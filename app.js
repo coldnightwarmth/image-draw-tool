@@ -73,6 +73,7 @@ const EXPORT_GIF_DURATION_MS = 2000;
 const EXPORT_GIF_FRAME_DELAY_MS = 50;
 const GIF_JS_LIBRARY_URL = "gif.js";
 const GIF_JS_WORKER_URL = "gif.worker.js";
+const GIFUCT_MODULE_URL = "./gifuct-js.bundle.mjs";
 const EXPORT_SCALE_PRESETS = [10, 25, 50, 100, 200];
 
 const state = {
@@ -109,6 +110,7 @@ const state = {
 let snapshotDbPromise = null;
 let sessionTabIdCache = null;
 let gifLibraryPromise = null;
+let gifuctModulePromise = null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -136,12 +138,6 @@ function setInputNumericValue(input, nextValue) {
     numericValue = Math.min(max, numericValue);
   }
   input.value = String(numericValue);
-}
-
-function wait(milliseconds) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
 }
 
 function isGifUrl(url) {
@@ -183,6 +179,67 @@ function loadGifLibrary() {
   });
 
   return gifLibraryPromise;
+}
+
+function loadGifuctModule() {
+  if (gifuctModulePromise) {
+    return gifuctModulePromise;
+  }
+
+  gifuctModulePromise = import(GIFUCT_MODULE_URL).then((module) => {
+    if (
+      !module ||
+      typeof module.parseGIF !== "function" ||
+      typeof module.decompressFrames !== "function"
+    ) {
+      throw new Error("GIF decoder module is unavailable.");
+    }
+    return module;
+  });
+
+  return gifuctModulePromise;
+}
+
+function dataUrlToUint8Array(url) {
+  const markerIndex = url.indexOf(",");
+  if (markerIndex < 0) {
+    throw new Error("Invalid data URL.");
+  }
+  const metadata = url.slice(0, markerIndex);
+  const payload = url.slice(markerIndex + 1);
+
+  if (metadata.includes(";base64")) {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+
+  const text = decodeURIComponent(payload);
+  const bytes = new Uint8Array(text.length);
+  for (let index = 0; index < text.length; index += 1) {
+    bytes[index] = text.charCodeAt(index) & 0xff;
+  }
+  return bytes;
+}
+
+async function readImageBytes(url) {
+  if (typeof url !== "string" || !url) {
+    throw new Error("Missing image URL.");
+  }
+
+  if (url.startsWith("data:")) {
+    return dataUrlToUint8Array(url);
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image bytes (${response.status}).`);
+  }
+  const buffer = await response.arrayBuffer();
+  return new Uint8Array(buffer);
 }
 
 function createSessionId() {
@@ -2146,6 +2203,11 @@ function collectExportStampEntries(selectionBounds) {
 
     entries.push({
       element,
+      sourceUrl:
+        element.dataset.brushUrl ||
+        element.currentSrc ||
+        element.getAttribute("src") ||
+        "",
       centerX: left + width / 2,
       centerY: top + height / 2,
       width,
@@ -2159,7 +2221,148 @@ function collectExportStampEntries(selectionBounds) {
   return entries;
 }
 
-function drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries) {
+function resolveGifFrameSource(animation, timeMs) {
+  if (!animation || !Array.isArray(animation.frames) || !animation.frames.length) {
+    return null;
+  }
+
+  const durations = Array.isArray(animation.durations) ? animation.durations : [];
+  const totalDuration = Math.max(1, Number(animation.totalDuration) || 1);
+  let wrapped = Number(timeMs) % totalDuration;
+  if (wrapped < 0) {
+    wrapped += totalDuration;
+  }
+
+  let elapsed = 0;
+  for (let index = 0; index < animation.frames.length; index += 1) {
+    const frameDuration = Math.max(
+      1,
+      Number.isFinite(Number(durations[index])) ? Number(durations[index]) : EXPORT_GIF_FRAME_DELAY_MS
+    );
+    elapsed += frameDuration;
+    if (wrapped < elapsed) {
+      return animation.frames[index];
+    }
+  }
+
+  return animation.frames[animation.frames.length - 1];
+}
+
+async function decodeGifAnimation(url) {
+  const bytes = await readImageBytes(url);
+  const gifuctModule = await loadGifuctModule();
+  const parseInput = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const parsed = gifuctModule.parseGIF(parseInput);
+  const decodedFrames = gifuctModule.decompressFrames(parsed, true);
+
+  if (!decodedFrames.length) {
+    throw new Error("No GIF frames decoded.");
+  }
+
+  const width = Math.max(
+    1,
+    Number(parsed?.lsd?.width) ||
+      Number(decodedFrames[0]?.dims?.width) ||
+      1
+  );
+  const height = Math.max(
+    1,
+    Number(parsed?.lsd?.height) ||
+      Number(decodedFrames[0]?.dims?.height) ||
+      1
+  );
+
+  const compositeCanvas = document.createElement("canvas");
+  compositeCanvas.width = width;
+  compositeCanvas.height = height;
+  const compositeCtx = compositeCanvas.getContext("2d", { alpha: true });
+  if (!compositeCtx) {
+    throw new Error("Could not create GIF decode canvas.");
+  }
+
+  compositeCtx.clearRect(0, 0, width, height);
+
+  const frames = [];
+  const durations = [];
+
+  for (const frame of decodedFrames) {
+    const dims = frame?.dims || {};
+    const left = Number.isFinite(Number(dims.left)) ? Number(dims.left) : 0;
+    const top = Number.isFinite(Number(dims.top)) ? Number(dims.top) : 0;
+    const frameWidth = Math.max(1, Number(dims.width) || width);
+    const frameHeight = Math.max(1, Number(dims.height) || height);
+    const disposalType = Number(frame?.disposalType) || 0;
+
+    let restoreBeforeFrame = null;
+    if (disposalType === 3) {
+      restoreBeforeFrame = compositeCtx.getImageData(0, 0, width, height);
+    }
+
+    if (frame?.patch && frame.patch.length === frameWidth * frameHeight * 4) {
+      const patchData = new Uint8ClampedArray(frame.patch);
+      const patchImage = new ImageData(patchData, frameWidth, frameHeight);
+      compositeCtx.putImageData(patchImage, left, top);
+    }
+
+    const snapshotCanvas = document.createElement("canvas");
+    snapshotCanvas.width = width;
+    snapshotCanvas.height = height;
+    const snapshotCtx = snapshotCanvas.getContext("2d", { alpha: true });
+    if (!snapshotCtx) {
+      throw new Error("Could not create GIF frame canvas.");
+    }
+    snapshotCtx.drawImage(compositeCanvas, 0, 0);
+    frames.push(snapshotCanvas);
+
+    const delayMs = Number(frame?.delay);
+    durations.push(
+      Math.max(20, Number.isFinite(delayMs) && delayMs > 0 ? delayMs : EXPORT_GIF_FRAME_DELAY_MS)
+    );
+
+    if (disposalType === 2) {
+      compositeCtx.clearRect(left, top, frameWidth, frameHeight);
+    } else if (disposalType === 3 && restoreBeforeFrame) {
+      compositeCtx.putImageData(restoreBeforeFrame, 0, 0);
+    }
+  }
+
+  const totalDuration =
+    durations.reduce((sum, duration) => sum + duration, 0) || EXPORT_GIF_FRAME_DELAY_MS;
+
+  return { frames, durations, totalDuration };
+}
+
+async function buildGifAnimationMap(entries) {
+  const urls = new Set();
+  for (const entry of entries) {
+    if (!entry || !isGifUrl(entry.sourceUrl)) {
+      continue;
+    }
+    urls.add(entry.sourceUrl);
+  }
+
+  const map = new Map();
+  for (const url of urls) {
+    try {
+      const animation = await decodeGifAnimation(url);
+      map.set(url, animation);
+    } catch (error) {
+      // Skip undecodable GIFs and keep static rendering for those entries.
+    }
+  }
+
+  return map;
+}
+
+function drawExportFrame(
+  ctx,
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  gifAnimationMap = null,
+  timeMs = 0
+) {
   const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
   const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
   const scaleX = outputWidth / selectionWidth;
@@ -2172,6 +2375,15 @@ function drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entrie
   ctx.fillRect(0, 0, outputWidth, outputHeight);
   ctx.restore();
   for (const entry of entries) {
+    let frameSource = entry.element;
+    if (gifAnimationMap && isGifUrl(entry.sourceUrl)) {
+      const animation = gifAnimationMap.get(entry.sourceUrl);
+      const animatedSource = resolveGifFrameSource(animation, timeMs);
+      if (animatedSource) {
+        frameSource = animatedSource;
+      }
+    }
+
     const drawWidth = entry.width * scaleX;
     const drawHeight = entry.height * scaleY;
     const drawCenterX = (entry.centerX - selectionBounds.left) * scaleX;
@@ -2182,7 +2394,7 @@ function drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entrie
     ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
     ctx.translate(drawCenterX, drawCenterY);
     ctx.rotate((entry.rotation * Math.PI) / 180);
-    ctx.drawImage(entry.element, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    ctx.drawImage(frameSource, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     ctx.restore();
   }
 }
@@ -2207,7 +2419,7 @@ function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries
   if (!ctx) {
     throw new Error("Could not create export canvas.");
   }
-  drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries);
+  drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries, null, 0);
   return canvasToPngBlob(canvas);
 }
 
@@ -2225,6 +2437,7 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
   if (!frameCtx) {
     throw new Error("Could not create GIF frame canvas.");
   }
+  const gifAnimationMap = await buildGifAnimationMap(entries);
 
   const gif = new window.GIF({
     workers: 2,
@@ -2235,11 +2448,17 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
   });
 
   for (let index = 0; index < frameCount; index += 1) {
-    drawExportFrame(frameCtx, selectionBounds, outputWidth, outputHeight, entries);
+    const elapsedMs = index * EXPORT_GIF_FRAME_DELAY_MS;
+    drawExportFrame(
+      frameCtx,
+      selectionBounds,
+      outputWidth,
+      outputHeight,
+      entries,
+      gifAnimationMap,
+      elapsedMs
+    );
     gif.addFrame(frameCanvas, { copy: true, delay: EXPORT_GIF_FRAME_DELAY_MS });
-    if (index < frameCount - 1) {
-      await wait(EXPORT_GIF_FRAME_DELAY_MS);
-    }
   }
 
   return new Promise((resolve, reject) => {
