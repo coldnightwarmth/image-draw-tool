@@ -64,6 +64,8 @@ const state = {
   drawing: null,
   erasing: null,
   panning: null,
+  touchPointers: new Map(),
+  touchGesture: null,
   strokeById: new Map(),
   urlRefCounts: new Map(),
   nextBrushId: 1,
@@ -482,7 +484,8 @@ function updateEraseCursorPosition(clientX, clientY) {
 }
 
 function updateEraseCursorVisibility() {
-  const shouldShow = state.eraseMode && state.pointerInViewport && !state.panning;
+  const shouldShow =
+    state.eraseMode && state.pointerInViewport && !state.panning && !state.touchGesture;
   eraseCursor.classList.toggle("is-visible", shouldShow);
 }
 
@@ -492,6 +495,103 @@ function updateEraseModeUI() {
   viewport.classList.toggle("is-erasing", state.eraseMode);
   updateEraseCursorGeometry();
   updateEraseCursorVisibility();
+}
+
+function updatePanningStateClass() {
+  viewport.classList.toggle("is-panning", Boolean(state.panning || state.touchGesture));
+}
+
+function startTouchGestureFromActiveTouches() {
+  const touchEntries = Array.from(state.touchPointers.entries());
+  if (touchEntries.length < 2) {
+    return false;
+  }
+
+  if (state.drawing) {
+    stopDrawing(state.drawing.pointerId);
+  }
+  if (state.erasing) {
+    stopErasing(state.erasing.pointerId);
+  }
+  if (state.panning) {
+    stopPanning(state.panning.pointerId);
+  }
+
+  resetCursorTrailAnchor();
+  const [[pointerIdA, pointA], [pointerIdB, pointB]] = touchEntries;
+  const midX = (pointA.x + pointB.x) / 2;
+  const midY = (pointA.y + pointB.y) / 2;
+  const startDistance = Math.max(8, Math.hypot(pointB.x - pointA.x, pointB.y - pointA.y));
+  const midWorld = screenToWorld(midX, midY);
+
+  state.touchGesture = {
+    pointerIdA,
+    pointerIdB,
+    startDistance,
+    startScale: state.camera.scale,
+    startWorldX: midWorld.x,
+    startWorldY: midWorld.y
+  };
+
+  for (const pointerId of [pointerIdA, pointerIdB]) {
+    if (!viewport.hasPointerCapture(pointerId)) {
+      try {
+        viewport.setPointerCapture(pointerId);
+      } catch (error) {
+        // Best effort capture for smoother multitouch tracking.
+      }
+    }
+  }
+
+  updatePanningStateClass();
+  updateEraseCursorVisibility();
+  return true;
+}
+
+function updateTouchGestureFromActiveTouches() {
+  if (!state.touchGesture) {
+    return;
+  }
+
+  const pointA = state.touchPointers.get(state.touchGesture.pointerIdA);
+  const pointB = state.touchPointers.get(state.touchGesture.pointerIdB);
+  if (!pointA || !pointB) {
+    return;
+  }
+
+  const midX = (pointA.x + pointB.x) / 2;
+  const midY = (pointA.y + pointB.y) / 2;
+  const distance = Math.max(8, Math.hypot(pointB.x - pointA.x, pointB.y - pointA.y));
+  const scaleFactor = distance / state.touchGesture.startDistance;
+  const nextScale = clamp(state.touchGesture.startScale * scaleFactor, MIN_CAMERA_SCALE, MAX_CAMERA_SCALE);
+
+  state.camera.x = midX - state.touchGesture.startWorldX * nextScale;
+  state.camera.y = midY - state.touchGesture.startWorldY * nextScale;
+  state.camera.scale = nextScale;
+  renderCamera();
+  updateEraseCursorGeometry();
+}
+
+function endTouchGesture() {
+  if (!state.touchGesture) {
+    return;
+  }
+
+  for (const pointerId of [state.touchGesture.pointerIdA, state.touchGesture.pointerIdB]) {
+    if (viewport.hasPointerCapture(pointerId)) {
+      try {
+        viewport.releasePointerCapture(pointerId);
+      } catch (error) {
+        // Ignore capture release errors from already-ended pointers.
+      }
+    }
+  }
+
+  state.touchGesture = null;
+  updatePanningStateClass();
+  resetCursorTrailAnchor();
+  updateEraseCursorVisibility();
+  scheduleSessionSave();
 }
 
 function isStampAtLeastHalfInsideCircle(element, centerX, centerY, radius) {
@@ -1792,6 +1892,7 @@ function startDrawing(event) {
     lastPlacedY: point.y,
     limitReached: false
   };
+  viewport.classList.add("is-drawing");
   viewport.setPointerCapture(event.pointerId);
 }
 
@@ -1805,6 +1906,7 @@ function stopDrawing(pointerId) {
     viewport.releasePointerCapture(pointerId);
   }
   state.drawing = null;
+  viewport.classList.remove("is-drawing");
 }
 
 function startPanning(event) {
@@ -1814,7 +1916,7 @@ function startPanning(event) {
     lastClientX: event.clientX,
     lastClientY: event.clientY
   };
-  viewport.classList.add("is-panning");
+  updatePanningStateClass();
   viewport.setPointerCapture(event.pointerId);
 }
 
@@ -1823,11 +1925,11 @@ function stopPanning(pointerId) {
     return;
   }
 
-  viewport.classList.remove("is-panning");
   if (viewport.hasPointerCapture(pointerId)) {
     viewport.releasePointerCapture(pointerId);
   }
   state.panning = null;
+  updatePanningStateClass();
   updateEraseCursorVisibility();
   scheduleSessionSave();
 }
@@ -1838,6 +1940,15 @@ function onPointerDown(event) {
   state.lastPointerClientY = event.clientY;
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
+
+  if (event.pointerType === "touch") {
+    state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.touchPointers.size >= 2) {
+      event.preventDefault();
+      startTouchGestureFromActiveTouches();
+      return;
+    }
+  }
 
   if (event.button === 1 || event.button === 2) {
     event.preventDefault();
@@ -1866,6 +1977,15 @@ function onPointerMove(event) {
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
 
+  if (event.pointerType === "touch") {
+    state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.touchGesture) {
+      event.preventDefault();
+      updateTouchGestureFromActiveTouches();
+      return;
+    }
+  }
+
   if (state.panning && state.panning.pointerId === event.pointerId) {
     event.preventDefault();
     const dx = event.clientX - state.panning.lastClientX;
@@ -1893,6 +2013,16 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (event.pointerType === "touch") {
+    state.touchPointers.delete(event.pointerId);
+    if (
+      state.touchGesture &&
+      (state.touchGesture.pointerIdA === event.pointerId || state.touchGesture.pointerIdB === event.pointerId)
+    ) {
+      endTouchGesture();
+    }
+  }
+
   stopPanning(event.pointerId);
   stopErasing(event.pointerId);
   stopDrawing(event.pointerId);

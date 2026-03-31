@@ -12,6 +12,13 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 html,
@@ -44,6 +51,10 @@ input {
 
 #viewport.is-panning {
   cursor: grabbing;
+}
+
+#viewport.is-drawing {
+  cursor: none;
 }
 
 #viewport.is-erasing {
@@ -354,8 +365,7 @@ input {
   gap: 6px;
   overflow-y: auto;
   padding-right: 1px;
-  scrollbar-width: thin;
-  scrollbar-color: #a9b9d4 transparent;
+  scrollbar-width: none;
 }
 
 #brushGallery[hidden] {
@@ -363,7 +373,9 @@ input {
 }
 
 #brushGallery::-webkit-scrollbar {
-  width: 7px;
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 #brushGallery::-webkit-scrollbar-thumb {
