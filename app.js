@@ -1700,6 +1700,32 @@ function renderBrushGallery() {
 }
 
 function onBrushGalleryClick(event) {
+  const preview = event.target.closest(".brush-thumb");
+  if (preview) {
+    const previewItem = preview.closest(".brush-item");
+    if (!previewItem) {
+      return;
+    }
+
+    const previewBrushId = Number(previewItem.dataset.brushId);
+    const previewBrush = findBrushById(previewBrushId);
+    if (!previewBrush) {
+      return;
+    }
+
+    if (state.soloBrushId === previewBrush.id) {
+      state.soloBrushId = null;
+    } else {
+      state.soloBrushId = previewBrush.id;
+      previewBrush.enabled = true;
+    }
+
+    updateBrushStatus();
+    renderBrushGallery();
+    scheduleSessionSave();
+    return;
+  }
+
   const button = event.target.closest(".brush-action-button");
   if (!button) {
     return;
@@ -1726,36 +1752,6 @@ function onBrushGalleryClick(event) {
     brush.weightMode = brush.weightMode === "low" ? "normal" : "low";
   } else if (action === "weight-high") {
     brush.weightMode = brush.weightMode === "high" ? "normal" : "high";
-  }
-
-  updateBrushStatus();
-  renderBrushGallery();
-  scheduleSessionSave();
-}
-
-function onBrushGalleryContextMenu(event) {
-  const eyeButton = event.target.closest(".brush-action-button[data-action=\"toggle-enabled\"]");
-  if (!eyeButton) {
-    return;
-  }
-  event.preventDefault();
-
-  const item = eyeButton.closest(".brush-item");
-  if (!item) {
-    return;
-  }
-
-  const brushId = Number(item.dataset.brushId);
-  const brush = findBrushById(brushId);
-  if (!brush) {
-    return;
-  }
-
-  if (state.soloBrushId === brush.id) {
-    state.soloBrushId = null;
-  } else {
-    state.soloBrushId = brush.id;
-    brush.enabled = true;
   }
 
   updateBrushStatus();
@@ -2807,7 +2803,6 @@ function onExportScaleButtonClick(event) {
 dropZonePrompt.addEventListener("click", () => brushInput.click());
 dropZonePrompt.addEventListener("keydown", onDropZoneKeyDown);
 brushGallery.addEventListener("click", onBrushGalleryClick);
-brushGallery.addEventListener("contextmenu", onBrushGalleryContextMenu);
 dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
   dropZone.classList.add("is-over");
