@@ -44,7 +44,9 @@ const eraseModeButton = document.getElementById("eraseModeButton");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
 const clearButton = document.getElementById("clearButton");
+const exportActions = document.getElementById("exportActions");
 const exportButton = document.getElementById("exportButton");
+const exportCancelButton = document.getElementById("exportCancelButton");
 const clearConfirmModal = document.getElementById("clearConfirmModal");
 const confirmYesButton = document.getElementById("confirmYesButton");
 const confirmNoButton = document.getElementById("confirmNoButton");
@@ -813,6 +815,9 @@ function updateExportModeUI() {
   exportOverlay.setAttribute("aria-hidden", String(!isOpen));
   exportButton.textContent = isOpen ? "Confirm Export" : "Export";
   exportButton.classList.toggle("is-active", isOpen);
+  exportActions.classList.toggle("is-active", isOpen);
+  exportCancelButton.hidden = !isOpen;
+  exportCancelButton.disabled = !isOpen;
   updateExportScaleButtonsUI();
   if (isOpen) {
     updateExportOverlayGeometry();
@@ -1745,6 +1750,9 @@ function updateUndoState() {
   redoButton.disabled = controlsLocked || !hasRedo;
   clearButton.disabled = controlsLocked || !hasStamps;
   exportButton.disabled = state.exportMode ? false : !hasStamps;
+  if (!state.exportMode) {
+    exportCancelButton.disabled = true;
+  }
 }
 
 function countEnabledBrushes() {
@@ -2619,6 +2627,7 @@ async function confirmExport() {
   const timestamp = Date.now();
 
   exportButton.disabled = true;
+  exportCancelButton.disabled = true;
   exportButton.textContent = "Exporting...";
   try {
     const blob = hasGif
@@ -2632,6 +2641,7 @@ async function confirmExport() {
   } catch (error) {
     exportButton.textContent = "Confirm Export";
     exportButton.disabled = false;
+    exportCancelButton.disabled = false;
   } finally {
     updateUndoState();
     updateExportModeUI();
@@ -3028,11 +3038,6 @@ function onPointerUp(event) {
 }
 
 function onWheel(event) {
-  if (state.exportMode) {
-    event.preventDefault();
-    return;
-  }
-
   event.preventDefault();
   resetCursorTrailAnchor();
 
@@ -3274,6 +3279,12 @@ exportButton.addEventListener("click", () => {
   }
   enterExportMode();
 });
+exportCancelButton.addEventListener("click", () => {
+  if (!state.exportMode) {
+    return;
+  }
+  exitExportMode({ focusButton: true });
+});
 confirmYesButton.addEventListener("click", () => {
   clearAllStrokes();
   closeClearConfirmModal();
@@ -3292,9 +3303,10 @@ exportOverlay.addEventListener("pointermove", onExportOverlayPointerMove);
 exportOverlay.addEventListener("pointerup", onExportOverlayPointerUp);
 exportOverlay.addEventListener("pointercancel", onExportOverlayPointerUp);
 exportOverlay.addEventListener("wheel", (event) => {
-  if (state.exportMode) {
-    event.preventDefault();
+  if (!state.exportMode) {
+    return;
   }
+  onWheel(event);
 }, { passive: false });
 exportOverlay.addEventListener("contextmenu", (event) => {
   if (state.exportMode) {

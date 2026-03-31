@@ -609,7 +609,8 @@ input[type="range"] + .value-text {
 #undoButton,
 #redoButton,
 #clearButton,
-#exportButton {
+#exportButton,
+#exportCancelButton {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid #bcbcbc;
@@ -661,13 +662,40 @@ input[type="range"] + .value-text {
 #undoButton:disabled,
 #redoButton:disabled,
 #clearButton:disabled,
-#exportButton:disabled {
+#exportButton:disabled,
+#exportCancelButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 #exportButton {
+  margin-top: 0;
+}
+
+#exportActions {
   margin-top: 6px;
+}
+
+#exportActions.is-active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 6px;
+}
+
+#exportActions.is-active #exportButton {
+  margin-top: 0;
+}
+
+#exportCancelButton {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+}
+
+#exportCancelButton[hidden] {
+  display: none;
 }
 
 #clearConfirmModal {
