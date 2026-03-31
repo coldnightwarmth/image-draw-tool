@@ -43,9 +43,22 @@ const eraseModeButton = document.getElementById("eraseModeButton");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
 const clearButton = document.getElementById("clearButton");
+const exportButton = document.getElementById("exportButton");
 const clearConfirmModal = document.getElementById("clearConfirmModal");
 const confirmYesButton = document.getElementById("confirmYesButton");
 const confirmNoButton = document.getElementById("confirmNoButton");
+const exportOverlay = document.getElementById("exportOverlay");
+const exportShadeTop = document.getElementById("exportShadeTop");
+const exportShadeRight = document.getElementById("exportShadeRight");
+const exportShadeBottom = document.getElementById("exportShadeBottom");
+const exportShadeLeft = document.getElementById("exportShadeLeft");
+const exportSelection = document.getElementById("exportSelection");
+const exportMeta = document.getElementById("exportMeta");
+const exportResolutionText = document.getElementById("exportResolutionText");
+const exportScaleButtonsGroup = document.getElementById("exportScaleButtons");
+const exportScaleButtons = Array.from(
+  exportOverlay.querySelectorAll(".export-scale-button")
+);
 
 const LOW_WEIGHT_MULTIPLIER = 0.12;
 const HIGH_WEIGHT_MULTIPLIER = 4.5;
@@ -54,6 +67,13 @@ const ERASER_GLOBAL_SIZE_MULTIPLIER = 2.5;
 const MIN_CAMERA_SCALE = 0.03;
 const MAX_CAMERA_SCALE = 6;
 const CURSOR_TRAIL_FADE_MS = 4000;
+const EXPORT_SELECTION_PADDING = 18;
+const EXPORT_MIN_SIZE = 24;
+const EXPORT_GIF_DURATION_MS = 2000;
+const EXPORT_GIF_FRAME_DELAY_MS = 50;
+const GIF_JS_CDN_URL = "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js";
+const GIF_JS_WORKER_CDN_URL = "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.worker.js";
+const EXPORT_SCALE_PRESETS = [10, 25, 50, 100, 200];
 
 const state = {
   brushes: [],
@@ -79,11 +99,16 @@ const state = {
   lastPointerClientY: 0,
   cursorTrailEntries: [],
   cursorTrailLastWorldX: null,
-  cursorTrailLastWorldY: null
+  cursorTrailLastWorldY: null,
+  exportMode: false,
+  exportSelectionBounds: null,
+  exportScalePercent: 100,
+  exportDrag: null
 };
 
 let snapshotDbPromise = null;
 let sessionTabIdCache = null;
+let gifLibraryPromise = null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -111,6 +136,50 @@ function setInputNumericValue(input, nextValue) {
     numericValue = Math.min(max, numericValue);
   }
   input.value = String(numericValue);
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+function isGifUrl(url) {
+  if (typeof url !== "string") {
+    return false;
+  }
+  return /^data:image\/gif/i.test(url) || /\.gif(?:$|[?#])/i.test(url);
+}
+
+function loadGifLibrary() {
+  if (typeof window.GIF === "function") {
+    return Promise.resolve();
+  }
+  if (gifLibraryPromise) {
+    return gifLibraryPromise;
+  }
+
+  gifLibraryPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector(`script[src="${GIF_JS_CDN_URL}"]`);
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load GIF encoder.")),
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = GIF_JS_CDN_URL;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load GIF encoder."));
+    document.head.appendChild(script);
+  });
+
+  return gifLibraryPromise;
 }
 
 function createSessionId() {
@@ -438,6 +507,325 @@ function updateRotationIndicator() {
   rotationNeedle.style.transform = `translate(-50%, -100%) rotate(${angle}deg)`;
 }
 
+function worldToScreen(worldX, worldY) {
+  return {
+    x: worldX * state.camera.scale + state.camera.x,
+    y: worldY * state.camera.scale + state.camera.y
+  };
+}
+
+function getVisibleStampElements() {
+  return Array.from(world.children).filter((element) => element.classList.contains("stamp"));
+}
+
+function getStampWorldBoundsFromLayout(left, top, width, height, rotationDegrees) {
+  const centerX = left + width / 2;
+  const centerY = top + height / 2;
+  const radians = (rotationDegrees * Math.PI) / 180;
+  const absCos = Math.abs(Math.cos(radians));
+  const absSin = Math.abs(Math.sin(radians));
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const extentX = halfWidth * absCos + halfHeight * absSin;
+  const extentY = halfWidth * absSin + halfHeight * absCos;
+  return {
+    left: centerX - extentX,
+    top: centerY - extentY,
+    right: centerX + extentX,
+    bottom: centerY + extentY
+  };
+}
+
+function getStampWorldBounds(element) {
+  const left = parseFloat(element.style.left) || 0;
+  const top = parseFloat(element.style.top) || 0;
+  const width = Math.max(0, parseFloat(element.style.width) || 0);
+  const height = Math.max(0, parseFloat(element.style.height) || 0);
+  const rotation = Number(element.dataset.rotation) || 0;
+  return getStampWorldBoundsFromLayout(left, top, width, height, rotation);
+}
+
+function normalizeExportSelectionBounds(bounds) {
+  const fallback = { left: -150, top: -100, right: 150, bottom: 100 };
+  if (!bounds) {
+    return fallback;
+  }
+
+  let left = Number(bounds.left);
+  let top = Number(bounds.top);
+  let right = Number(bounds.right);
+  let bottom = Number(bounds.bottom);
+
+  if (![left, top, right, bottom].every((value) => Number.isFinite(value))) {
+    return fallback;
+  }
+
+  if (left > right) {
+    [left, right] = [right, left];
+  }
+  if (top > bottom) {
+    [top, bottom] = [bottom, top];
+  }
+
+  if (right - left < EXPORT_MIN_SIZE) {
+    const centerX = (left + right) / 2;
+    left = centerX - EXPORT_MIN_SIZE / 2;
+    right = centerX + EXPORT_MIN_SIZE / 2;
+  }
+  if (bottom - top < EXPORT_MIN_SIZE) {
+    const centerY = (top + bottom) / 2;
+    top = centerY - EXPORT_MIN_SIZE / 2;
+    bottom = centerY + EXPORT_MIN_SIZE / 2;
+  }
+
+  return { left, top, right, bottom };
+}
+
+function getDefaultExportSelectionBounds() {
+  const rect = viewport.getBoundingClientRect();
+  const center = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  const halfWidth = Math.max(160, (rect.width / state.camera.scale) * 0.3);
+  const halfHeight = Math.max(120, (rect.height / state.camera.scale) * 0.3);
+  return {
+    left: center.x - halfWidth,
+    right: center.x + halfWidth,
+    top: center.y - halfHeight,
+    bottom: center.y + halfHeight
+  };
+}
+
+function computeInitialExportSelectionBounds() {
+  const stamps = getVisibleStampElements();
+  if (!stamps.length) {
+    return normalizeExportSelectionBounds(getDefaultExportSelectionBounds());
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const element of stamps) {
+    const bounds = getStampWorldBounds(element);
+    minX = Math.min(minX, bounds.left);
+    minY = Math.min(minY, bounds.top);
+    maxX = Math.max(maxX, bounds.right);
+    maxY = Math.max(maxY, bounds.bottom);
+  }
+
+  return normalizeExportSelectionBounds({
+    left: minX - EXPORT_SELECTION_PADDING,
+    top: minY - EXPORT_SELECTION_PADDING,
+    right: maxX + EXPORT_SELECTION_PADDING,
+    bottom: maxY + EXPORT_SELECTION_PADDING
+  });
+}
+
+function setFixedRectStyle(element, left, top, width, height) {
+  element.style.left = `${left}px`;
+  element.style.top = `${top}px`;
+  element.style.width = `${Math.max(0, width)}px`;
+  element.style.height = `${Math.max(0, height)}px`;
+}
+
+function getExportScaleMultiplier() {
+  return clamp(Number(state.exportScalePercent) / 100, 0.1, 8);
+}
+
+function getExportScaledResolution(bounds) {
+  const normalized = normalizeExportSelectionBounds(bounds);
+  const multiplier = getExportScaleMultiplier();
+  const width = Math.max(1, Math.round((normalized.right - normalized.left) * multiplier));
+  const height = Math.max(1, Math.round((normalized.bottom - normalized.top) * multiplier));
+  return { width, height };
+}
+
+function updateExportScaleButtonsUI() {
+  for (const button of exportScaleButtons) {
+    const scale = Number(button.dataset.scale);
+    const isActive = scale === state.exportScalePercent;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  }
+}
+
+function setExportScalePercent(nextScalePercent) {
+  const numericScale = Number(nextScalePercent);
+  if (!Number.isFinite(numericScale) || !EXPORT_SCALE_PRESETS.includes(numericScale)) {
+    return;
+  }
+  state.exportScalePercent = numericScale;
+  updateExportScaleButtonsUI();
+  updateExportOverlayGeometry();
+}
+
+function hasGifStampOnCanvas() {
+  for (const element of getVisibleStampElements()) {
+    const brushUrl = element.dataset.brushUrl || element.getAttribute("src") || "";
+    if (isGifUrl(brushUrl)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function updateExportOverlayGeometry() {
+  if (!state.exportMode || !state.exportSelectionBounds) {
+    return;
+  }
+
+  const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
+  state.exportSelectionBounds = normalized;
+
+  const topLeft = worldToScreen(normalized.left, normalized.top);
+  const bottomRight = worldToScreen(normalized.right, normalized.bottom);
+  const selectionLeft = Math.min(topLeft.x, bottomRight.x);
+  const selectionTop = Math.min(topLeft.y, bottomRight.y);
+  const selectionRight = Math.max(topLeft.x, bottomRight.x);
+  const selectionBottom = Math.max(topLeft.y, bottomRight.y);
+  const selectionWidth = Math.max(1, selectionRight - selectionLeft);
+  const selectionHeight = Math.max(1, selectionBottom - selectionTop);
+
+  setFixedRectStyle(exportSelection, selectionLeft, selectionTop, selectionWidth, selectionHeight);
+
+  const viewportRect = viewport.getBoundingClientRect();
+  const viewportLeft = viewportRect.left;
+  const viewportTop = viewportRect.top;
+  const viewportRight = viewportRect.right;
+  const viewportBottom = viewportRect.bottom;
+  const viewportWidth = viewportRect.width;
+  const viewportHeight = viewportRect.height;
+
+  const clipLeft = clamp(selectionLeft, viewportLeft, viewportRight);
+  const clipTop = clamp(selectionTop, viewportTop, viewportBottom);
+  const clipRight = clamp(selectionRight, viewportLeft, viewportRight);
+  const clipBottom = clamp(selectionBottom, viewportTop, viewportBottom);
+  const clipWidth = Math.max(0, clipRight - clipLeft);
+  const clipHeight = Math.max(0, clipBottom - clipTop);
+
+  setFixedRectStyle(exportShadeTop, viewportLeft, viewportTop, viewportWidth, clipTop - viewportTop);
+  setFixedRectStyle(
+    exportShadeBottom,
+    viewportLeft,
+    clipBottom,
+    viewportWidth,
+    viewportBottom - clipBottom
+  );
+  setFixedRectStyle(exportShadeLeft, viewportLeft, clipTop, clipLeft - viewportLeft, clipHeight);
+  setFixedRectStyle(exportShadeRight, clipRight, clipTop, viewportRight - clipRight, clipHeight);
+
+  const centerX = selectionLeft + selectionWidth / 2;
+  exportMeta.style.left = `${centerX}px`;
+  exportMeta.style.top = `${selectionBottom + 8}px`;
+  exportMeta.style.transform = "translateX(-50%)";
+
+  const scaledResolution = getExportScaledResolution(normalized);
+  exportResolutionText.textContent = `${scaledResolution.width}x${scaledResolution.height}px`;
+}
+
+function updateExportModeUI() {
+  const isOpen = Boolean(state.exportMode && state.exportSelectionBounds);
+  exportOverlay.hidden = !isOpen;
+  exportOverlay.setAttribute("aria-hidden", String(!isOpen));
+  exportButton.textContent = isOpen ? "Confirm Export" : "Export";
+  exportButton.classList.toggle("is-active", isOpen);
+  updateExportScaleButtonsUI();
+  if (isOpen) {
+    updateExportOverlayGeometry();
+  }
+  updateEraseCursorVisibility();
+}
+
+function exitExportMode(options = {}) {
+  state.exportMode = false;
+  state.exportSelectionBounds = null;
+  state.exportDrag = null;
+  state.exportScalePercent = 100;
+  updateExportModeUI();
+  updateUndoState();
+  if (options.focusButton) {
+    exportButton.focus();
+  }
+}
+
+function enterExportMode() {
+  if (!getVisibleStampCount()) {
+    return;
+  }
+
+  if (clearConfirmModal.classList.contains("is-open")) {
+    closeClearConfirmModal();
+  }
+
+  if (state.drawing) {
+    stopDrawing(state.drawing.pointerId);
+  }
+  if (state.erasing) {
+    stopErasing(state.erasing.pointerId);
+  }
+  if (state.panning) {
+    stopPanning(state.panning.pointerId);
+  }
+  if (state.touchGesture) {
+    endTouchGesture();
+  }
+
+  state.exportMode = true;
+  state.exportSelectionBounds = computeInitialExportSelectionBounds();
+  state.exportScalePercent = 100;
+  state.exportDrag = null;
+  updateExportModeUI();
+  updateUndoState();
+}
+
+function startExportSelectionDrag(pointerId, edge) {
+  if (!state.exportMode || !state.exportSelectionBounds) {
+    return;
+  }
+  state.exportDrag = { pointerId, edge };
+  try {
+    exportSelection.setPointerCapture(pointerId);
+  } catch (error) {
+    // Continue without capture if pointer ended before capture.
+  }
+}
+
+function updateExportSelectionDrag(pointerId, clientX, clientY) {
+  if (!state.exportDrag || state.exportDrag.pointerId !== pointerId || !state.exportSelectionBounds) {
+    return;
+  }
+
+  const point = screenToWorld(clientX, clientY);
+  const next = { ...state.exportSelectionBounds };
+
+  if (state.exportDrag.edge === "left") {
+    next.left = Math.min(point.x, next.right - EXPORT_MIN_SIZE);
+  } else if (state.exportDrag.edge === "right") {
+    next.right = Math.max(point.x, next.left + EXPORT_MIN_SIZE);
+  } else if (state.exportDrag.edge === "top") {
+    next.top = Math.min(point.y, next.bottom - EXPORT_MIN_SIZE);
+  } else if (state.exportDrag.edge === "bottom") {
+    next.bottom = Math.max(point.y, next.top + EXPORT_MIN_SIZE);
+  }
+
+  state.exportSelectionBounds = normalizeExportSelectionBounds(next);
+  updateExportOverlayGeometry();
+}
+
+function stopExportSelectionDrag(pointerId) {
+  if (!state.exportDrag || state.exportDrag.pointerId !== pointerId) {
+    return;
+  }
+  try {
+    if (exportSelection.hasPointerCapture(pointerId)) {
+      exportSelection.releasePointerCapture(pointerId);
+    }
+  } catch (error) {
+    // Ignore release errors for already-finished pointers.
+  }
+  state.exportDrag = null;
+}
+
 function getEnabledBrushesForSizing() {
   const soloBrush = getSoloBrush();
   if (soloBrush) {
@@ -485,7 +873,11 @@ function updateEraseCursorPosition(clientX, clientY) {
 
 function updateEraseCursorVisibility() {
   const shouldShow =
-    state.eraseMode && state.pointerInViewport && !state.panning && !state.touchGesture;
+    state.eraseMode &&
+    state.pointerInViewport &&
+    !state.panning &&
+    !state.touchGesture &&
+    !state.exportMode;
   eraseCursor.classList.toggle("is-visible", shouldShow);
 }
 
@@ -1125,9 +1517,13 @@ async function restoreSessionState() {
 function updateUndoState() {
   const hasHistory = state.history.length > 0;
   const hasRedo = state.redoHistory.length > 0;
-  undoButton.disabled = !hasHistory;
-  redoButton.disabled = !hasRedo;
-  clearButton.disabled = getVisibleStampCount() === 0;
+  const hasStamps = getVisibleStampCount() > 0;
+  const controlsLocked = state.exportMode;
+
+  undoButton.disabled = controlsLocked || !hasHistory;
+  redoButton.disabled = controlsLocked || !hasRedo;
+  clearButton.disabled = controlsLocked || !hasStamps;
+  exportButton.disabled = state.exportMode ? false : !hasStamps;
 }
 
 function countEnabledBrushes() {
@@ -1344,6 +1740,9 @@ function screenToWorld(clientX, clientY) {
 function renderCamera() {
   world.style.transform =
     `translate(${state.camera.x}px, ${state.camera.y}px) scale(${state.camera.scale})`;
+  if (state.exportMode) {
+    updateExportOverlayGeometry();
+  }
 }
 
 function isActiveBrushUrl(url) {
@@ -1562,6 +1961,9 @@ function clearAllStrokes() {
     const stroke = state.strokes.pop();
     detachStrokeFromWorld(stroke);
   }
+  if (state.exportMode) {
+    exitExportMode();
+  }
   state.strokeById.clear();
   state.history = [];
   state.redoHistory = [];
@@ -1685,6 +2087,181 @@ function placeAlongPath(drawing, x, y) {
 
   drawing.lastPlacedX = cursorX;
   drawing.lastPlacedY = cursorY;
+}
+
+function rectsIntersect(a, b) {
+  return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+}
+
+function collectExportStampEntries(selectionBounds) {
+  const entries = [];
+  const stamps = getVisibleStampElements();
+
+  for (const element of stamps) {
+    const left = parseFloat(element.style.left) || 0;
+    const top = parseFloat(element.style.top) || 0;
+    const width = Math.max(0, parseFloat(element.style.width) || 0);
+    const height = Math.max(0, parseFloat(element.style.height) || 0);
+    if (width <= 0 || height <= 0) {
+      continue;
+    }
+
+    const rotation = Number(element.dataset.rotation) || 0;
+    const bounds = getStampWorldBoundsFromLayout(left, top, width, height, rotation);
+    if (!rectsIntersect(bounds, selectionBounds)) {
+      continue;
+    }
+
+    entries.push({
+      element,
+      centerX: left + width / 2,
+      centerY: top + height / 2,
+      width,
+      height,
+      rotation,
+      opacity: clamp(Number(element.style.opacity) || 1, 0, 1),
+      imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated"
+    });
+  }
+
+  return entries;
+}
+
+function drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries) {
+  const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
+  const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
+  const scaleX = outputWidth / selectionWidth;
+  const scaleY = outputHeight / selectionHeight;
+
+  ctx.clearRect(0, 0, outputWidth, outputHeight);
+  for (const entry of entries) {
+    const drawWidth = entry.width * scaleX;
+    const drawHeight = entry.height * scaleY;
+    const drawCenterX = (entry.centerX - selectionBounds.left) * scaleX;
+    const drawCenterY = (entry.centerY - selectionBounds.top) * scaleY;
+
+    ctx.save();
+    ctx.globalAlpha = entry.opacity;
+    ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
+    ctx.translate(drawCenterX, drawCenterY);
+    ctx.rotate((entry.rotation * Math.PI) / 180);
+    ctx.drawImage(entry.element, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    ctx.restore();
+  }
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Failed to create PNG export."));
+        return;
+      }
+      resolve(blob);
+    }, "image/png");
+  });
+}
+
+function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries) {
+  const canvas = document.createElement("canvas");
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) {
+    throw new Error("Could not create export canvas.");
+  }
+  drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries);
+  return canvasToPngBlob(canvas);
+}
+
+async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries) {
+  await loadGifLibrary();
+  if (typeof window.GIF !== "function") {
+    throw new Error("GIF encoder is unavailable.");
+  }
+
+  const frameCount = Math.max(1, Math.round(EXPORT_GIF_DURATION_MS / EXPORT_GIF_FRAME_DELAY_MS));
+  const frameCanvas = document.createElement("canvas");
+  frameCanvas.width = outputWidth;
+  frameCanvas.height = outputHeight;
+  const frameCtx = frameCanvas.getContext("2d", { alpha: true });
+  if (!frameCtx) {
+    throw new Error("Could not create GIF frame canvas.");
+  }
+
+  const gif = new window.GIF({
+    workers: 2,
+    quality: 10,
+    width: outputWidth,
+    height: outputHeight,
+    workerScript: GIF_JS_WORKER_CDN_URL
+  });
+
+  for (let index = 0; index < frameCount; index += 1) {
+    drawExportFrame(frameCtx, selectionBounds, outputWidth, outputHeight, entries);
+    gif.addFrame(frameCanvas, { copy: true, delay: EXPORT_GIF_FRAME_DELAY_MS });
+    if (index < frameCount - 1) {
+      await wait(EXPORT_GIF_FRAME_DELAY_MS);
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    gif.on("finished", (blob) => resolve(blob));
+    gif.on("abort", () => reject(new Error("GIF export was aborted.")));
+    gif.render();
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+async function confirmExport() {
+  if (!state.exportMode || !state.exportSelectionBounds) {
+    return;
+  }
+
+  const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
+  const resolution = getExportScaledResolution(normalized);
+  const entries = collectExportStampEntries(normalized);
+  const hasGif = hasGifStampOnCanvas();
+  const timestamp = Date.now();
+
+  exportButton.disabled = true;
+  exportButton.textContent = "Exporting...";
+  try {
+    let blob = null;
+    let extension = "png";
+
+    if (hasGif) {
+      try {
+        blob = await renderExportGifBlob(normalized, resolution.width, resolution.height, entries);
+        extension = "gif";
+      } catch (gifError) {
+        blob = await renderExportPngBlob(normalized, resolution.width, resolution.height, entries);
+        extension = "png";
+      }
+    } else {
+      blob = await renderExportPngBlob(normalized, resolution.width, resolution.height, entries);
+    }
+
+    const filename = `image-draw-export-${timestamp}.${extension}`;
+    downloadBlob(blob, filename);
+    exitExportMode();
+  } catch (error) {
+    exportButton.textContent = "Confirm Export";
+    exportButton.disabled = false;
+  } finally {
+    updateUndoState();
+    updateExportModeUI();
+  }
 }
 
 async function getImageDimensions(url) {
@@ -1969,6 +2546,10 @@ function stopPanning(pointerId) {
 }
 
 function onPointerDown(event) {
+  if (state.exportMode) {
+    return;
+  }
+
   state.pointerInViewport = true;
   state.lastPointerClientX = event.clientX;
   state.lastPointerClientY = event.clientY;
@@ -2005,6 +2586,10 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  if (state.exportMode) {
+    return;
+  }
+
   state.pointerInViewport = true;
   state.lastPointerClientX = event.clientX;
   state.lastPointerClientY = event.clientY;
@@ -2047,6 +2632,10 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (state.exportMode) {
+    return;
+  }
+
   if (event.pointerType === "touch") {
     state.touchPointers.delete(event.pointerId);
     if (
@@ -2064,6 +2653,11 @@ function onPointerUp(event) {
 }
 
 function onWheel(event) {
+  if (state.exportMode) {
+    event.preventDefault();
+    return;
+  }
+
   event.preventDefault();
   resetCursorTrailAnchor();
 
@@ -2118,6 +2712,54 @@ function setEraseMode(nextValue) {
     updateEraseCursorPosition(state.lastPointerClientX, state.lastPointerClientY);
   }
   updateEraseModeUI();
+}
+
+function onExportSelectionPointerDown(event) {
+  if (!state.exportMode || event.button !== 0) {
+    return;
+  }
+
+  const handle = event.target.closest(".export-edge-handle");
+  if (!handle) {
+    return;
+  }
+
+  const edge = handle.dataset.edge;
+  if (!edge) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  startExportSelectionDrag(event.pointerId, edge);
+}
+
+function onExportOverlayPointerMove(event) {
+  if (!state.exportMode) {
+    return;
+  }
+  if (!state.exportDrag) {
+    return;
+  }
+
+  event.preventDefault();
+  updateExportSelectionDrag(event.pointerId, event.clientX, event.clientY);
+}
+
+function onExportOverlayPointerUp(event) {
+  if (!state.exportMode) {
+    return;
+  }
+  stopExportSelectionDrag(event.pointerId);
+}
+
+function onExportScaleButtonClick(event) {
+  const button = event.target.closest(".export-scale-button");
+  if (!button || !state.exportMode) {
+    return;
+  }
+  event.preventDefault();
+  setExportScalePercent(Number(button.dataset.scale));
 }
 
 dropZonePrompt.addEventListener("click", () => brushInput.click());
@@ -2203,6 +2845,13 @@ eraseModeButton.addEventListener("click", () => {
 undoButton.addEventListener("click", undoLastStroke);
 redoButton.addEventListener("click", redoLastStroke);
 clearButton.addEventListener("click", openClearConfirmModal);
+exportButton.addEventListener("click", () => {
+  if (state.exportMode) {
+    void confirmExport();
+    return;
+  }
+  enterExportMode();
+});
 confirmYesButton.addEventListener("click", () => {
   clearAllStrokes();
   closeClearConfirmModal();
@@ -2213,10 +2862,38 @@ clearConfirmModal.addEventListener("click", (event) => {
     closeClearConfirmModal();
   }
 });
+exportSelection.addEventListener("pointerdown", onExportSelectionPointerDown);
+exportSelection.addEventListener("pointermove", onExportOverlayPointerMove);
+exportSelection.addEventListener("pointerup", onExportOverlayPointerUp);
+exportSelection.addEventListener("pointercancel", onExportOverlayPointerUp);
+exportOverlay.addEventListener("pointermove", onExportOverlayPointerMove);
+exportOverlay.addEventListener("pointerup", onExportOverlayPointerUp);
+exportOverlay.addEventListener("pointercancel", onExportOverlayPointerUp);
+exportOverlay.addEventListener("wheel", (event) => {
+  if (state.exportMode) {
+    event.preventDefault();
+  }
+}, { passive: false });
+exportOverlay.addEventListener("contextmenu", (event) => {
+  if (state.exportMode) {
+    event.preventDefault();
+  }
+});
+exportScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.exportMode) {
+    event.preventDefault();
+    exitExportMode({ focusButton: true });
+    return;
+  }
+
   const key = String(event.key || "").toLowerCase();
   const hasUndoModifier = event.ctrlKey || event.metaKey;
   if (hasUndoModifier && !event.altKey && key === "z") {
+    if (state.exportMode) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     if (event.shiftKey) {
       redoLastStroke();
@@ -2256,6 +2933,11 @@ viewport.addEventListener("auxclick", (event) => {
 });
 window.addEventListener("pagehide", flushSessionSaveNow);
 window.addEventListener("beforeunload", flushSessionSaveNow);
+window.addEventListener("resize", () => {
+  if (state.exportMode) {
+    updateExportOverlayGeometry();
+  }
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     flushSessionSaveNow();

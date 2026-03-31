@@ -591,7 +591,8 @@ input[type="range"] + .value-text {
 #eraseModeButton,
 #undoButton,
 #redoButton,
-#clearButton {
+#clearButton,
+#exportButton {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid #bcbcbc;
@@ -626,6 +627,10 @@ input[type="range"] + .value-text {
   background: #e6e6e6;
 }
 
+#exportButton.is-active {
+  background: #e6e6e6;
+}
+
 #historyActions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -638,9 +643,14 @@ input[type="range"] + .value-text {
 
 #undoButton:disabled,
 #redoButton:disabled,
-#clearButton:disabled {
+#clearButton:disabled,
+#exportButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+#exportButton {
+  margin-top: 6px;
 }
 
 #clearConfirmModal {
@@ -697,4 +707,106 @@ input[type="range"] + .value-text {
 
 #confirmNoButton {
   border-color: #bb7a7a;
+}
+
+#exportOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+#exportOverlay[hidden] {
+  display: none;
+}
+
+.export-shade {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.22);
+  pointer-events: auto;
+}
+
+#exportSelection {
+  position: fixed;
+  border: 1px dashed #111;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.export-edge-handle {
+  position: absolute;
+  background: transparent;
+}
+
+.export-edge-handle[data-edge="top"] {
+  top: -7px;
+  left: 0;
+  width: 100%;
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.export-edge-handle[data-edge="bottom"] {
+  bottom: -7px;
+  left: 0;
+  width: 100%;
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.export-edge-handle[data-edge="left"] {
+  left: -7px;
+  top: 0;
+  width: 14px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.export-edge-handle[data-edge="right"] {
+  right: -7px;
+  top: 0;
+  width: 14px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+#exportMeta {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+#exportResolutionText {
+  margin: 0;
+  padding: 3px 6px;
+  border: 1px solid #111;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+#exportScaleButtons {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.export-scale-button {
+  min-width: 44px;
+  padding: 4px 6px;
+  border: 1px solid #111;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.export-scale-button.is-active {
+  background: #111;
+  color: #fff;
 }

@@ -117,6 +117,7 @@
       <button id="redoButton" type="button" disabled>Redo</button>
     </div>
     <button id="clearButton" type="button" disabled>Clear</button>
+    <button id="exportButton" type="button" disabled>Export</button>
   </aside>
 
   <div id="clearConfirmModal" aria-hidden="true">
@@ -125,6 +126,31 @@
       <div class="confirm-actions">
         <button id="confirmYesButton" type="button">Yes &#10003;</button>
         <button id="confirmNoButton" type="button">No &#10005;</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="exportOverlay" aria-hidden="true" hidden>
+    <div class="export-shade" id="exportShadeTop"></div>
+    <div class="export-shade" id="exportShadeRight"></div>
+    <div class="export-shade" id="exportShadeBottom"></div>
+    <div class="export-shade" id="exportShadeLeft"></div>
+
+    <div id="exportSelection" aria-hidden="true">
+      <div class="export-edge-handle" data-edge="top"></div>
+      <div class="export-edge-handle" data-edge="right"></div>
+      <div class="export-edge-handle" data-edge="bottom"></div>
+      <div class="export-edge-handle" data-edge="left"></div>
+    </div>
+
+    <div id="exportMeta" aria-hidden="true">
+      <p id="exportResolutionText">0x0px</p>
+      <div id="exportScaleButtons" role="group" aria-label="Export scale">
+        <button type="button" class="export-scale-button" data-scale="10">10%</button>
+        <button type="button" class="export-scale-button" data-scale="25">25%</button>
+        <button type="button" class="export-scale-button" data-scale="50">50%</button>
+        <button type="button" class="export-scale-button is-active" data-scale="100">100%</button>
+        <button type="button" class="export-scale-button" data-scale="200">200%</button>
       </div>
     </div>
   </div>
