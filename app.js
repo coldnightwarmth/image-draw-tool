@@ -501,6 +501,40 @@ function updatePanningStateClass() {
   viewport.classList.toggle("is-panning", Boolean(state.panning || state.touchGesture));
 }
 
+function cancelDrawingForGesture() {
+  if (!state.drawing) {
+    return;
+  }
+
+  const drawing = state.drawing;
+  for (const element of drawing.stroke.elements) {
+    decrementUrlRef(element.dataset.brushUrl);
+    element.remove();
+  }
+  if (viewport.hasPointerCapture(drawing.pointerId)) {
+    viewport.releasePointerCapture(drawing.pointerId);
+  }
+  state.drawing = null;
+  viewport.classList.remove("is-drawing");
+}
+
+function cancelErasingForGesture() {
+  if (!state.erasing) {
+    return;
+  }
+
+  const erasing = state.erasing;
+  if (viewport.hasPointerCapture(erasing.pointerId)) {
+    viewport.releasePointerCapture(erasing.pointerId);
+  }
+
+  if (erasing.changed && erasing.removalContext.records.length) {
+    undoEraseAction({ removals: erasing.removalContext.records });
+  }
+
+  state.erasing = null;
+}
+
 function startTouchGestureFromActiveTouches() {
   const touchEntries = Array.from(state.touchPointers.entries());
   if (touchEntries.length < 2) {
@@ -508,10 +542,10 @@ function startTouchGestureFromActiveTouches() {
   }
 
   if (state.drawing) {
-    stopDrawing(state.drawing.pointerId);
+    cancelDrawingForGesture();
   }
   if (state.erasing) {
-    stopErasing(state.erasing.pointerId);
+    cancelErasingForGesture();
   }
   if (state.panning) {
     stopPanning(state.panning.pointerId);
