@@ -39,6 +39,7 @@ const cursorTrailCountGroup = document.getElementById("cursorTrailCountGroup");
 const cursorTrailCountSlider = document.getElementById("cursorTrailCountSlider");
 const cursorTrailCountValue = document.getElementById("cursorTrailCountValue");
 const eraseCursor = document.getElementById("eraseCursor");
+const shortcutPreview = document.getElementById("shortcutPreview");
 const eraseModeButton = document.getElementById("eraseModeButton");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
@@ -104,7 +105,12 @@ const state = {
   exportMode: false,
   exportSelectionBounds: null,
   exportScalePercent: 100,
-  exportDrag: null
+  exportDrag: null,
+  ctrlOrMetaHeld: false,
+  shortcutPreview: {
+    brushId: null,
+    hideTimerId: null
+  }
 };
 
 let snapshotDbPromise = null;
@@ -990,6 +996,118 @@ function updateEraseModeUI() {
   viewport.classList.toggle("is-erasing", state.eraseMode);
   updateEraseCursorGeometry();
   updateEraseCursorVisibility();
+}
+
+function clearShortcutPreviewHideTimer() {
+  if (state.shortcutPreview.hideTimerId !== null) {
+    window.clearTimeout(state.shortcutPreview.hideTimerId);
+    state.shortcutPreview.hideTimerId = null;
+  }
+}
+
+function hideShortcutPreview(resetBrush = false) {
+  clearShortcutPreviewHideTimer();
+  shortcutPreview.classList.remove("is-visible");
+  if (resetBrush) {
+    state.shortcutPreview.brushId = null;
+  }
+}
+
+function scheduleShortcutPreviewHide() {
+  clearShortcutPreviewHideTimer();
+  state.shortcutPreview.hideTimerId = window.setTimeout(() => {
+    hideShortcutPreview();
+  }, 520);
+}
+
+function getShortcutPreviewBrush() {
+  const remembered = findBrushById(Number(state.shortcutPreview.brushId));
+  if (remembered) {
+    return remembered;
+  }
+
+  const soloBrush = getSoloBrush();
+  if (soloBrush) {
+    state.shortcutPreview.brushId = soloBrush.id;
+    return soloBrush;
+  }
+
+  const enabledBrush = state.brushes.find((brush) => brush.enabled);
+  if (enabledBrush) {
+    state.shortcutPreview.brushId = enabledBrush.id;
+    return enabledBrush;
+  }
+
+  const fallbackBrush = state.brushes[0] || null;
+  if (fallbackBrush) {
+    state.shortcutPreview.brushId = fallbackBrush.id;
+  }
+  return fallbackBrush;
+}
+
+function getBrushPlacementSize(brush) {
+  if (!brush) {
+    return { width: 0, height: 0 };
+  }
+
+  let width = 0;
+  let height = 0;
+  if (consistentToggle.checked) {
+    width = Math.max(4, Number(consistentSizeSlider.value));
+    height = Math.max(4, width * (brush.height / brush.width));
+  } else {
+    const scale = Number(sizeSlider.value) / 100;
+    width = Math.max(4, brush.width * scale);
+    height = Math.max(4, brush.height * scale);
+  }
+  return { width, height };
+}
+
+function showShortcutPreviewAt(clientX, clientY) {
+  const brush = getShortcutPreviewBrush();
+  if (!brush) {
+    hideShortcutPreview(true);
+    return;
+  }
+
+  const worldSize = getBrushPlacementSize(brush);
+  let displayWidth = Math.max(8, worldSize.width * state.camera.scale);
+  let displayHeight = Math.max(8, worldSize.height * state.camera.scale);
+  const maxDisplaySize = 220;
+  if (displayWidth > maxDisplaySize || displayHeight > maxDisplaySize) {
+    const scaleDown = Math.min(maxDisplaySize / displayWidth, maxDisplaySize / displayHeight);
+    displayWidth *= scaleDown;
+    displayHeight *= scaleDown;
+  }
+
+  const gap = 14;
+  const viewportRect = viewport.getBoundingClientRect();
+  const maxLeft = viewportRect.right - displayWidth - 8;
+  const maxTop = viewportRect.bottom - displayHeight - 8;
+  let left = clientX + gap;
+  let top = clientY + gap;
+  if (left > maxLeft) {
+    left = clientX - displayWidth - gap;
+  }
+  if (top > maxTop) {
+    top = clientY - displayHeight - gap;
+  }
+  left = clamp(left, viewportRect.left + 8, maxLeft);
+  top = clamp(top, viewportRect.top + 8, maxTop);
+
+  const rotation = parseNumericInputValue(rotationSlider, 0);
+  const opacity = clamp(Number(opacitySlider.value) / 100, 0, 1);
+
+  shortcutPreview.src = brush.url;
+  shortcutPreview.style.left = `${left}px`;
+  shortcutPreview.style.top = `${top}px`;
+  shortcutPreview.style.width = `${displayWidth}px`;
+  shortcutPreview.style.height = `${displayHeight}px`;
+  shortcutPreview.style.transform = `rotate(${rotation}deg)`;
+  shortcutPreview.style.opacity = String(opacity);
+  shortcutPreview.style.imageRendering = renderModeToggle.checked ? "auto" : "pixelated";
+  shortcutPreview.classList.add("is-visible");
+  scheduleShortcutPreviewHide();
 }
 
 function updatePanningStateClass() {
@@ -2924,13 +3042,16 @@ function onWheel(event) {
     return;
   }
 
-  if (event.ctrlKey && !event.altKey && !event.metaKey) {
+  const rotationShortcutActive =
+    (event.ctrlKey || event.metaKey || state.ctrlOrMetaHeld) && !event.altKey;
+  if (rotationShortcutActive) {
     const rotationStepPerUnit = 6;
     const nextRotation =
       parseNumericInputValue(rotationSlider, 0) + wheelUnits * rotationStepPerUnit;
     setInputNumericValue(rotationSlider, nextRotation);
     updateSliderText();
     updateRotationIndicator();
+    showShortcutPreviewAt(event.clientX, event.clientY);
     scheduleSessionSave();
     return;
   }
@@ -2947,6 +3068,7 @@ function onWheel(event) {
     setInputNumericValue(targetSlider, nextSize);
     updateSliderText();
     updateEraseCursorGeometry();
+    showShortcutPreviewAt(event.clientX, event.clientY);
     scheduleSessionSave();
     return;
   }
@@ -3181,6 +3303,7 @@ exportOverlay.addEventListener("contextmenu", (event) => {
 });
 exportScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
 document.addEventListener("keydown", (event) => {
+  state.ctrlOrMetaHeld = Boolean(event.ctrlKey || event.metaKey);
   if (event.key === "Escape" && state.exportMode) {
     event.preventDefault();
     exitExportMode({ focusButton: true });
@@ -3206,6 +3329,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && clearConfirmModal.classList.contains("is-open")) {
     closeClearConfirmModal();
   }
+});
+document.addEventListener("keyup", (event) => {
+  state.ctrlOrMetaHeld = Boolean(event.ctrlKey || event.metaKey);
+});
+window.addEventListener("blur", () => {
+  state.ctrlOrMetaHeld = false;
+  hideShortcutPreview(true);
 });
 
 viewport.addEventListener("pointerdown", onPointerDown);

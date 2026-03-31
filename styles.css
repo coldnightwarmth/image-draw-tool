@@ -90,6 +90,23 @@ input {
   display: block;
 }
 
+#shortcutPreview {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  display: none;
+  pointer-events: none;
+  user-select: none;
+  z-index: 36;
+  opacity: 0;
+}
+
+#shortcutPreview.is-visible {
+  display: block;
+}
+
 .stamp {
   position: absolute;
   display: block;
