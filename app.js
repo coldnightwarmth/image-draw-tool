@@ -1085,20 +1085,8 @@ function showShortcutPreviewAt(clientX, clientY) {
     displayHeight *= scaleDown;
   }
 
-  const gap = 14;
-  const viewportRect = viewport.getBoundingClientRect();
-  const maxLeft = viewportRect.right - displayWidth - 8;
-  const maxTop = viewportRect.bottom - displayHeight - 8;
-  let left = clientX + gap;
-  let top = clientY + gap;
-  if (left > maxLeft) {
-    left = clientX - displayWidth - gap;
-  }
-  if (top > maxTop) {
-    top = clientY - displayHeight - gap;
-  }
-  left = clamp(left, viewportRect.left + 8, maxLeft);
-  top = clamp(top, viewportRect.top + 8, maxTop);
+  const left = clientX - displayWidth / 2;
+  const top = clientY - displayHeight / 2;
 
   const rotation = parseNumericInputValue(rotationSlider, 0);
   const opacity = clamp(Number(opacitySlider.value) / 100, 0, 1);
