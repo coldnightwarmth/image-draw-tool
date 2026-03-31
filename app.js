@@ -140,6 +140,16 @@ function setInputNumericValue(input, nextValue) {
   input.value = String(numericValue);
 }
 
+function getNormalizedWheelDelta(event) {
+  let delta = Number(event.deltaY) || 0;
+  if (event.deltaMode === 1) {
+    delta *= 16;
+  } else if (event.deltaMode === 2) {
+    delta *= window.innerHeight;
+  }
+  return delta;
+}
+
 function isGifUrl(url) {
   if (typeof url !== "string") {
     return false;
@@ -2770,6 +2780,7 @@ function startPanning(event) {
   resetCursorTrailAnchor();
   state.panning = {
     pointerId: event.pointerId,
+    button: event.button,
     lastClientX: event.clientX,
     lastClientY: event.clientY
   };
@@ -2906,6 +2917,39 @@ function onWheel(event) {
 
   event.preventDefault();
   resetCursorTrailAnchor();
+
+  const normalizedDelta = getNormalizedWheelDelta(event);
+  const wheelUnits = -normalizedDelta / 100;
+  if (wheelUnits === 0) {
+    return;
+  }
+
+  if (event.ctrlKey && !event.altKey && !event.metaKey) {
+    const rotationStepPerUnit = 6;
+    const nextRotation =
+      parseNumericInputValue(rotationSlider, 0) + wheelUnits * rotationStepPerUnit;
+    setInputNumericValue(rotationSlider, nextRotation);
+    updateSliderText();
+    updateRotationIndicator();
+    scheduleSessionSave();
+    return;
+  }
+
+  const rightButtonHeld =
+    (Number(event.buttons) & 2) === 2 ||
+    (state.panning && state.panning.button === 2);
+  if (rightButtonHeld) {
+    const targetSlider = consistentToggle.checked ? consistentSizeSlider : sizeSlider;
+    const sizeStepPerUnit = consistentToggle.checked ? 6 : 14;
+    const nextSize =
+      parseNumericInputValue(targetSlider, Number(targetSlider.value) || 0) +
+      wheelUnits * sizeStepPerUnit;
+    setInputNumericValue(targetSlider, nextSize);
+    updateSliderText();
+    updateEraseCursorGeometry();
+    scheduleSessionSave();
+    return;
+  }
 
   const rect = viewport.getBoundingClientRect();
   const cursorX = event.clientX - rect.left;
