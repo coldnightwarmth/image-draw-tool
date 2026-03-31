@@ -71,8 +71,8 @@ const EXPORT_SELECTION_PADDING = 18;
 const EXPORT_MIN_SIZE = 24;
 const EXPORT_GIF_DURATION_MS = 2000;
 const EXPORT_GIF_FRAME_DELAY_MS = 50;
-const GIF_JS_CDN_URL = "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js";
-const GIF_JS_WORKER_CDN_URL = "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.worker.js";
+const GIF_JS_LIBRARY_URL = "gif.js";
+const GIF_JS_WORKER_URL = "gif.worker.js";
 const EXPORT_SCALE_PRESETS = [10, 25, 50, 100, 200];
 
 const state = {
@@ -160,7 +160,10 @@ function loadGifLibrary() {
   }
 
   gifLibraryPromise = new Promise((resolve, reject) => {
-    const existingScript = document.querySelector(`script[src="${GIF_JS_CDN_URL}"]`);
+    const existingScript = Array.from(document.querySelectorAll("script")).find((scriptElement) => {
+      const rawSrc = scriptElement.getAttribute("src") || "";
+      return rawSrc === GIF_JS_LIBRARY_URL || rawSrc.endsWith(`/${GIF_JS_LIBRARY_URL}`);
+    });
     if (existingScript) {
       existingScript.addEventListener("load", () => resolve(), { once: true });
       existingScript.addEventListener(
@@ -172,7 +175,7 @@ function loadGifLibrary() {
     }
 
     const script = document.createElement("script");
-    script.src = GIF_JS_CDN_URL;
+    script.src = GIF_JS_LIBRARY_URL;
     script.async = true;
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("Failed to load GIF encoder."));
@@ -661,8 +664,16 @@ function setExportScalePercent(nextScalePercent) {
 
 function hasGifStampOnCanvas() {
   for (const element of getVisibleStampElements()) {
-    const brushUrl = element.dataset.brushUrl || element.getAttribute("src") || "";
-    if (isGifUrl(brushUrl)) {
+    const brushId = Number(element.dataset.brushId);
+    const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+    const brushName = brush ? String(brush.name || "") : "";
+    const brushUrl =
+      element.dataset.brushUrl ||
+      element.currentSrc ||
+      element.getAttribute("src") ||
+      (brush ? String(brush.url || "") : "");
+
+    if (isGifUrl(brushUrl) || /\.gif$/i.test(brushName)) {
       return true;
     }
   }
@@ -778,11 +789,28 @@ function enterExportMode() {
   updateUndoState();
 }
 
-function startExportSelectionDrag(pointerId, edge) {
+function startExportSelectionDrag(pointerId, options) {
   if (!state.exportMode || !state.exportSelectionBounds) {
     return;
   }
-  state.exportDrag = { pointerId, edge };
+
+  const mode = options?.mode === "move" ? "move" : "resize";
+  const edge = typeof options?.edge === "string" ? options.edge : null;
+  const clientX = Number(options?.clientX);
+  const clientY = Number(options?.clientY);
+  const pointerPoint =
+    Number.isFinite(clientX) && Number.isFinite(clientY)
+      ? screenToWorld(clientX, clientY)
+      : { x: 0, y: 0 };
+
+  state.exportDrag = {
+    pointerId,
+    mode,
+    edge,
+    startWorldX: pointerPoint.x,
+    startWorldY: pointerPoint.y,
+    originBounds: { ...state.exportSelectionBounds }
+  };
   try {
     exportSelection.setPointerCapture(pointerId);
   } catch (error) {
@@ -796,9 +824,17 @@ function updateExportSelectionDrag(pointerId, clientX, clientY) {
   }
 
   const point = screenToWorld(clientX, clientY);
-  const next = { ...state.exportSelectionBounds };
+  const origin = state.exportDrag.originBounds || state.exportSelectionBounds;
+  const next = { ...origin };
 
-  if (state.exportDrag.edge === "left") {
+  if (state.exportDrag.mode === "move") {
+    const deltaX = point.x - state.exportDrag.startWorldX;
+    const deltaY = point.y - state.exportDrag.startWorldY;
+    next.left += deltaX;
+    next.right += deltaX;
+    next.top += deltaY;
+    next.bottom += deltaY;
+  } else if (state.exportDrag.edge === "left") {
     next.left = Math.min(point.x, next.right - EXPORT_MIN_SIZE);
   } else if (state.exportDrag.edge === "right") {
     next.right = Math.max(point.x, next.left + EXPORT_MIN_SIZE);
@@ -2134,6 +2170,11 @@ function drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entrie
   const scaleY = outputHeight / selectionHeight;
 
   ctx.clearRect(0, 0, outputWidth, outputHeight);
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, outputWidth, outputHeight);
+  ctx.restore();
   for (const entry of entries) {
     const drawWidth = entry.width * scaleX;
     const drawHeight = entry.height * scaleY;
@@ -2194,7 +2235,7 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     quality: 10,
     width: outputWidth,
     height: outputHeight,
-    workerScript: GIF_JS_WORKER_CDN_URL
+    workerScript: GIF_JS_WORKER_URL
   });
 
   for (let index = 0; index < frameCount; index += 1) {
@@ -2237,20 +2278,10 @@ async function confirmExport() {
   exportButton.disabled = true;
   exportButton.textContent = "Exporting...";
   try {
-    let blob = null;
-    let extension = "png";
-
-    if (hasGif) {
-      try {
-        blob = await renderExportGifBlob(normalized, resolution.width, resolution.height, entries);
-        extension = "gif";
-      } catch (gifError) {
-        blob = await renderExportPngBlob(normalized, resolution.width, resolution.height, entries);
-        extension = "png";
-      }
-    } else {
-      blob = await renderExportPngBlob(normalized, resolution.width, resolution.height, entries);
-    }
+    const blob = hasGif
+      ? await renderExportGifBlob(normalized, resolution.width, resolution.height, entries)
+      : await renderExportPngBlob(normalized, resolution.width, resolution.height, entries);
+    const extension = hasGif ? "gif" : "png";
 
     const filename = `image-draw-export-${timestamp}.${extension}`;
     downloadBlob(blob, filename);
@@ -2719,19 +2750,30 @@ function onExportSelectionPointerDown(event) {
     return;
   }
 
-  const handle = event.target.closest(".export-edge-handle");
-  if (!handle) {
-    return;
-  }
-
-  const edge = handle.dataset.edge;
-  if (!edge) {
-    return;
-  }
-
   event.preventDefault();
   event.stopPropagation();
-  startExportSelectionDrag(event.pointerId, edge);
+
+  const handle = event.target.closest(".export-edge-handle");
+  if (handle) {
+    const edge = handle.dataset.edge;
+    if (!edge) {
+      return;
+    }
+
+    startExportSelectionDrag(event.pointerId, {
+      mode: "resize",
+      edge,
+      clientX: event.clientX,
+      clientY: event.clientY
+    });
+    return;
+  }
+
+  startExportSelectionDrag(event.pointerId, {
+    mode: "move",
+    clientX: event.clientX,
+    clientY: event.clientY
+  });
 }
 
 function onExportOverlayPointerMove(event) {
