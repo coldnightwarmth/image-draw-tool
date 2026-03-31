@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>image brush</title>
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%96%8C%EF%B8%8F%3C/text%3E%3C/svg%3E"
+  >
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="viewport" aria-label="Drawing canvas">
+    <div id="world"></div>
+  </div>
+  <div id="eraseCursor" aria-hidden="true"></div>
+
+  <aside id="controls" aria-label="Drawing controls">
+    <button id="sidebarToggleButton" type="button" aria-expanded="true" aria-label="Hide sidebar contents">
+      <span class="chevron-icon" aria-hidden="true"></span>
+    </button>
+
+    <div class="control-group">
+      <label for="brushInput" class="control-label">brush data</label>
+      <div id="dropZone" aria-controls="brushInput">
+        <div id="dropZonePrompt" role="button" tabindex="0" aria-controls="brushInput">
+          Drop folder/files here or click to load
+        </div>
+        <div id="brushGallery" hidden></div>
+      </div>
+      <input
+        id="brushInput"
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif"
+        multiple
+        webkitdirectory
+      >
+      <p id="brushStatus">No brush data loaded.</p>
+    </div>
+
+    <div class="control-group">
+      <div class="toggle-row">
+        <p id="renderModeLabel" class="control-label inline-label">point</p>
+        <label class="ios-switch ios-switch-neutral" for="renderModeToggle">
+          <input id="renderModeToggle" type="checkbox">
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="toggle-row" id="cursorTrailToggleRow">
+        <label for="cursorTrailToggle" class="control-label inline-label">cursor trail</label>
+        <label class="ios-switch" for="cursorTrailToggle">
+          <input id="cursorTrailToggle" type="checkbox">
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div id="cursorTrailCountGroup" hidden>
+        <label for="cursorTrailCountSlider" class="control-label">length</label>
+        <input id="cursorTrailCountSlider" type="range" min="1" max="200" value="24" step="1" disabled>
+        <p class="value-text"><span id="cursorTrailCountValue">24</span></p>
+      </div>
+    </div>
+
+    <div class="control-group" id="sizeScaleGroup">
+      <label for="sizeSlider" class="control-label">size</label>
+      <input id="sizeSlider" type="range" min="10" max="777" value="100" step="1">
+      <p class="value-text"><span id="sizeValue">100</span>%</p>
+    </div>
+
+    <div class="control-group">
+      <div class="toggle-row">
+        <label for="consistentToggle" class="control-label inline-label">consistent?</label>
+        <label class="ios-switch" for="consistentToggle">
+          <input id="consistentToggle" type="checkbox">
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div id="consistentSizeGroup" hidden>
+        <label for="consistentSizeSlider" class="control-label">size</label>
+        <input id="consistentSizeSlider" type="range" min="8" max="777" value="96" step="1" disabled>
+        <p class="value-text"><span id="consistentSizeValue">96</span>px</p>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label for="spacingSlider" class="control-label">spacing</label>
+      <input id="spacingSlider" type="range" min="4" max="250" value="48" step="1">
+      <p class="value-text"><span id="spacingValue">48</span>px</p>
+    </div>
+
+    <div class="control-group">
+      <div class="toggle-row">
+        <label for="rotationSlider" class="control-label inline-label">rotation</label>
+        <div id="rotationIndicator" aria-hidden="true">
+          <span id="rotationNeedle"></span>
+        </div>
+      </div>
+      <input id="rotationSlider" type="range" min="-180" max="180" value="0" step="1">
+      <p class="value-text"><span id="rotationValue">0</span>deg</p>
+    </div>
+
+    <div class="control-group">
+      <label for="opacitySlider" class="control-label">opacity</label>
+      <input id="opacitySlider" type="range" min="1" max="100" value="100" step="1">
+      <p class="value-text"><span id="opacityValue">100</span>%</p>
+    </div>
+
+    <button id="eraseModeButton" type="button">
+      <span>Erase</span>
+      <img class="button-icon erase-icon-image" src="eraser%20icon.png" alt="" aria-hidden="true" draggable="false">
+    </button>
+    <div id="historyActions">
+      <button id="undoButton" type="button" disabled>Undo</button>
+      <button id="redoButton" type="button" disabled>Redo</button>
+    </div>
+    <button id="clearButton" type="button" disabled>Clear</button>
+  </aside>
+
+  <div id="clearConfirmModal" aria-hidden="true">
+    <div id="clearConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="clearConfirmMessage">
+      <p id="clearConfirmMessage">Are you sure? This cannot be undone.</p>
+      <div class="confirm-actions">
+        <button id="confirmYesButton" type="button">Yes &#10003;</button>
+        <button id="confirmNoButton" type="button">No &#10005;</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
