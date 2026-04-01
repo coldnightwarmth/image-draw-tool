@@ -229,6 +229,40 @@ input {
   margin: 0;
 }
 
+.slider-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.slider-toggle-label::after {
+  content: "";
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid #6f6f6f;
+  border-bottom: 1px solid #6f6f6f;
+  transform: rotate(45deg);
+  transform-origin: 50% 50%;
+  margin-top: -1px;
+}
+
+.control-group.is-slider-collapsed .slider-toggle-label::after {
+  transform: rotate(-45deg);
+}
+
+.control-group.is-slider-collapsed > input[type="range"],
+.control-group.is-slider-collapsed > .value-text {
+  display: none;
+}
+
+.slider-toggle-label:focus-visible {
+  outline: 1px solid #000;
+  outline-offset: 2px;
+}
+
 #cursorTrailToggleRow {
   margin-top: 4px;
 }

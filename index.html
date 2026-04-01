@@ -59,14 +59,22 @@
         </label>
       </div>
       <div id="cursorTrailCountGroup" hidden>
-        <label for="cursorTrailCountSlider" class="control-label">length</label>
+        <label
+          for="cursorTrailCountSlider"
+          class="control-label slider-toggle-label"
+          data-slider-toggle-target="cursorTrailCountGroup"
+        >length</label>
         <input id="cursorTrailCountSlider" type="range" min="1" max="200" value="24" step="1" disabled>
         <p class="value-text"><span id="cursorTrailCountValue">24</span></p>
       </div>
     </div>
 
     <div class="control-group" id="sizeScaleGroup">
-      <label for="sizeSlider" class="control-label">size</label>
+      <label
+        for="sizeSlider"
+        class="control-label slider-toggle-label"
+        data-slider-toggle-target="sizeScaleGroup"
+      >size</label>
       <input id="sizeSlider" type="range" min="10" max="777" value="100" step="1">
       <p class="value-text"><span id="sizeValue">100</span>%</p>
     </div>
@@ -80,21 +88,33 @@
         </label>
       </div>
       <div id="consistentSizeGroup" hidden>
-        <label for="consistentSizeSlider" class="control-label">size</label>
+        <label
+          for="consistentSizeSlider"
+          class="control-label slider-toggle-label"
+          data-slider-toggle-target="consistentSizeGroup"
+        >size</label>
         <input id="consistentSizeSlider" type="range" min="8" max="777" value="96" step="1" disabled>
         <p class="value-text"><span id="consistentSizeValue">96</span>px</p>
       </div>
     </div>
 
-    <div class="control-group">
-      <label for="spacingSlider" class="control-label">spacing</label>
+    <div class="control-group" id="spacingGroup">
+      <label
+        for="spacingSlider"
+        class="control-label slider-toggle-label"
+        data-slider-toggle-target="spacingGroup"
+      >spacing</label>
       <input id="spacingSlider" type="range" min="4" max="250" value="48" step="1">
       <p class="value-text"><span id="spacingValue">48</span>px</p>
     </div>
 
-    <div class="control-group">
+    <div class="control-group" id="rotationGroup">
       <div class="toggle-row">
-        <label for="rotationSlider" class="control-label inline-label">rotation</label>
+        <label
+          for="rotationSlider"
+          class="control-label inline-label slider-toggle-label"
+          data-slider-toggle-target="rotationGroup"
+        >rotation</label>
         <div id="rotationIndicator" aria-hidden="true">
           <span id="rotationNeedle"></span>
         </div>
@@ -103,8 +123,12 @@
       <p class="value-text"><span id="rotationValue">0</span>deg</p>
     </div>
 
-    <div class="control-group">
-      <label for="opacitySlider" class="control-label">opacity</label>
+    <div class="control-group" id="opacityGroup">
+      <label
+        for="opacitySlider"
+        class="control-label slider-toggle-label"
+        data-slider-toggle-target="opacityGroup"
+      >opacity</label>
       <input id="opacitySlider" type="range" min="1" max="100" value="100" step="1">
       <p class="value-text"><span id="opacityValue">100</span>%</p>
     </div>

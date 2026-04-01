@@ -62,6 +62,9 @@ const exportScaleButtonsGroup = document.getElementById("exportScaleButtons");
 const exportScaleButtons = Array.from(
   exportOverlay.querySelectorAll(".export-scale-button")
 );
+const sliderToggleLabels = Array.from(
+  document.querySelectorAll(".slider-toggle-label[data-slider-toggle-target]")
+);
 
 const LOW_WEIGHT_MULTIPLIER = 0.12;
 const HIGH_WEIGHT_MULTIPLIER = 4.5;
@@ -113,7 +116,8 @@ const state = {
   shortcutPreview: {
     brushId: null,
     hideTimerId: null
-  }
+  },
+  collapsedSliderGroups: {}
 };
 
 let snapshotDbPromise = null;
@@ -936,6 +940,89 @@ function updateSliderText() {
   rotationValue.textContent = String(rotationSlider.value);
   opacityValue.textContent = String(opacitySlider.value);
   cursorTrailCountValue.textContent = String(cursorTrailCountSlider.value);
+}
+
+function setSliderGroupCollapsed(groupId, collapsed) {
+  if (!groupId) {
+    return;
+  }
+
+  const group = document.getElementById(groupId);
+  if (!group) {
+    return;
+  }
+
+  group.classList.toggle("is-slider-collapsed", Boolean(collapsed));
+  state.collapsedSliderGroups[groupId] = Boolean(collapsed);
+
+  for (const label of sliderToggleLabels) {
+    if (label.dataset.sliderToggleTarget !== groupId) {
+      continue;
+    }
+    label.setAttribute("aria-expanded", String(!collapsed));
+  }
+}
+
+function getCollapsedSliderGroupSnapshot() {
+  const snapshot = {};
+  for (const label of sliderToggleLabels) {
+    const groupId = label.dataset.sliderToggleTarget;
+    if (!groupId) {
+      continue;
+    }
+    const group = document.getElementById(groupId);
+    if (!group) {
+      continue;
+    }
+    snapshot[groupId] = group.classList.contains("is-slider-collapsed");
+  }
+  return snapshot;
+}
+
+function applyCollapsedSliderGroupSnapshot(snapshot) {
+  state.collapsedSliderGroups = {};
+  const source = snapshot && typeof snapshot === "object" ? snapshot : {};
+  for (const label of sliderToggleLabels) {
+    const groupId = label.dataset.sliderToggleTarget;
+    if (!groupId) {
+      continue;
+    }
+    setSliderGroupCollapsed(groupId, Boolean(source[groupId]));
+  }
+}
+
+function initializeSliderGroupToggles() {
+  for (const label of sliderToggleLabels) {
+    label.setAttribute("role", "button");
+    label.setAttribute("tabindex", "0");
+    const groupId = label.dataset.sliderToggleTarget;
+    if (!groupId) {
+      continue;
+    }
+
+    label.addEventListener("click", (event) => {
+      event.preventDefault();
+      const group = document.getElementById(groupId);
+      if (!group) {
+        return;
+      }
+      setSliderGroupCollapsed(groupId, !group.classList.contains("is-slider-collapsed"));
+      scheduleSessionSave();
+    });
+
+    label.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      const group = document.getElementById(groupId);
+      if (!group) {
+        return;
+      }
+      setSliderGroupCollapsed(groupId, !group.classList.contains("is-slider-collapsed"));
+      scheduleSessionSave();
+    });
+  }
 }
 
 function updateConsistentModeUI() {
@@ -2023,7 +2110,8 @@ function buildSessionSnapshot() {
       renderLinear: renderModeToggle.checked,
       cursorTrailEnabled: cursorTrailToggle.checked,
       cursorTrailCount: parseNumericInputValue(cursorTrailCountSlider, 24),
-      sidebarCollapsed: state.sidebarCollapsed
+      sidebarCollapsed: state.sidebarCollapsed,
+      collapsedSliderGroups: getCollapsedSliderGroupSnapshot()
     },
     brushes: state.brushes.map((brush) => ({
       id: brush.id,
@@ -2275,6 +2363,7 @@ async function restoreSessionState() {
     cursorTrailToggle.checked = Boolean(controls.cursorTrailEnabled);
     setInputNumericValue(cursorTrailCountSlider, controls.cursorTrailCount);
     state.sidebarCollapsed = Boolean(controls.sidebarCollapsed);
+    applyCollapsedSliderGroupSnapshot(controls.collapsedSliderGroups);
 
     const camera = snapshot.camera || {};
     if (Number.isFinite(Number(camera.x))) {
@@ -3798,6 +3887,8 @@ window.__applyBrushCropFromPopup = async (payload) => {
   await applyCropToBrush(brushId, cropRect);
 };
 
+initializeSliderGroupToggles();
+
 dropZonePrompt.addEventListener("click", () => brushInput.click());
 dropZonePrompt.addEventListener("keydown", onDropZoneKeyDown);
 brushGallery.addEventListener("click", onBrushGalleryClick);
@@ -4005,6 +4096,7 @@ async function initializeApp() {
   if (restored) {
     return;
   }
+  applyCollapsedSliderGroupSnapshot(null);
   updateSliderText();
   updateConsistentModeUI();
   updateRenderModeUI();
