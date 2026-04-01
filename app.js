@@ -159,6 +159,15 @@ function getNormalizedWheelDelta(event) {
   return delta;
 }
 
+function isRotationWheelShortcutActive(event) {
+  const modifierFromState =
+    typeof event.getModifierState === "function"
+      ? event.getModifierState("Control") || event.getModifierState("Meta")
+      : false;
+  return Boolean(event.ctrlKey || event.metaKey || modifierFromState || state.ctrlOrMetaHeld) &&
+    !event.altKey;
+}
+
 function isGifUrl(url) {
   if (typeof url !== "string") {
     return false;
@@ -2881,6 +2890,22 @@ function placeAlongPath(drawing, x, y) {
   drawing.lastPlacedY = cursorY;
 }
 
+function updateActiveStrokeTailRotation() {
+  if (!state.drawing || !state.drawing.stroke || !state.drawing.stroke.elements.length) {
+    return;
+  }
+
+  const elements = state.drawing.stroke.elements;
+  const tail = elements[elements.length - 1];
+  if (!tail) {
+    return;
+  }
+
+  const rotation = parseNumericInputValue(rotationSlider, 0);
+  tail.dataset.rotation = String(rotation);
+  tail.style.transform = `rotate(${rotation}deg)`;
+}
+
 function rectsIntersect(a, b) {
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 }
@@ -3609,6 +3634,10 @@ function onPointerUp(event) {
 }
 
 function onWheel(event) {
+  if (event.defaultPrevented) {
+    return;
+  }
+
   event.preventDefault();
   resetCursorTrailAnchor();
 
@@ -3618,15 +3647,14 @@ function onWheel(event) {
     return;
   }
 
-  const rotationShortcutActive =
-    (event.ctrlKey || event.metaKey || state.ctrlOrMetaHeld) && !event.altKey;
-  if (rotationShortcutActive) {
+  if (isRotationWheelShortcutActive(event)) {
     const rotationStepPerUnit = 6;
     const nextRotation =
       parseNumericInputValue(rotationSlider, 0) + wheelUnits * rotationStepPerUnit;
     setInputNumericValue(rotationSlider, nextRotation);
     updateSliderText();
     updateRotationIndicator();
+    updateActiveStrokeTailRotation();
     showShortcutPreviewAt(event.clientX, event.clientY);
     scheduleSessionSave();
     return;
@@ -3947,6 +3975,12 @@ viewport.addEventListener("pointerleave", () => {
   updateEraseCursorVisibility();
 });
 viewport.addEventListener("wheel", onWheel, { passive: false });
+window.addEventListener("wheel", (event) => {
+  if (!state.drawing) {
+    return;
+  }
+  onWheel(event);
+}, { passive: false, capture: true });
 viewport.addEventListener("contextmenu", (event) => event.preventDefault());
 viewport.addEventListener("auxclick", (event) => {
   if (event.button === 1) {
