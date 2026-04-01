@@ -923,6 +923,7 @@ input[type="range"] + .value-text {
 .brush-crop-edge {
   position: absolute;
   background: transparent;
+  z-index: 1;
 }
 
 .brush-crop-edge[data-edge="top"] {
@@ -957,6 +958,42 @@ input[type="range"] + .value-text {
   cursor: ew-resize;
 }
 
+.brush-crop-edge[data-edge="top-left"] {
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.brush-crop-edge[data-edge="top-right"] {
+  right: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+  z-index: 2;
+}
+
+.brush-crop-edge[data-edge="bottom-right"] {
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.brush-crop-edge[data-edge="bottom-left"] {
+  left: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+  z-index: 2;
+}
+
 .brush-crop-actions {
   margin-top: 0;
 }
@@ -989,6 +1026,7 @@ input[type="range"] + .value-text {
 .export-edge-handle {
   position: absolute;
   background: transparent;
+  z-index: 1;
 }
 
 .export-edge-handle[data-edge="top"] {
@@ -1021,6 +1059,42 @@ input[type="range"] + .value-text {
   width: 14px;
   height: 100%;
   cursor: ew-resize;
+}
+
+.export-edge-handle[data-edge="top-left"] {
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.export-edge-handle[data-edge="top-right"] {
+  right: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+  z-index: 2;
+}
+
+.export-edge-handle[data-edge="bottom-right"] {
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.export-edge-handle[data-edge="bottom-left"] {
+  left: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+  z-index: 2;
 }
 
 #exportMeta {

@@ -796,16 +796,22 @@ function onBrushCropPointerMove(event) {
   if (drag.mode === "move") {
     next.x = drag.startCropRect.x + dx;
     next.y = drag.startCropRect.y + dy;
-  } else if (drag.edge === "left") {
-    next.x = drag.startCropRect.x + dx;
-    next.width = drag.startCropRect.width - dx;
-  } else if (drag.edge === "right") {
-    next.width = drag.startCropRect.width + dx;
-  } else if (drag.edge === "top") {
-    next.y = drag.startCropRect.y + dy;
-    next.height = drag.startCropRect.height - dy;
-  } else if (drag.edge === "bottom") {
-    next.height = drag.startCropRect.height + dy;
+  } else {
+    const edge = String(drag.edge || "");
+    if (edge.includes("left")) {
+      next.x = drag.startCropRect.x + dx;
+      next.width = drag.startCropRect.width - dx;
+    }
+    if (edge.includes("right")) {
+      next.width = drag.startCropRect.width + dx;
+    }
+    if (edge.includes("top")) {
+      next.y = drag.startCropRect.y + dy;
+      next.height = drag.startCropRect.height - dy;
+    }
+    if (edge.includes("bottom")) {
+      next.height = drag.startCropRect.height + dy;
+    }
   }
 
   state.brushCropEditor.cropRect = normalizeBrushCropRect(
@@ -1586,14 +1592,20 @@ function updateExportSelectionDrag(pointerId, clientX, clientY) {
     next.right += deltaX;
     next.top += deltaY;
     next.bottom += deltaY;
-  } else if (state.exportDrag.edge === "left") {
-    next.left = Math.min(point.x, next.right - EXPORT_MIN_SIZE);
-  } else if (state.exportDrag.edge === "right") {
-    next.right = Math.max(point.x, next.left + EXPORT_MIN_SIZE);
-  } else if (state.exportDrag.edge === "top") {
-    next.top = Math.min(point.y, next.bottom - EXPORT_MIN_SIZE);
-  } else if (state.exportDrag.edge === "bottom") {
-    next.bottom = Math.max(point.y, next.top + EXPORT_MIN_SIZE);
+  } else {
+    const edge = String(state.exportDrag.edge || "");
+    if (edge.includes("left")) {
+      next.left = Math.min(point.x, next.right - EXPORT_MIN_SIZE);
+    }
+    if (edge.includes("right")) {
+      next.right = Math.max(point.x, next.left + EXPORT_MIN_SIZE);
+    }
+    if (edge.includes("top")) {
+      next.top = Math.min(point.y, next.bottom - EXPORT_MIN_SIZE);
+    }
+    if (edge.includes("bottom")) {
+      next.bottom = Math.max(point.y, next.top + EXPORT_MIN_SIZE);
+    }
   }
 
   state.exportSelectionBounds = normalizeExportSelectionBounds(next);
