@@ -73,10 +73,10 @@ input {
 
 #eraseCursor {
   position: fixed;
+  left: 0;
+  top: 0;
   width: 18px;
   height: 18px;
-  margin-left: -9px;
-  margin-top: -9px;
   border: 1px solid rgba(0, 0, 0, 0.92);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.08);
@@ -84,6 +84,8 @@ input {
   pointer-events: none;
   z-index: 35;
   display: none;
+  transform: translate3d(-9999px, -9999px, 0);
+  will-change: transform, width, height;
 }
 
 #eraseCursor.is-visible {
@@ -237,6 +239,42 @@ input {
   margin: 0;
 }
 
+.brush-data-toggle {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.brush-data-toggle::after {
+  content: "";
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid #6f6f6f;
+  border-bottom: 1px solid #6f6f6f;
+  transform: translateY(2px) rotate(-135deg);
+  transform-origin: 50% 50%;
+  margin-top: -1px;
+}
+
+.brush-data-toggle.is-collapsed::after {
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.brush-data-toggle:focus-visible {
+  outline: 1px solid #000;
+  outline-offset: 2px;
+}
+
 .slider-toggle-label {
   display: inline-flex;
   align-items: center;
@@ -252,17 +290,21 @@ input {
   height: 5px;
   border-right: 1px solid #6f6f6f;
   border-bottom: 1px solid #6f6f6f;
-  transform: rotate(45deg);
+  transform: translateY(2px) rotate(-135deg);
   transform-origin: 50% 50%;
   margin-top: -1px;
 }
 
-.control-group.is-slider-collapsed .slider-toggle-label::after {
-  transform: rotate(-45deg);
+.is-slider-collapsed .slider-toggle-label::after {
+  transform: translateY(-1px) rotate(45deg);
 }
 
-.control-group.is-slider-collapsed > input[type="range"],
-.control-group.is-slider-collapsed > .value-text {
+.is-slider-collapsed > input[type="range"],
+.is-slider-collapsed > .value-text {
+  display: none;
+}
+
+#sizeScaleGroup.is-slider-collapsed + #consistentControlGroup {
   display: none;
 }
 
@@ -408,6 +450,12 @@ input {
   background: #fff;
   flex: 0 0 auto;
   transform: translateY(-3px);
+  cursor: grab;
+  touch-action: none;
+}
+
+#rotationIndicator.is-dragging {
+  cursor: grabbing;
 }
 
 #rotationNeedle {
@@ -451,12 +499,43 @@ input {
   justify-content: flex-start;
 }
 
-#dropZonePrompt {
+#dropZoneHeader {
   width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  gap: 4px;
+  align-items: stretch;
+}
+
+#dropZoneHeader.no-unload {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#dropZonePrompt {
+  width: auto;
   border-radius: 0;
   padding: 8px 10px;
   cursor: pointer;
   user-select: none;
+}
+
+#unloadBrushDataButton {
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid #d9d9d9;
+  border-radius: 0;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 12px;
+}
+
+#unloadBrushDataButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 #dropZonePrompt:focus-visible {
@@ -469,6 +548,11 @@ input {
   background: #f8f8f8;
   font-size: 11px;
   padding: 6px 8px;
+}
+
+#dropZone.has-gallery #unloadBrushDataButton {
+  background: #f8f8f8;
+  font-size: 11px;
 }
 
 #brushGallery {
@@ -525,6 +609,7 @@ input {
   border: 1px solid #ececec;
   border-radius: 0;
   background: #f7f7f7;
+  cursor: pointer;
 }
 
 .brush-name {
@@ -653,6 +738,11 @@ input[type="range"] {
   appearance: none;
   background: transparent;
   height: 16px;
+  cursor: grab;
+}
+
+input[type="range"]:active {
+  cursor: grabbing;
 }
 
 input[type="range"]::-webkit-slider-runnable-track {
@@ -668,6 +758,11 @@ input[type="range"]::-webkit-slider-thumb {
   border: 0;
   border-radius: 0;
   background: #000;
+  cursor: grab;
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+  cursor: grabbing;
 }
 
 input[type="range"]::-moz-range-track {
@@ -687,10 +782,20 @@ input[type="range"]::-moz-range-thumb {
   border: 0;
   border-radius: 0;
   background: #000;
+  cursor: grab;
+}
+
+input[type="range"]:active::-moz-range-thumb {
+  cursor: grabbing;
 }
 
 input[type="range"]:disabled {
   opacity: 0.45;
+  cursor: not-allowed;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb,
+input[type="range"]:disabled::-moz-range-thumb {
   cursor: not-allowed;
 }
 
@@ -750,12 +855,28 @@ input[type="range"] + .value-text {
 
 #historyActions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+#historyActions > button {
+  min-width: 0;
+  padding: 6px 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+#undoButton {
+  grid-column: 1;
+}
+
+#redoButton {
+  grid-column: 2;
 }
 
 #clearButton {
-  margin-top: 6px;
+  grid-column: 3;
+  margin-top: 0;
 }
 
 #undoButton:disabled,
@@ -1118,7 +1239,7 @@ input[type="range"] + .value-text {
 
 #exportScaleButtons {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 4px;
 }
 

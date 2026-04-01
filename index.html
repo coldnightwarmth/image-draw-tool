@@ -37,10 +37,21 @@
     </button>
 
     <div class="control-group">
-      <label for="brushInput" class="control-label">brush data</label>
+      <button
+        id="brushDataToggleButton"
+        type="button"
+        class="control-label brush-data-toggle"
+        aria-expanded="true"
+        aria-label="Hide brush data gallery"
+      >brush data</button>
       <div id="dropZone" aria-controls="brushInput">
-        <div id="dropZonePrompt" role="button" tabindex="0" aria-controls="brushInput">
-          Drop folder/files here or click to load
+        <div id="dropZoneHeader">
+          <div id="dropZonePrompt" role="button" tabindex="0" aria-controls="brushInput">
+            Drop folder/files here or click to load
+          </div>
+          <button id="unloadBrushDataButton" type="button" aria-label="Unload brush data" title="Unload brush data" disabled>
+            &#10005;
+          </button>
         </div>
         <div id="brushGallery" hidden></div>
       </div>
@@ -90,7 +101,7 @@
       <p class="value-text"><span id="sizeValue">100</span>%</p>
     </div>
 
-    <div class="control-group">
+    <div class="control-group" id="consistentControlGroup">
       <div class="toggle-row">
         <label for="consistentToggle" class="control-label inline-label">consistent?</label>
         <label class="ios-switch" for="consistentToggle">
@@ -101,8 +112,7 @@
       <div id="consistentSizeGroup" hidden>
         <label
           for="consistentSizeSlider"
-          class="control-label slider-toggle-label"
-          data-slider-toggle-target="consistentSizeGroup"
+          class="control-label"
         >size</label>
         <input id="consistentSizeSlider" type="range" min="8" max="777" value="96" step="1" disabled>
         <p class="value-text"><span id="consistentSizeValue">96</span>px</p>
@@ -142,8 +152,10 @@
         </button>
       </div>
       <div id="tintPopover" hidden>
-        <label for="tintColorInput" class="control-label">color</label>
-        <input id="tintColorInput" type="color" value="#ffffff">
+        <div id="tintColorField">
+          <label for="tintColorInput" class="control-label">color</label>
+          <input id="tintColorInput" type="color" value="#ffffff">
+        </div>
         <label for="tintAmountSlider" class="control-label">amount</label>
         <input id="tintAmountSlider" type="range" min="0" max="100" value="0" step="1">
         <p class="value-text"><span id="tintAmountValue">0</span>%</p>
@@ -167,8 +179,8 @@
     <div id="historyActions">
       <button id="undoButton" type="button" disabled>Undo</button>
       <button id="redoButton" type="button" disabled>Redo</button>
+      <button id="clearButton" type="button" disabled>Clear</button>
     </div>
-    <button id="clearButton" type="button" disabled>Clear</button>
     <div id="exportActions">
       <button id="exportButton" type="button" disabled>Export</button>
       <button id="exportCancelButton" type="button" aria-label="Cancel export" hidden>&#10005;</button>
@@ -233,6 +245,7 @@
     <div id="exportMeta" aria-hidden="true">
       <p id="exportResolutionText">0x0px</p>
       <div id="exportScaleButtons" role="group" aria-label="Export scale">
+        <button type="button" class="export-scale-button" data-scale="5">5%</button>
         <button type="button" class="export-scale-button" data-scale="10">10%</button>
         <button type="button" class="export-scale-button" data-scale="25">25%</button>
         <button type="button" class="export-scale-button" data-scale="50">50%</button>
