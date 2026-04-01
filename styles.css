@@ -8,6 +8,7 @@
   --soft-yellow: #e8dc87;
   --soft-yellow-border: #c9bb5d;
   --soft-yellow-text: #4b4100;
+  --canvas-bg: #ffffff;
 }
 
 * {
@@ -32,7 +33,7 @@ body {
   font-family: "VT323", "Courier New", "Lucida Console", monospace;
   color: var(--text);
   overflow: hidden;
-  background: #fff;
+  background: var(--canvas-bg);
 }
 
 button,
@@ -43,7 +44,7 @@ input {
 #viewport {
   position: fixed;
   inset: 0;
-  background: #fff;
+  background: var(--canvas-bg);
   cursor: crosshair;
   touch-action: none;
   user-select: none;
@@ -183,6 +184,53 @@ input {
   opacity: 0.78;
 }
 
+#sidebarOptionsButton {
+  position: absolute;
+  top: 6px;
+  right: 26px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #d0d0d0;
+  background: #f2f2f2;
+  border-radius: 0;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.78;
+}
+
+#sidebarOptionsButton.is-active {
+  background: #e6e6e6;
+}
+
+.options-icon {
+  position: relative;
+  display: block;
+  width: 2px;
+  height: 2px;
+  background: #6f6f6f;
+}
+
+.options-icon::before,
+.options-icon::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 2px;
+  background: #6f6f6f;
+}
+
+.options-icon::before {
+  left: -4px;
+}
+
+.options-icon::after {
+  left: 4px;
+}
+
 .chevron-icon {
   display: block;
   width: 5px;
@@ -213,6 +261,41 @@ input {
   border-color: transparent;
   background: transparent;
   opacity: 0.62;
+}
+
+#settingsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+#settingsPanel[hidden] {
+  display: none;
+}
+
+#settingsTitle {
+  margin: 0;
+  font-size: 16px;
+  text-transform: lowercase;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+#canvasBgColorInput {
+  width: 30px;
+  height: 18px;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  padding: 0;
+  cursor: pointer;
 }
 
 .control-group {
@@ -892,6 +975,23 @@ input[type="range"] + .value-text {
   margin-top: 0;
 }
 
+#exportButton.is-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#exportButton.is-loading::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border: 1px solid #111;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: export-button-spin 0.72s linear infinite;
+}
+
 #exportActions {
   margin-top: 6px;
 }
@@ -916,6 +1016,12 @@ input[type="range"] + .value-text {
 
 #exportCancelButton[hidden] {
   display: none;
+}
+
+@keyframes export-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 #clearConfirmModal {

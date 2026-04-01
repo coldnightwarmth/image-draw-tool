@@ -11,6 +11,9 @@ const SAVE_DEBOUNCE_MS = 140;
 const viewport = document.getElementById("viewport");
 const world = document.getElementById("world");
 const controlsPanel = document.getElementById("controls");
+const controlsMain = document.getElementById("controlsMain");
+const settingsPanel = document.getElementById("settingsPanel");
+const sidebarOptionsButton = document.getElementById("sidebarOptionsButton");
 const sidebarToggleButton = document.getElementById("sidebarToggleButton");
 const brushDataToggleButton = document.getElementById("brushDataToggleButton");
 const dropZone = document.getElementById("dropZone");
@@ -41,6 +44,9 @@ const tintColorField = document.getElementById("tintColorField");
 const tintColorInput = document.getElementById("tintColorInput");
 const tintAmountSlider = document.getElementById("tintAmountSlider");
 const tintAmountValue = document.getElementById("tintAmountValue");
+const canvasBgColorLabel = document.getElementById("canvasBgColorLabel");
+const canvasBgColorInput = document.getElementById("canvasBgColorInput");
+const exportBackgroundToggle = document.getElementById("exportBackgroundToggle");
 const filterDefs = document.getElementById("filterDefs");
 const opacitySlider = document.getElementById("opacitySlider");
 const opacityValue = document.getElementById("opacityValue");
@@ -105,6 +111,8 @@ const GIF_JS_WORKER_URL = "gif.worker.js";
 const GIFUCT_MODULE_URL = "./gifuct-js.bundle.mjs";
 const EXPORT_SCALE_PRESETS = [5, 10, 25, 50, 100, 200];
 const BRUSH_CROP_MIN_SIZE = 4;
+const GIF_TRANSPARENT_MATTE = "#00ff01";
+const GIF_TRANSPARENT_MATTE_HEX = 0x00ff01;
 const STAMP_INDEX_CELL_SIZE = 256;
 const ERASER_SAMPLE_GRID_SIZE = 5;
 const ERASER_PATH_STEP_FACTOR = 0.6;
@@ -131,7 +139,10 @@ const state = {
   saveTimerId: null,
   soloBrushId: null,
   sidebarCollapsed: false,
+  sidebarTab: "main",
   brushGalleryCollapsed: false,
+  canvasBackgroundColor: "#ffffff",
+  exportBackgroundEnabled: true,
   eraseMode: false,
   pointerInViewport: false,
   lastPointerClientX: 0,
@@ -169,8 +180,10 @@ let sessionTabIdCache = null;
 let gifLibraryPromise = null;
 let gifuctModulePromise = null;
 let tintNativePickerOpen = false;
+let canvasBgNativePickerOpen = false;
 let suppressTintPickerClick = false;
 let suppressNextTintInputClick = false;
+let suppressNextCanvasBgInputClick = false;
 const tintFilterCache = new Map();
 const NO_TINT_SETTINGS = { color: "#ffffff", amountPercent: 0 };
 
@@ -445,6 +458,21 @@ function openNativeTintPicker() {
   tintColorInput.focus();
   tintColorInput.click();
   return true;
+}
+
+function isCanvasBgPickerActive() {
+  return Boolean(
+    canvasBgNativePickerOpen ||
+      (canvasBgColorInput && document.activeElement === canvasBgColorInput)
+  );
+}
+
+function closeCanvasBgPicker() {
+  if (!canvasBgColorInput) {
+    return;
+  }
+  canvasBgNativePickerOpen = false;
+  canvasBgColorInput.blur();
 }
 
 function setTintPopoverOpen(nextOpen) {
@@ -1393,6 +1421,45 @@ function updateCursorTrailAtClientPoint(clientX, clientY) {
 
   state.cursorTrailLastWorldX = cursorX;
   state.cursorTrailLastWorldY = cursorY;
+}
+
+function applyCanvasBackgroundColor(nextColor) {
+  const normalized = normalizeHexColor(nextColor, "#ffffff");
+  state.canvasBackgroundColor = normalized;
+  document.documentElement.style.setProperty("--canvas-bg", normalized);
+  if (canvasBgColorInput && canvasBgColorInput.value !== normalized) {
+    canvasBgColorInput.value = normalized;
+  }
+}
+
+function updateSettingsPanelUI() {
+  if (canvasBgColorInput) {
+    canvasBgColorInput.value = normalizeHexColor(state.canvasBackgroundColor, "#ffffff");
+  }
+  if (exportBackgroundToggle) {
+    exportBackgroundToggle.checked = Boolean(state.exportBackgroundEnabled);
+  }
+}
+
+function updateSidebarTabUI() {
+  const isSettingsTab = state.sidebarTab === "settings";
+  if (controlsMain) {
+    controlsMain.hidden = isSettingsTab;
+  }
+  if (settingsPanel) {
+    settingsPanel.hidden = !isSettingsTab;
+  }
+  if (sidebarOptionsButton) {
+    sidebarOptionsButton.classList.toggle("is-active", isSettingsTab);
+    sidebarOptionsButton.setAttribute("aria-pressed", String(isSettingsTab));
+    sidebarOptionsButton.setAttribute(
+      "aria-label",
+      isSettingsTab ? "Show drawing controls" : "Show settings"
+    );
+  }
+  if (isSettingsTab) {
+    setTintPopoverOpen(false);
+  }
 }
 
 function updateSidebarVisibilityUI() {
@@ -2599,7 +2666,10 @@ function buildSessionSnapshot() {
       cursorTrailEnabled: cursorTrailToggle.checked,
       cursorTrailCount: parseNumericInputValue(cursorTrailCountSlider, 24),
       sidebarCollapsed: state.sidebarCollapsed,
+      sidebarTab: state.sidebarTab,
       brushGalleryCollapsed: state.brushGalleryCollapsed,
+      canvasBackgroundColor: normalizeHexColor(state.canvasBackgroundColor, "#ffffff"),
+      exportBackgroundEnabled: state.exportBackgroundEnabled !== false,
       collapsedSliderGroups: getCollapsedSliderGroupSnapshot()
     },
     brushes: state.brushes.map((brush) => ({
@@ -2877,7 +2947,10 @@ async function restoreSessionState() {
     cursorTrailToggle.checked = Boolean(controls.cursorTrailEnabled);
     setInputNumericValue(cursorTrailCountSlider, controls.cursorTrailCount);
     state.sidebarCollapsed = Boolean(controls.sidebarCollapsed);
+    state.sidebarTab = controls.sidebarTab === "settings" ? "settings" : "main";
     state.brushGalleryCollapsed = Boolean(controls.brushGalleryCollapsed);
+    state.exportBackgroundEnabled = controls.exportBackgroundEnabled !== false;
+    state.canvasBackgroundColor = normalizeHexColor(controls.canvasBackgroundColor, "#ffffff");
     applyCollapsedSliderGroupSnapshot(controls.collapsedSliderGroups);
 
     const camera = snapshot.camera || {};
@@ -2900,6 +2973,9 @@ async function restoreSessionState() {
     updateCursorTrailUI();
     updateRotationIndicator();
     updateSidebarVisibilityUI();
+    updateSidebarTabUI();
+    updateSettingsPanelUI();
+    applyCanvasBackgroundColor(state.canvasBackgroundColor);
     updateEraseModeUI();
     updateUndoState();
     updateBrushStatus();
@@ -3723,19 +3799,25 @@ function drawExportFrame(
   outputHeight,
   entries,
   gifAnimationMap = null,
-  timeMs = 0
+  timeMs = 0,
+  options = {}
 ) {
+  const includeBackground = options.includeBackground !== false;
+  const backgroundColor = normalizeHexColor(options.backgroundColor, "#ffffff");
+  const matteColor = typeof options.matteColor === "string" ? options.matteColor : "";
   const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
   const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
   const scaleX = outputWidth / selectionWidth;
   const scaleY = outputHeight / selectionHeight;
 
   ctx.clearRect(0, 0, outputWidth, outputHeight);
-  ctx.save();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, outputWidth, outputHeight);
-  ctx.restore();
+  if (includeBackground || matteColor) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = includeBackground ? backgroundColor : matteColor;
+    ctx.fillRect(0, 0, outputWidth, outputHeight);
+    ctx.restore();
+  }
   for (const entry of entries) {
     let frameSource = entry.element;
     if (gifAnimationMap && isGifUrl(entry.sourceUrl)) {
@@ -3773,7 +3855,7 @@ function canvasToPngBlob(canvas) {
   });
 }
 
-function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries) {
+function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = outputWidth;
   canvas.height = outputHeight;
@@ -3781,32 +3863,50 @@ function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries
   if (!ctx) {
     throw new Error("Could not create export canvas.");
   }
-  drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries, null, 0);
+  drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries, null, 0, options);
   return canvasToPngBlob(canvas);
 }
 
-async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries) {
+async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}) {
   await loadGifLibrary();
   if (typeof window.GIF !== "function") {
     throw new Error("GIF encoder is unavailable.");
   }
 
+  const includeBackground = options.includeBackground !== false;
+  const backgroundColor = normalizeHexColor(options.backgroundColor, "#ffffff");
+  const frameOptions = {
+    ...options,
+    includeBackground,
+    matteColor: includeBackground ? "" : GIF_TRANSPARENT_MATTE
+  };
   const frameCount = Math.max(1, Math.round(EXPORT_GIF_DURATION_MS / EXPORT_GIF_FRAME_DELAY_MS));
   const frameCanvas = document.createElement("canvas");
   frameCanvas.width = outputWidth;
   frameCanvas.height = outputHeight;
-  const frameCtx = frameCanvas.getContext("2d", { alpha: true });
+  const frameCtx = frameCanvas.getContext("2d", { alpha: !includeBackground });
   if (!frameCtx) {
     throw new Error("Could not create GIF frame canvas.");
+  }
+  if (includeBackground) {
+    frameCtx.globalCompositeOperation = "copy";
+    frameCtx.fillStyle = backgroundColor;
+    frameCtx.fillRect(0, 0, outputWidth, outputHeight);
+    frameCtx.globalCompositeOperation = "source-over";
   }
   const gifAnimationMap = await buildGifAnimationMap(entries);
 
   const gif = new window.GIF({
     workers: 2,
-    quality: 10,
+    quality: 1,
     width: outputWidth,
     height: outputHeight,
-    workerScript: GIF_JS_WORKER_URL
+    repeat: 0,
+    dither: false,
+    background: includeBackground ? backgroundColor : GIF_TRANSPARENT_MATTE,
+    globalPalette: includeBackground ? true : false,
+    workerScript: GIF_JS_WORKER_URL,
+    ...(includeBackground ? {} : { transparent: GIF_TRANSPARENT_MATTE_HEX })
   });
 
   for (let index = 0; index < frameCount; index += 1) {
@@ -3818,9 +3918,14 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
       outputHeight,
       entries,
       gifAnimationMap,
-      elapsedMs
+      elapsedMs,
+      frameOptions
     );
-    gif.addFrame(frameCanvas, { copy: true, delay: EXPORT_GIF_FRAME_DELAY_MS });
+    gif.addFrame(frameCanvas, {
+      copy: true,
+      delay: EXPORT_GIF_FRAME_DELAY_MS,
+      dispose: includeBackground ? 2 : 1
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -3851,14 +3956,19 @@ async function confirmExport() {
   const entries = collectExportStampEntries(normalized);
   const hasGif = hasGifStampOnCanvas();
   const timestamp = Date.now();
+  const exportOptions = {
+    includeBackground: Boolean(state.exportBackgroundEnabled),
+    backgroundColor: state.canvasBackgroundColor
+  };
 
   exportButton.disabled = true;
   exportCancelButton.disabled = true;
-  exportButton.textContent = "Exporting...";
+  exportButton.classList.add("is-loading");
+  exportButton.textContent = "Exporting";
   try {
     const blob = hasGif
-      ? await renderExportGifBlob(normalized, resolution.width, resolution.height, entries)
-      : await renderExportPngBlob(normalized, resolution.width, resolution.height, entries);
+      ? await renderExportGifBlob(normalized, resolution.width, resolution.height, entries, exportOptions)
+      : await renderExportPngBlob(normalized, resolution.width, resolution.height, entries, exportOptions);
     const extension = hasGif ? "gif" : "png";
 
     const filename = `image-draw-export-${timestamp}.${extension}`;
@@ -3869,6 +3979,7 @@ async function confirmExport() {
     exportButton.disabled = false;
     exportCancelButton.disabled = false;
   } finally {
+    exportButton.classList.remove("is-loading");
     updateUndoState();
     updateExportModeUI();
   }
@@ -4667,9 +4778,65 @@ cursorTrailCountSlider.addEventListener("input", () => {
   enforceCursorTrailLimit();
   scheduleSessionSave();
 });
+sidebarOptionsButton.addEventListener("click", () => {
+  state.sidebarTab = state.sidebarTab === "settings" ? "main" : "settings";
+  updateSidebarTabUI();
+  scheduleSessionSave();
+});
 sidebarToggleButton.addEventListener("click", () => {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   updateSidebarVisibilityUI();
+  scheduleSessionSave();
+});
+canvasBgColorInput.addEventListener("pointerdown", (event) => {
+  event.stopPropagation();
+  if (!isCanvasBgPickerActive()) {
+    return;
+  }
+  event.preventDefault();
+  suppressNextCanvasBgInputClick = true;
+  closeCanvasBgPicker();
+});
+canvasBgColorInput.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (!suppressNextCanvasBgInputClick) {
+    return;
+  }
+  event.preventDefault();
+  suppressNextCanvasBgInputClick = false;
+});
+if (canvasBgColorLabel) {
+  canvasBgColorLabel.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    if (!isCanvasBgPickerActive()) {
+      return;
+    }
+    event.preventDefault();
+    suppressNextCanvasBgInputClick = true;
+    closeCanvasBgPicker();
+  });
+  canvasBgColorLabel.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!suppressNextCanvasBgInputClick) {
+      return;
+    }
+    event.preventDefault();
+    suppressNextCanvasBgInputClick = false;
+  });
+}
+canvasBgColorInput.addEventListener("focus", () => {
+  canvasBgNativePickerOpen = true;
+});
+canvasBgColorInput.addEventListener("blur", () => {
+  canvasBgNativePickerOpen = false;
+  suppressNextCanvasBgInputClick = false;
+});
+canvasBgColorInput.addEventListener("input", () => {
+  applyCanvasBackgroundColor(canvasBgColorInput.value);
+  scheduleSessionSave();
+});
+exportBackgroundToggle.addEventListener("change", () => {
+  state.exportBackgroundEnabled = exportBackgroundToggle.checked;
   scheduleSessionSave();
 });
 eraseModeButton.addEventListener("click", () => {
@@ -4805,6 +4972,8 @@ window.addEventListener("blur", () => {
   }
   state.ctrlOrMetaHeld = false;
   setTintPopoverOpen(false);
+  closeCanvasBgPicker();
+  suppressNextCanvasBgInputClick = false;
   hideShortcutPreview(true);
 });
 
@@ -4874,6 +5043,9 @@ async function initializeApp() {
   updateCursorTrailUI();
   updateRotationIndicator();
   updateSidebarVisibilityUI();
+  updateSidebarTabUI();
+  updateSettingsPanelUI();
+  applyCanvasBackgroundColor(state.canvasBackgroundColor);
   updateEraseModeUI();
   updateUndoState();
   updateBrushStatus();

@@ -32,10 +32,14 @@
   </svg>
 
   <aside id="controls" aria-label="Drawing controls">
+    <button id="sidebarOptionsButton" type="button" aria-pressed="false" aria-label="Show settings">
+      <span class="options-icon" aria-hidden="true"></span>
+    </button>
     <button id="sidebarToggleButton" type="button" aria-expanded="true" aria-label="Hide sidebar contents">
       <span class="chevron-icon" aria-hidden="true"></span>
     </button>
 
+    <div id="controlsMain">
     <div class="control-group">
       <button
         id="brushDataToggleButton"
@@ -185,6 +189,24 @@
       <button id="exportButton" type="button" disabled>Export</button>
       <button id="exportCancelButton" type="button" aria-label="Cancel export" hidden>&#10005;</button>
     </div>
+    </div>
+
+    <section id="settingsPanel" hidden aria-label="Settings">
+      <h2 id="settingsTitle">settings</h2>
+
+      <div class="settings-row">
+        <label id="canvasBgColorLabel" for="canvasBgColorInput" class="control-label inline-label">bkg color</label>
+        <input id="canvasBgColorInput" type="color" value="#ffffff" aria-label="Canvas background color">
+      </div>
+
+      <div class="settings-row">
+        <label for="exportBackgroundToggle" class="control-label inline-label">export bkg?</label>
+        <label class="ios-switch" for="exportBackgroundToggle">
+          <input id="exportBackgroundToggle" type="checkbox" checked>
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+    </section>
   </aside>
 
   <div id="clearConfirmModal" aria-hidden="true">
