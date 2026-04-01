@@ -78,6 +78,7 @@ const GIF_JS_LIBRARY_URL = "gif.js";
 const GIF_JS_WORKER_URL = "gif.worker.js";
 const GIFUCT_MODULE_URL = "./gifuct-js.bundle.mjs";
 const EXPORT_SCALE_PRESETS = [10, 25, 50, 100, 200];
+const BRUSH_CROP_MIN_SIZE = 4;
 
 const state = {
   brushes: [],
@@ -258,6 +259,547 @@ async function readImageBytes(url) {
   }
   const buffer = await response.arrayBuffer();
   return new Uint8Array(buffer);
+}
+
+function getBrushOriginalWidth(brush) {
+  return Math.max(1, Number(brush?.originalWidth) || Number(brush?.width) || 1);
+}
+
+function getBrushOriginalHeight(brush) {
+  return Math.max(1, Number(brush?.originalHeight) || Number(brush?.height) || 1);
+}
+
+function getBrushOriginalUrl(brush) {
+  if (typeof brush?.originalUrl === "string" && brush.originalUrl) {
+    return brush.originalUrl;
+  }
+  return typeof brush?.url === "string" ? brush.url : "";
+}
+
+function normalizeBrushCropRect(rect, fullWidth, fullHeight) {
+  const widthLimit = Math.max(BRUSH_CROP_MIN_SIZE, Math.round(fullWidth));
+  const heightLimit = Math.max(BRUSH_CROP_MIN_SIZE, Math.round(fullHeight));
+  let x = Number(rect?.x);
+  let y = Number(rect?.y);
+  let width = Number(rect?.width);
+  let height = Number(rect?.height);
+
+  if (!Number.isFinite(x)) {
+    x = 0;
+  }
+  if (!Number.isFinite(y)) {
+    y = 0;
+  }
+  if (!Number.isFinite(width)) {
+    width = widthLimit;
+  }
+  if (!Number.isFinite(height)) {
+    height = heightLimit;
+  }
+
+  width = Math.max(BRUSH_CROP_MIN_SIZE, Math.min(width, widthLimit));
+  height = Math.max(BRUSH_CROP_MIN_SIZE, Math.min(height, heightLimit));
+  x = clamp(x, 0, Math.max(0, widthLimit - width));
+  y = clamp(y, 0, Math.max(0, heightLimit - height));
+
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height)
+  };
+}
+
+function getBrushCurrentCropRect(brush) {
+  const fullWidth = getBrushOriginalWidth(brush);
+  const fullHeight = getBrushOriginalHeight(brush);
+  if (
+    brush?.cropRect &&
+    Number.isFinite(Number(brush.cropRect.width)) &&
+    Number.isFinite(Number(brush.cropRect.height))
+  ) {
+    return normalizeBrushCropRect(brush.cropRect, fullWidth, fullHeight);
+  }
+  return {
+    x: 0,
+    y: 0,
+    width: fullWidth,
+    height: fullHeight
+  };
+}
+
+function isFullBrushCropRect(rect, fullWidth, fullHeight) {
+  const normalized = normalizeBrushCropRect(rect, fullWidth, fullHeight);
+  return (
+    normalized.x <= 0 &&
+    normalized.y <= 0 &&
+    normalized.width >= fullWidth &&
+    normalized.height >= fullHeight
+  );
+}
+
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not convert cropped image."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function cropStaticImageToDataUrl(sourceUrl, cropRect) {
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not read source image for crop."));
+    img.src = sourceUrl;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(cropRect.width));
+  canvas.height = Math.max(1, Math.round(cropRect.height));
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) {
+    throw new Error("Could not create crop canvas.");
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(
+    image,
+    cropRect.x,
+    cropRect.y,
+    cropRect.width,
+    cropRect.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  return canvas.toDataURL("image/png");
+}
+
+async function cropAnimatedGifToDataUrl(sourceUrl, cropRect) {
+  await loadGifLibrary();
+  const animation = await decodeGifAnimation(sourceUrl);
+
+  const gif = new window.GIF({
+    workers: 2,
+    quality: 10,
+    width: cropRect.width,
+    height: cropRect.height,
+    workerScript: GIF_JS_WORKER_URL
+  });
+
+  const frameCanvas = document.createElement("canvas");
+  frameCanvas.width = cropRect.width;
+  frameCanvas.height = cropRect.height;
+  const frameCtx = frameCanvas.getContext("2d", { alpha: true });
+  if (!frameCtx) {
+    throw new Error("Could not create GIF crop frame.");
+  }
+
+  const durations = Array.isArray(animation.durations) ? animation.durations : [];
+  const sourceFrames = Array.isArray(animation.frames) ? animation.frames : [];
+  for (let index = 0; index < sourceFrames.length; index += 1) {
+    const sourceFrame = sourceFrames[index];
+    if (!sourceFrame) {
+      continue;
+    }
+    frameCtx.clearRect(0, 0, cropRect.width, cropRect.height);
+    frameCtx.drawImage(
+      sourceFrame,
+      cropRect.x,
+      cropRect.y,
+      cropRect.width,
+      cropRect.height,
+      0,
+      0,
+      cropRect.width,
+      cropRect.height
+    );
+    const delay = Math.max(
+      20,
+      Number.isFinite(Number(durations[index])) ? Number(durations[index]) : EXPORT_GIF_FRAME_DELAY_MS
+    );
+    gif.addFrame(frameCanvas, { copy: true, delay });
+  }
+
+  const blob = await new Promise((resolve, reject) => {
+    gif.on("finished", (finishedBlob) => resolve(finishedBlob));
+    gif.on("abort", () => reject(new Error("GIF crop encode aborted.")));
+    gif.render();
+  });
+  return readBlobAsDataUrl(blob);
+}
+
+async function applyCropToBrush(brushId, cropRect) {
+  const brush = findBrushById(brushId);
+  if (!brush) {
+    return;
+  }
+
+  const fullWidth = getBrushOriginalWidth(brush);
+  const fullHeight = getBrushOriginalHeight(brush);
+  const normalizedRect = normalizeBrushCropRect(cropRect, fullWidth, fullHeight);
+
+  const sourceUrl = getBrushOriginalUrl(brush);
+  if (!sourceUrl) {
+    return;
+  }
+
+  if (isFullBrushCropRect(normalizedRect, fullWidth, fullHeight)) {
+    brush.url = sourceUrl;
+    brush.width = fullWidth;
+    brush.height = fullHeight;
+    brush.cropRect = null;
+    renderBrushGallery();
+    updateBrushStatus();
+    scheduleSessionSave();
+    return;
+  }
+
+  const isGifBrush =
+    isGifUrl(sourceUrl) ||
+    /\.gif$/i.test(String(brush.name || ""));
+  const croppedUrl = isGifBrush
+    ? await cropAnimatedGifToDataUrl(sourceUrl, normalizedRect)
+    : await cropStaticImageToDataUrl(sourceUrl, normalizedRect);
+
+  brush.url = croppedUrl;
+  brush.width = normalizedRect.width;
+  brush.height = normalizedRect.height;
+  brush.cropRect = normalizedRect;
+  renderBrushGallery();
+  updateBrushStatus();
+  scheduleSessionSave();
+}
+
+function buildBrushCropPopupHtml(payload) {
+  const payloadJson = JSON.stringify(payload).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brush Crop</title>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: #f7f7f7;
+      color: #111;
+      font-family: "VT323", "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    .root {
+      min-height: 100%;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      gap: 10px;
+      padding: 12px;
+    }
+    .stage-wrap {
+      display: grid;
+      place-items: center;
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid #d8d8d8;
+      background: #fff;
+    }
+    .stage {
+      position: relative;
+      display: inline-block;
+      line-height: 0;
+      max-width: calc(100vw - 44px);
+      max-height: calc(100vh - 140px);
+    }
+    #cropImage {
+      display: block;
+      max-width: calc(100vw - 44px);
+      max-height: calc(100vh - 140px);
+      width: auto;
+      height: auto;
+      image-rendering: auto;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: none;
+    }
+    .shade {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.42);
+      pointer-events: none;
+    }
+    #selection {
+      position: absolute;
+      border: 1px dashed #111;
+      background: transparent;
+      cursor: move;
+    }
+    .edge {
+      position: absolute;
+      background: transparent;
+    }
+    .edge[data-edge="top"] {
+      top: -7px; left: 0; width: 100%; height: 14px; cursor: ns-resize;
+    }
+    .edge[data-edge="bottom"] {
+      bottom: -7px; left: 0; width: 100%; height: 14px; cursor: ns-resize;
+    }
+    .edge[data-edge="left"] {
+      left: -7px; top: 0; width: 14px; height: 100%; cursor: ew-resize;
+    }
+    .edge[data-edge="right"] {
+      right: -7px; top: 0; width: 14px; height: 100%; cursor: ew-resize;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    button {
+      border: 1px solid #bcbcbc;
+      border-radius: 0;
+      background: #fff;
+      color: #111;
+      padding: 8px 10px;
+      font-size: 18px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <img id="cropImage" alt="" draggable="false">
+        <div class="shade" id="shadeTop"></div>
+        <div class="shade" id="shadeRight"></div>
+        <div class="shade" id="shadeBottom"></div>
+        <div class="shade" id="shadeLeft"></div>
+        <div id="selection">
+          <div class="edge" data-edge="top"></div>
+          <div class="edge" data-edge="right"></div>
+          <div class="edge" data-edge="bottom"></div>
+          <div class="edge" data-edge="left"></div>
+        </div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="confirmButton" type="button">Confirm</button>
+      <button id="cancelButton" type="button">Cancel</button>
+    </div>
+  </div>
+  <script>
+    const payload = ${payloadJson};
+    const MIN_SIZE = ${BRUSH_CROP_MIN_SIZE};
+    const stage = document.getElementById("stage");
+    const cropImage = document.getElementById("cropImage");
+    const selection = document.getElementById("selection");
+    const shadeTop = document.getElementById("shadeTop");
+    const shadeRight = document.getElementById("shadeRight");
+    const shadeBottom = document.getElementById("shadeBottom");
+    const shadeLeft = document.getElementById("shadeLeft");
+    const confirmButton = document.getElementById("confirmButton");
+    const cancelButton = document.getElementById("cancelButton");
+
+    let crop = {
+      x: Number(payload.cropRect.x) || 0,
+      y: Number(payload.cropRect.y) || 0,
+      width: Number(payload.cropRect.width) || Number(payload.imageWidth) || 1,
+      height: Number(payload.cropRect.height) || Number(payload.imageHeight) || 1
+    };
+    let drag = null;
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function normalizeCrop(rect) {
+      const fullWidth = Math.max(1, Number(payload.imageWidth) || 1);
+      const fullHeight = Math.max(1, Number(payload.imageHeight) || 1);
+      let x = Number(rect.x);
+      let y = Number(rect.y);
+      let width = Number(rect.width);
+      let height = Number(rect.height);
+      if (!Number.isFinite(x)) x = 0;
+      if (!Number.isFinite(y)) y = 0;
+      if (!Number.isFinite(width)) width = fullWidth;
+      if (!Number.isFinite(height)) height = fullHeight;
+      width = Math.max(MIN_SIZE, Math.min(width, fullWidth));
+      height = Math.max(MIN_SIZE, Math.min(height, fullHeight));
+      x = clamp(x, 0, Math.max(0, fullWidth - width));
+      y = clamp(y, 0, Math.max(0, fullHeight - height));
+      return {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(width),
+        height: Math.round(height)
+      };
+    }
+
+    function getDisplayScale() {
+      const imageRect = cropImage.getBoundingClientRect();
+      const fullWidth = Math.max(1, Number(payload.imageWidth) || 1);
+      const fullHeight = Math.max(1, Number(payload.imageHeight) || 1);
+      return {
+        x: imageRect.width / fullWidth,
+        y: imageRect.height / fullHeight
+      };
+    }
+
+    function setRectStyle(element, left, top, width, height) {
+      element.style.left = left + "px";
+      element.style.top = top + "px";
+      element.style.width = Math.max(0, width) + "px";
+      element.style.height = Math.max(0, height) + "px";
+    }
+
+    function render() {
+      crop = normalizeCrop(crop);
+      const imageRect = cropImage.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const scale = getDisplayScale();
+
+      const left = crop.x * scale.x;
+      const top = crop.y * scale.y;
+      const width = crop.width * scale.x;
+      const height = crop.height * scale.y;
+      const right = left + width;
+      const bottom = top + height;
+
+      setRectStyle(selection, left, top, width, height);
+      setRectStyle(shadeTop, 0, 0, imageRect.width, top);
+      setRectStyle(shadeBottom, 0, bottom, imageRect.width, imageRect.height - bottom);
+      setRectStyle(shadeLeft, 0, top, left, height);
+      setRectStyle(shadeRight, right, top, imageRect.width - right, height);
+    }
+
+    function beginDrag(event, mode, edge) {
+      event.preventDefault();
+      drag = {
+        mode,
+        edge,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startCrop: { ...crop }
+      };
+      selection.setPointerCapture(event.pointerId);
+    }
+
+    function onPointerDown(event) {
+      if (event.button !== 0) return;
+      const edgeNode = event.target.closest(".edge");
+      if (edgeNode) {
+        beginDrag(event, "resize", edgeNode.dataset.edge || "");
+        return;
+      }
+      beginDrag(event, "move", "");
+    }
+
+    function onPointerMove(event) {
+      if (!drag) return;
+      const scale = getDisplayScale();
+      const dx = (event.clientX - drag.startClientX) / Math.max(scale.x, 0.0001);
+      const dy = (event.clientY - drag.startClientY) / Math.max(scale.y, 0.0001);
+      const next = { ...drag.startCrop };
+
+      if (drag.mode === "move") {
+        next.x = drag.startCrop.x + dx;
+        next.y = drag.startCrop.y + dy;
+      } else if (drag.edge === "left") {
+        next.x = drag.startCrop.x + dx;
+        next.width = drag.startCrop.width - dx;
+      } else if (drag.edge === "right") {
+        next.width = drag.startCrop.width + dx;
+      } else if (drag.edge === "top") {
+        next.y = drag.startCrop.y + dy;
+        next.height = drag.startCrop.height - dy;
+      } else if (drag.edge === "bottom") {
+        next.height = drag.startCrop.height + dy;
+      }
+
+      crop = normalizeCrop(next);
+      render();
+    }
+
+    function onPointerUp(event) {
+      if (!drag) return;
+      try {
+        if (selection.hasPointerCapture(event.pointerId)) {
+          selection.releasePointerCapture(event.pointerId);
+        }
+      } catch (error) {}
+      drag = null;
+    }
+
+    confirmButton.addEventListener("click", async () => {
+      confirmButton.disabled = true;
+      cancelButton.disabled = true;
+      try {
+        if (window.opener && typeof window.opener.__applyBrushCropFromPopup === "function") {
+          await window.opener.__applyBrushCropFromPopup({
+            brushId: Number(payload.brushId),
+            cropRect: normalizeCrop(crop)
+          });
+        }
+        window.close();
+      } catch (error) {
+        confirmButton.disabled = false;
+        cancelButton.disabled = false;
+      }
+    });
+
+    cancelButton.addEventListener("click", () => window.close());
+    selection.addEventListener("pointerdown", onPointerDown);
+    selection.addEventListener("pointermove", onPointerMove);
+    selection.addEventListener("pointerup", onPointerUp);
+    selection.addEventListener("pointercancel", onPointerUp);
+    window.addEventListener("resize", render);
+
+    cropImage.addEventListener("load", () => {
+      render();
+    });
+    cropImage.src = payload.imageUrl;
+  </script>
+</body>
+</html>`;
+}
+
+function openBrushCropPopup(brush) {
+  if (!brush) {
+    return;
+  }
+
+  const fullWidth = getBrushOriginalWidth(brush);
+  const fullHeight = getBrushOriginalHeight(brush);
+  const currentCrop = getBrushCurrentCropRect(brush);
+  const imageUrl = getBrushOriginalUrl(brush);
+  if (!imageUrl) {
+    return;
+  }
+
+  const popup = window.open(
+    "",
+    `brush-crop-${brush.id}`,
+    "popup=yes,width=760,height=860,resizable=yes"
+  );
+  if (!popup) {
+    return;
+  }
+
+  const html = buildBrushCropPopupHtml({
+    brushId: brush.id,
+    imageUrl,
+    imageWidth: fullWidth,
+    imageHeight: fullHeight,
+    cropRect: currentCrop
+  });
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+  popup.focus();
 }
 
 function createSessionId() {
@@ -1480,6 +2022,17 @@ function buildSessionSnapshot() {
       name: brush.name,
       width: brush.width,
       height: brush.height,
+      originalUrl: brush.originalUrl || brush.url,
+      originalWidth: brush.originalWidth || brush.width,
+      originalHeight: brush.originalHeight || brush.height,
+      cropRect: brush.cropRect && Number.isFinite(Number(brush.cropRect.width))
+        ? {
+            x: Number(brush.cropRect.x) || 0,
+            y: Number(brush.cropRect.y) || 0,
+            width: Math.max(1, Number(brush.cropRect.width) || brush.width),
+            height: Math.max(1, Number(brush.cropRect.height) || brush.height)
+          }
+        : null,
       enabled: brush.enabled,
       weightMode: brush.weightMode
     })),
@@ -1630,6 +2183,22 @@ async function restoreSessionState() {
         name: String(brush.name || "brush"),
         width: Math.max(1, Number(brush.width) || 1),
         height: Math.max(1, Number(brush.height) || 1),
+        originalUrl: typeof brush.originalUrl === "string" && brush.originalUrl
+          ? brush.originalUrl
+          : brush.url,
+        originalWidth: Math.max(1, Number(brush.originalWidth) || Number(brush.width) || 1),
+        originalHeight: Math.max(1, Number(brush.originalHeight) || Number(brush.height) || 1),
+        cropRect:
+          brush.cropRect &&
+          Number.isFinite(Number(brush.cropRect.width)) &&
+          Number.isFinite(Number(brush.cropRect.height))
+            ? {
+                x: Number(brush.cropRect.x) || 0,
+                y: Number(brush.cropRect.y) || 0,
+                width: Math.max(1, Number(brush.cropRect.width)),
+                height: Math.max(1, Number(brush.cropRect.height))
+              }
+            : null,
         enabled: brush.enabled !== false,
         weightMode: brush.weightMode === "low" || brush.weightMode === "high" ? brush.weightMode : "normal"
       }));
@@ -1867,10 +2436,17 @@ function renderBrushGallery() {
       brush.weightMode === "high",
       "Increase occurrence probability"
     );
+    const cropButton = createBrushActionButton(
+      "crop",
+      "▣",
+      false,
+      "Open crop editor"
+    );
 
     actionRow.appendChild(lowButton);
     actionRow.appendChild(enabledButton);
     actionRow.appendChild(highButton);
+    actionRow.appendChild(cropButton);
     card.appendChild(preview);
     card.appendChild(name);
     card.appendChild(actionRow);
@@ -1929,6 +2505,9 @@ function onBrushGalleryClick(event) {
     if (!brush.enabled && state.soloBrushId === brush.id) {
       state.soloBrushId = null;
     }
+  } else if (action === "crop") {
+    openBrushCropPopup(brush);
+    return;
   } else if (action === "weight-low") {
     brush.weightMode = brush.weightMode === "low" ? "normal" : "low";
   } else if (action === "weight-high") {
@@ -2689,6 +3268,10 @@ async function loadBrushFiles(files) {
         name: file.name,
         width: dimensions.width,
         height: dimensions.height,
+        originalUrl: dataUrl,
+        originalWidth: dimensions.width,
+        originalHeight: dimensions.height,
+        cropRect: null,
         enabled: true,
         weightMode: "normal"
       });
@@ -3177,6 +3760,15 @@ function onExportScaleButtonClick(event) {
   event.preventDefault();
   setExportScalePercent(Number(button.dataset.scale));
 }
+
+window.__applyBrushCropFromPopup = async (payload) => {
+  const brushId = Number(payload?.brushId);
+  if (!Number.isFinite(brushId)) {
+    return;
+  }
+  const cropRect = payload?.cropRect || {};
+  await applyCropToBrush(brushId, cropRect);
+};
 
 dropZonePrompt.addEventListener("click", () => brushInput.click());
 dropZonePrompt.addEventListener("keydown", onDropZoneKeyDown);
