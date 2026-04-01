@@ -19,6 +19,17 @@
   </div>
   <div id="eraseCursor" aria-hidden="true"></div>
   <img id="shortcutPreview" alt="" aria-hidden="true" draggable="false">
+  <svg id="filterDefs" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="brushTintFilter" color-interpolation-filters="sRGB">
+        <feColorMatrix
+          id="brushTintMatrix"
+          type="matrix"
+          values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0"
+        />
+      </filter>
+    </defs>
+  </svg>
 
   <aside id="controls" aria-label="Drawing controls">
     <button id="sidebarToggleButton" type="button" aria-expanded="true" aria-label="Hide sidebar contents">
@@ -121,6 +132,22 @@
       </div>
       <input id="rotationSlider" type="range" min="-180" max="180" value="0" step="1">
       <p class="value-text"><span id="rotationValue">0</span>deg</p>
+    </div>
+
+    <div class="control-group" id="tintGroup">
+      <div class="toggle-row">
+        <p class="control-label inline-label">color tint</p>
+        <button id="tintPickerButton" type="button" aria-expanded="false" aria-controls="tintPopover">
+          <span id="tintSwatch" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div id="tintPopover" hidden>
+        <label for="tintColorInput" class="control-label">color</label>
+        <input id="tintColorInput" type="color" value="#ffffff">
+        <label for="tintAmountSlider" class="control-label">amount</label>
+        <input id="tintAmountSlider" type="range" min="0" max="100" value="0" step="1">
+        <p class="value-text"><span id="tintAmountValue">0</span>%</p>
+      </div>
     </div>
 
     <div class="control-group" id="opacityGroup">

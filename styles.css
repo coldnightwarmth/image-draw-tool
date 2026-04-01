@@ -107,6 +107,14 @@ input {
   display: block;
 }
 
+#filterDefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .stamp {
   position: absolute;
   display: block;
@@ -283,6 +291,62 @@ input {
   opacity: 0.45;
 }
 
+#tintGroup {
+  position: relative;
+}
+
+#tintPickerButton {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tintSwatch {
+  width: 20px;
+  height: 10px;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+}
+
+#tintPopover {
+  position: absolute;
+  right: 0;
+  top: calc(100% - 4px);
+  width: min(180px, 100%);
+  padding: 8px;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  z-index: 26;
+}
+
+#tintPopover[hidden] {
+  display: none;
+}
+
+#tintColorInput {
+  width: 100%;
+  height: 24px;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  padding: 2px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+#tintAmountSlider + .value-text {
+  margin-top: -2px;
+}
+
 .ios-switch {
   position: relative;
   width: 34px;
@@ -451,10 +515,6 @@ input {
 
 .brush-item.is-solo-muted {
   opacity: 0.45;
-}
-
-.brush-item.is-disabled .brush-thumb {
-  filter: grayscale(0.75);
 }
 
 .brush-thumb {

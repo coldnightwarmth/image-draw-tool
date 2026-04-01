@@ -30,6 +30,14 @@ const rotationSlider = document.getElementById("rotationSlider");
 const rotationValue = document.getElementById("rotationValue");
 const rotationIndicator = document.getElementById("rotationIndicator");
 const rotationNeedle = document.getElementById("rotationNeedle");
+const tintPickerButton = document.getElementById("tintPickerButton");
+const tintSwatch = document.getElementById("tintSwatch");
+const tintPopover = document.getElementById("tintPopover");
+const tintGroup = document.getElementById("tintGroup");
+const tintColorInput = document.getElementById("tintColorInput");
+const tintAmountSlider = document.getElementById("tintAmountSlider");
+const tintAmountValue = document.getElementById("tintAmountValue");
+const brushTintMatrix = document.getElementById("brushTintMatrix");
 const opacitySlider = document.getElementById("opacitySlider");
 const opacityValue = document.getElementById("opacityValue");
 const renderModeToggle = document.getElementById("renderModeToggle");
@@ -117,7 +125,8 @@ const state = {
     brushId: null,
     hideTimerId: null
   },
-  collapsedSliderGroups: {}
+  collapsedSliderGroups: {},
+  tintPopoverOpen: false
 };
 
 let snapshotDbPromise = null;
@@ -170,6 +179,143 @@ function isRotationWheelShortcutActive(event) {
       : false;
   return Boolean(event.ctrlKey || event.metaKey || modifierFromState || state.ctrlOrMetaHeld) &&
     !event.altKey;
+}
+
+function normalizeHexColor(color, fallback = "#ffffff") {
+  if (typeof color !== "string") {
+    return fallback;
+  }
+
+  const trimmed = color.trim().toLowerCase();
+  if (!trimmed.startsWith("#")) {
+    return fallback;
+  }
+
+  if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`;
+  }
+
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return fallback;
+}
+
+function hexToRgbUnit(hexColor) {
+  const normalized = normalizeHexColor(hexColor);
+  const red = parseInt(normalized.slice(1, 3), 16) / 255;
+  const green = parseInt(normalized.slice(3, 5), 16) / 255;
+  const blue = parseInt(normalized.slice(5, 7), 16) / 255;
+  return { red, green, blue };
+}
+
+function getTintAmountFraction() {
+  if (!tintAmountSlider) {
+    return 0;
+  }
+  return clamp(parseNumericInputValue(tintAmountSlider, 0) / 100, 0, 1);
+}
+
+function getBrushTintCssFilter(disabled = false) {
+  const amount = getTintAmountFraction();
+  if (amount <= 0) {
+    return disabled ? "grayscale(0.75)" : "";
+  }
+  return disabled ? "grayscale(0.75) url(#brushTintFilter)" : "url(#brushTintFilter)";
+}
+
+function applyBrushTintStyle(element, disabled = false) {
+  if (!element) {
+    return;
+  }
+  const filterValue = getBrushTintCssFilter(disabled);
+  if (filterValue) {
+    element.style.filter = filterValue;
+  } else {
+    element.style.removeProperty("filter");
+  }
+}
+
+function updateBrushTintMatrix() {
+  if (!brushTintMatrix || !tintColorInput || !tintAmountSlider) {
+    return;
+  }
+
+  const amount = getTintAmountFraction();
+  const { red, green, blue } = hexToRgbUnit(tintColorInput.value);
+  const lumaR = 0.2126;
+  const lumaG = 0.7152;
+  const lumaB = 0.0722;
+  const keep = 1 - amount;
+
+  const matrixValues = [
+    keep + amount * lumaR * red,
+    amount * lumaG * red,
+    amount * lumaB * red,
+    0,
+    0,
+    amount * lumaR * green,
+    keep + amount * lumaG * green,
+    amount * lumaB * green,
+    0,
+    0,
+    amount * lumaR * blue,
+    amount * lumaG * blue,
+    keep + amount * lumaB * blue,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0
+  ];
+
+  brushTintMatrix.setAttribute("values", matrixValues.map((value) => value.toFixed(6)).join(" "));
+}
+
+function refreshBrushTintOnVisibleElements() {
+  const stampElements = world.querySelectorAll(".stamp, .trail-stamp");
+  for (const element of stampElements) {
+    applyBrushTintStyle(element, false);
+  }
+
+  if (shortcutPreview.classList.contains("is-visible")) {
+    applyBrushTintStyle(shortcutPreview, false);
+  }
+
+  const thumbs = brushGallery.querySelectorAll(".brush-thumb");
+  for (const thumb of thumbs) {
+    const card = thumb.closest(".brush-item");
+    const disabled = Boolean(card && card.classList.contains("is-disabled"));
+    applyBrushTintStyle(thumb, disabled);
+  }
+}
+
+function updateTintControlUI() {
+  if (!tintColorInput || !tintSwatch || !tintAmountValue || !tintAmountSlider) {
+    return;
+  }
+  const normalizedColor = normalizeHexColor(tintColorInput.value);
+  tintColorInput.value = normalizedColor;
+  tintSwatch.style.background = normalizedColor;
+  tintAmountValue.textContent = String(parseNumericInputValue(tintAmountSlider, 0));
+}
+
+function setTintPopoverOpen(nextOpen) {
+  if (!tintPopover || !tintPickerButton) {
+    return;
+  }
+  state.tintPopoverOpen = Boolean(nextOpen);
+  tintPopover.hidden = !state.tintPopoverOpen;
+  tintPickerButton.setAttribute("aria-expanded", String(state.tintPopoverOpen));
+}
+
+function applyTintSettingsFromInputs() {
+  updateTintControlUI();
+  updateBrushTintMatrix();
+  refreshBrushTintOnVisibleElements();
 }
 
 function isGifUrl(url) {
@@ -940,6 +1086,7 @@ function updateSliderText() {
   rotationValue.textContent = String(rotationSlider.value);
   opacityValue.textContent = String(opacitySlider.value);
   cursorTrailCountValue.textContent = String(cursorTrailCountSlider.value);
+  tintAmountValue.textContent = String(tintAmountSlider.value);
 }
 
 function setSliderGroupCollapsed(groupId, collapsed) {
@@ -1142,6 +1289,7 @@ function spawnCursorTrailStamp(worldX, worldY) {
   const opacity = clamp(Number(opacitySlider.value) / 100, 0, 1);
   trailStamp.style.opacity = String(opacity);
   trailStamp.style.setProperty("--trail-start-opacity", String(opacity));
+  applyBrushTintStyle(trailStamp, false);
   world.appendChild(trailStamp);
 
   const entry = {
@@ -1737,6 +1885,7 @@ function showShortcutPreviewAt(clientX, clientY) {
   shortcutPreview.style.transform = `rotate(${rotation}deg)`;
   shortcutPreview.style.opacity = String(opacity);
   shortcutPreview.style.imageRendering = renderModeToggle.checked ? "auto" : "pixelated";
+  applyBrushTintStyle(shortcutPreview, false);
   shortcutPreview.classList.add("is-visible");
   scheduleShortcutPreviewHide();
 }
@@ -2107,6 +2256,8 @@ function buildSessionSnapshot() {
       spacing: parseNumericInputValue(spacingSlider, 48),
       rotation: parseNumericInputValue(rotationSlider, 0),
       opacity: parseNumericInputValue(opacitySlider, 100),
+      tintColor: normalizeHexColor(tintColorInput.value),
+      tintAmount: parseNumericInputValue(tintAmountSlider, 0),
       renderLinear: renderModeToggle.checked,
       cursorTrailEnabled: cursorTrailToggle.checked,
       cursorTrailCount: parseNumericInputValue(cursorTrailCountSlider, 24),
@@ -2197,6 +2348,7 @@ function createStampElement(stampData, brush) {
   stamp.style.opacity = String(Number.isFinite(opacity) ? clamp(opacity, 0, 1) : 1);
   stamp.style.imageRendering = stampData.imageRendering === "auto" ? "auto" : "pixelated";
   stamp.style.transform = `rotate(${rotation}deg)`;
+  applyBrushTintStyle(stamp, false);
 
   return stamp;
 }
@@ -2359,6 +2511,8 @@ async function restoreSessionState() {
     setInputNumericValue(spacingSlider, controls.spacing);
     setInputNumericValue(rotationSlider, controls.rotation);
     setInputNumericValue(opacitySlider, controls.opacity);
+    tintColorInput.value = normalizeHexColor(controls.tintColor, "#ffffff");
+    setInputNumericValue(tintAmountSlider, controls.tintAmount);
     renderModeToggle.checked = Boolean(controls.renderLinear);
     cursorTrailToggle.checked = Boolean(controls.cursorTrailEnabled);
     setInputNumericValue(cursorTrailCountSlider, controls.cursorTrailCount);
@@ -2377,6 +2531,9 @@ async function restoreSessionState() {
     }
 
     updateSliderText();
+    updateTintControlUI();
+    updateBrushTintMatrix();
+    setTintPopoverOpen(false);
     updateConsistentModeUI();
     updateRenderModeUI();
     updateCursorTrailUI();
@@ -2386,6 +2543,7 @@ async function restoreSessionState() {
     updateUndoState();
     updateBrushStatus();
     renderBrushGallery();
+    refreshBrushTintOnVisibleElements();
     renderCamera();
     return true;
   } catch (error) {
@@ -2501,6 +2659,7 @@ function renderBrushGallery() {
     preview.src = brush.url;
     preview.alt = brush.name;
     preview.draggable = false;
+    applyBrushTintStyle(preview, !brush.enabled);
 
     const name = document.createElement("p");
     name.className = "brush-name";
@@ -2514,12 +2673,12 @@ function renderBrushGallery() {
       "👁",
       brush.enabled,
       brush.enabled
-        ? "Disable brush image (right-click to solo)"
-        : "Enable brush image (right-click to solo)"
+        ? "Disable brush image"
+        : "Enable brush image"
     );
     if (isSolo) {
       enabledButton.classList.add("is-solo");
-      enabledButton.title = "Solo brush active (right-click to unsolo)";
+      enabledButton.title = "Solo brush active";
       enabledButton.setAttribute("aria-label", "Solo brush active");
     }
     const lowButton = createBrushActionButton(
@@ -2938,6 +3097,7 @@ function placeBrush(x, y, stroke) {
   stamp.style.opacity = String(clamp(Number(opacitySlider.value) / 100, 0, 1));
   stamp.style.imageRendering = renderModeToggle.checked ? "auto" : "pixelated";
   stamp.style.transform = `rotate(${rotation}deg)`;
+  applyBrushTintStyle(stamp, false);
 
   world.appendChild(stamp);
   incrementUrlRef(brush.url);
@@ -3943,6 +4103,18 @@ rotationIndicator.addEventListener("dblclick", (event) => {
   updateRotationIndicator();
   scheduleSessionSave();
 });
+tintPickerButton.addEventListener("click", (event) => {
+  event.preventDefault();
+  setTintPopoverOpen(!state.tintPopoverOpen);
+});
+tintColorInput.addEventListener("input", () => {
+  applyTintSettingsFromInputs();
+  scheduleSessionSave();
+});
+tintAmountSlider.addEventListener("input", () => {
+  applyTintSettingsFromInputs();
+  scheduleSessionSave();
+});
 opacitySlider.addEventListener("input", () => {
   updateSliderText();
   scheduleSessionSave();
@@ -4013,11 +4185,30 @@ exportOverlay.addEventListener("contextmenu", (event) => {
   }
 });
 exportScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
+document.addEventListener("pointerdown", (event) => {
+  if (!state.tintPopoverOpen) {
+    return;
+  }
+  if (!tintGroup) {
+    setTintPopoverOpen(false);
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Node && tintGroup.contains(target)) {
+    return;
+  }
+  setTintPopoverOpen(false);
+});
 document.addEventListener("keydown", (event) => {
   state.ctrlOrMetaHeld = Boolean(event.ctrlKey || event.metaKey);
   if (event.key === "Escape" && state.exportMode) {
     event.preventDefault();
     exitExportMode({ focusButton: true });
+    return;
+  }
+  if (event.key === "Escape" && state.tintPopoverOpen) {
+    event.preventDefault();
+    setTintPopoverOpen(false);
     return;
   }
 
@@ -4046,6 +4237,7 @@ document.addEventListener("keyup", (event) => {
 });
 window.addEventListener("blur", () => {
   state.ctrlOrMetaHeld = false;
+  setTintPopoverOpen(false);
   hideShortcutPreview(true);
 });
 
@@ -4098,6 +4290,9 @@ async function initializeApp() {
   }
   applyCollapsedSliderGroupSnapshot(null);
   updateSliderText();
+  updateTintControlUI();
+  updateBrushTintMatrix();
+  setTintPopoverOpen(false);
   updateConsistentModeUI();
   updateRenderModeUI();
   updateCursorTrailUI();
