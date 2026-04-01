@@ -169,6 +169,8 @@ let sessionTabIdCache = null;
 let gifLibraryPromise = null;
 let gifuctModulePromise = null;
 let tintNativePickerOpen = false;
+let suppressTintPickerClick = false;
+let suppressNextTintInputClick = false;
 const tintFilterCache = new Map();
 const NO_TINT_SETTINGS = { color: "#ffffff", amountPercent: 0 };
 
@@ -425,21 +427,24 @@ function closeNativeTintPicker() {
 
 function openNativeTintPicker() {
   if (!tintColorInput) {
-    return;
+    return false;
   }
-  tintNativePickerOpen = true;
 
   if (typeof tintColorInput.showPicker === "function") {
     try {
       tintColorInput.showPicker();
-      return;
+      tintNativePickerOpen = true;
+      return true;
     } catch (error) {
       // Fall through for browsers that block showPicker.
     }
   }
 
+  // Fallback path for browsers without showPicker support.
+  // Do not force tintNativePickerOpen here; rely on focus/blur to reflect true state.
   tintColorInput.focus();
   tintColorInput.click();
+  return true;
 }
 
 function setTintPopoverOpen(nextOpen) {
@@ -4589,27 +4594,48 @@ rotationIndicator.addEventListener("dblclick", (event) => {
   updateActiveStrokeTailRotation();
   scheduleSessionSave();
 });
+tintPickerButton.addEventListener("pointerdown", (event) => {
+  if (!state.tintPopoverOpen) {
+    return;
+  }
+  event.preventDefault();
+  setTintPopoverOpen(false);
+  suppressTintPickerClick = true;
+});
 tintPickerButton.addEventListener("click", (event) => {
   event.preventDefault();
-  if (state.tintPopoverOpen) {
-    setTintPopoverOpen(false);
-  } else {
-    setTintPopoverOpen(true);
+  if (suppressTintPickerClick) {
+    suppressTintPickerClick = false;
+    return;
   }
+  setTintPopoverOpen(!state.tintPopoverOpen);
 });
 if (tintColorField) {
-  tintColorField.addEventListener("click", (event) => {
+  tintColorField.addEventListener("pointerdown", (event) => {
     if (!state.tintPopoverOpen) {
       return;
     }
     event.preventDefault();
+    event.stopPropagation();
+
     if (isNativeTintPickerActive()) {
+      suppressNextTintInputClick = true;
       closeNativeTintPicker();
       return;
     }
+
+    suppressNextTintInputClick = false;
     openNativeTintPicker();
   });
 }
+tintColorInput.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (!suppressNextTintInputClick) {
+    return;
+  }
+  event.preventDefault();
+  suppressNextTintInputClick = false;
+});
 tintColorInput.addEventListener("focus", () => {
   tintNativePickerOpen = true;
 });
