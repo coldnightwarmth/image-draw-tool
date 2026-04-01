@@ -853,6 +853,114 @@ input[type="range"] + .value-text {
   border-color: #bb7a7a;
 }
 
+#brushCropModal {
+  position: fixed;
+  inset: 0;
+  z-index: 31;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+#brushCropModal.is-open {
+  display: flex;
+}
+
+#brushCropDialog {
+  width: min(620px, calc(100vw - 24px));
+  max-height: calc(100vh - 28px);
+  border: 1px solid #d4d4d4;
+  border-radius: 0;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+#brushCropStageWrap {
+  min-height: 230px;
+  border: 1px solid #d8d8d8;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+}
+
+#brushCropStage {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+#brushCropImage {
+  display: block;
+  max-width: min(580px, calc(100vw - 62px));
+  max-height: min(62vh, 700px);
+  width: auto;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+.brush-crop-shade {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.42);
+  pointer-events: none;
+}
+
+#brushCropSelection {
+  position: absolute;
+  border: 1px dashed #111;
+  background: transparent;
+  cursor: move;
+}
+
+.brush-crop-edge {
+  position: absolute;
+  background: transparent;
+}
+
+.brush-crop-edge[data-edge="top"] {
+  top: -7px;
+  left: 0;
+  width: 100%;
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.brush-crop-edge[data-edge="bottom"] {
+  bottom: -7px;
+  left: 0;
+  width: 100%;
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.brush-crop-edge[data-edge="left"] {
+  left: -7px;
+  top: 0;
+  width: 14px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.brush-crop-edge[data-edge="right"] {
+  right: -7px;
+  top: 0;
+  width: 14px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.brush-crop-actions {
+  margin-top: 0;
+}
+
 #exportOverlay {
   position: fixed;
   inset: 0;

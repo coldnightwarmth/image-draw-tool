@@ -185,6 +185,30 @@
     </div>
   </div>
 
+  <div id="brushCropModal" aria-hidden="true">
+    <div id="brushCropDialog" role="dialog" aria-modal="true" aria-label="Brush crop editor">
+      <div id="brushCropStageWrap">
+        <div id="brushCropStage">
+          <img id="brushCropImage" alt="" draggable="false">
+          <div class="brush-crop-shade" id="brushCropShadeTop"></div>
+          <div class="brush-crop-shade" id="brushCropShadeRight"></div>
+          <div class="brush-crop-shade" id="brushCropShadeBottom"></div>
+          <div class="brush-crop-shade" id="brushCropShadeLeft"></div>
+          <div id="brushCropSelection">
+            <div class="brush-crop-edge" data-edge="top"></div>
+            <div class="brush-crop-edge" data-edge="right"></div>
+            <div class="brush-crop-edge" data-edge="bottom"></div>
+            <div class="brush-crop-edge" data-edge="left"></div>
+          </div>
+        </div>
+      </div>
+      <div class="confirm-actions brush-crop-actions">
+        <button id="brushCropConfirmButton" type="button">Confirm</button>
+        <button id="brushCropCancelButton" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div id="exportOverlay" aria-hidden="true" hidden>
     <div class="export-shade" id="exportShadeTop"></div>
     <div class="export-shade" id="exportShadeRight"></div>
