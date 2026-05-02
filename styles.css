@@ -110,6 +110,33 @@ input {
   display: block;
 }
 
+#shapePreview {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 34;
+  border: 1px dashed #111;
+  background: rgba(47, 125, 246, 0.08);
+  transform-origin: 0 50%;
+}
+
+#shapePreview.is-visible {
+  display: block;
+}
+
+#shapePreview.is-line {
+  height: 0;
+  border: 0;
+  border-top: 1px dashed #111;
+  background: transparent;
+}
+
+#shapePreview.is-circle {
+  border-radius: 50%;
+}
+
 #filterDefs {
   position: absolute;
   width: 0;
@@ -123,6 +150,11 @@ input {
   display: block;
   pointer-events: none;
   user-select: none;
+  contain: layout paint style;
+}
+
+.stamp.is-culled {
+  visibility: hidden;
 }
 
 .trail-stamp {
@@ -416,6 +448,139 @@ input {
   opacity: 0.45;
 }
 
+.settings-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#drawModeGroup {
+  margin-top: -2px;
+}
+
+#drawModeButtons {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.draw-mode-button {
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.draw-mode-button.is-active {
+  background: #e6e6e6;
+  border-color: #8e8e8e;
+}
+
+.draw-mode-icon {
+  display: block;
+  width: 19px;
+  height: 19px;
+  overflow: visible;
+}
+
+.draw-mode-icon * {
+  vector-effect: non-scaling-stroke;
+}
+
+.draw-mode-icon .icon-shadow {
+  fill: rgba(0, 0, 0, 0.16);
+  stroke: none;
+}
+
+.draw-mode-icon .icon-shadow-stroke {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.2);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+.draw-mode-icon .icon-dark {
+  fill: none;
+  stroke: #111;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.draw-mode-icon .icon-dark-fill {
+  fill: #111;
+  stroke: none;
+}
+
+.draw-mode-icon .icon-metal {
+  fill: #dce3ee;
+  stroke: #111;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.draw-mode-icon .icon-gold {
+  fill: #e5bb59;
+  stroke: none;
+}
+
+.draw-mode-icon .icon-blue {
+  fill: #78b4ff;
+  stroke: none;
+}
+
+.draw-mode-icon .icon-blue-soft {
+  fill: rgba(120, 180, 255, 0.42);
+  stroke: none;
+}
+
+.draw-mode-icon .icon-blue-stroke {
+  fill: none;
+  stroke: #2e7df7;
+  stroke-width: 2.45;
+  stroke-linecap: round;
+}
+
+.draw-mode-icon .icon-light,
+.draw-mode-icon .icon-highlight {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.88);
+  stroke-width: 1.05;
+  stroke-linecap: round;
+}
+
+.draw-mode-icon .icon-tip {
+  fill: #111;
+  stroke: none;
+}
+
+.draw-mode-icon .icon-dot {
+  fill: #2e7df7;
+  stroke: #111;
+  stroke-width: 0.75;
+}
+
+.draw-mode-icon .icon-handle {
+  fill: #fff;
+  stroke: #111;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+#spraySpreadGroup {
+  margin-top: 6px;
+}
+
+#spraySpreadGroup[hidden] {
+  display: none;
+}
+
 #tintGroup {
   position: relative;
 }
@@ -580,6 +745,51 @@ input {
   border-style: solid;
   align-items: stretch;
   justify-content: flex-start;
+}
+
+#stockBrushButtons {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+}
+
+#stockBrushButtons[hidden] {
+  display: none;
+}
+
+.stock-brush-button {
+  min-width: 0;
+  aspect-ratio: 1 / 1;
+  padding: 2px;
+  border: 1px solid #d9d9d9;
+  border-radius: 0;
+  background: #fff;
+  cursor: pointer;
+}
+
+.stock-brush-button.is-active {
+  border-color: #2f7df6;
+  background: #edf5ff;
+}
+
+.stock-brush-button.is-loading {
+  opacity: 0.62;
+  cursor: progress;
+}
+
+.stock-brush-button:disabled {
+  opacity: 0.52;
+  cursor: progress;
+}
+
+.stock-brush-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+  pointer-events: none;
 }
 
 #dropZoneHeader {
@@ -897,7 +1107,8 @@ input[type="range"] + .value-text {
 #redoButton,
 #clearButton,
 #exportButton,
-#exportCancelButton {
+#exportCancelButton,
+#gifPauseButton {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid #bcbcbc;
@@ -934,6 +1145,57 @@ input[type="range"] + .value-text {
 
 #exportButton.is-active {
   background: #e6e6e6;
+}
+
+#gifPauseButton {
+  margin-top: 6px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+}
+
+#gifPauseButton.is-paused {
+  background: #e6e6e6;
+}
+
+.gif-pause-symbol {
+  position: relative;
+  display: block;
+  width: 14px;
+  height: 16px;
+}
+
+.gif-pause-symbol::before,
+.gif-pause-symbol::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  width: 4px;
+  height: 12px;
+  background: #111;
+}
+
+.gif-pause-symbol::before {
+  left: 2px;
+}
+
+.gif-pause-symbol::after {
+  right: 2px;
+}
+
+#gifPauseButton.is-paused .gif-pause-symbol::before {
+  left: 3px;
+  top: 1px;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 10px solid #111;
+  background: transparent;
+}
+
+#gifPauseButton.is-paused .gif-pause-symbol::after {
+  display: none;
 }
 
 #historyActions {
@@ -1333,14 +1595,47 @@ input[type="range"] + .value-text {
   pointer-events: auto;
 }
 
-#exportResolutionText {
-  margin: 0;
-  padding: 3px 6px;
-  border: 1px solid #111;
-  background: rgba(255, 255, 255, 0.9);
+#exportResolutionControls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: #111;
   font-size: 13px;
-  line-height: 1.1;
+  line-height: 1;
+}
+
+#exportWidthInput,
+#exportHeightInput {
+  width: 62px;
+  padding: 3px 5px;
+  border: 1px solid #111;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+  font-size: 13px;
+  line-height: 1;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+#exportWidthInput::-webkit-outer-spin-button,
+#exportWidthInput::-webkit-inner-spin-button,
+#exportHeightInput::-webkit-outer-spin-button,
+#exportHeightInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#exportWidthInput:focus,
+#exportHeightInput:focus {
+  outline: 2px solid #111;
+  outline-offset: 1px;
+}
+
+#exportResolutionSeparator {
+  padding: 0 1px;
+  color: #111;
 }
 
 #exportScaleButtons {

@@ -1,5 +1,28 @@
 const MAX_VISIBLE_STAMPS = 25000;
 const ALLOWED_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
+const STOCK_BRUSH_FOLDERS = Array.isArray(window.STOCK_BRUSH_FOLDERS)
+  ? window.STOCK_BRUSH_FOLDERS
+  : [];
+const STOCK_BRUSH_FOLDER_ORDER = [
+  "radial",
+  "flower",
+  "glitch_square",
+  "glitch_square2",
+  "green_square",
+  "futari glitch",
+  "esp ra de glitch",
+  "laser data",
+  "particles",
+  "garden",
+  "3d",
+  "misc",
+  "pixel art+games",
+  "esp ra de",
+  "esp ra de characters",
+  "framing"
+];
+const DRAW_MODES = ["pencil", "spray", "line", "box", "circle"];
+const SHAPE_DRAW_MODES = new Set(["line", "box", "circle"]);
 const SESSION_STORAGE_KEY = "random-brush-drawer-session-v1";
 const SESSION_STORAGE_POINTER_KEY = `${SESSION_STORAGE_KEY}-pointer`;
 const SESSION_STORAGE_TAB_ID_KEY = `${SESSION_STORAGE_KEY}-tab-id`;
@@ -21,6 +44,7 @@ const dropZoneHeader = document.getElementById("dropZoneHeader");
 const dropZonePrompt = document.getElementById("dropZonePrompt");
 const unloadBrushDataButton = document.getElementById("unloadBrushDataButton");
 const brushGallery = document.getElementById("brushGallery");
+const stockBrushButtons = document.getElementById("stockBrushButtons");
 const brushInput = document.getElementById("brushInput");
 const brushStatus = document.getElementById("brushStatus");
 const sizeScaleGroup = document.getElementById("sizeScaleGroup");
@@ -57,7 +81,12 @@ const cursorTrailCountGroup = document.getElementById("cursorTrailCountGroup");
 const cursorTrailCountSlider = document.getElementById("cursorTrailCountSlider");
 const cursorTrailCountValue = document.getElementById("cursorTrailCountValue");
 const eraseCursor = document.getElementById("eraseCursor");
+const shapePreview = document.getElementById("shapePreview");
 const shortcutPreview = document.getElementById("shortcutPreview");
+const drawModeButtons = document.getElementById("drawModeButtons");
+const spraySpreadGroup = document.getElementById("spraySpreadGroup");
+const spraySpreadSlider = document.getElementById("spraySpreadSlider");
+const spraySpreadValue = document.getElementById("spraySpreadValue");
 const eraseModeButton = document.getElementById("eraseModeButton");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
@@ -65,6 +94,7 @@ const clearButton = document.getElementById("clearButton");
 const exportActions = document.getElementById("exportActions");
 const exportButton = document.getElementById("exportButton");
 const exportCancelButton = document.getElementById("exportCancelButton");
+const gifPauseButton = document.getElementById("gifPauseButton");
 const clearConfirmModal = document.getElementById("clearConfirmModal");
 const confirmYesButton = document.getElementById("confirmYesButton");
 const confirmNoButton = document.getElementById("confirmNoButton");
@@ -86,7 +116,8 @@ const exportShadeBottom = document.getElementById("exportShadeBottom");
 const exportShadeLeft = document.getElementById("exportShadeLeft");
 const exportSelection = document.getElementById("exportSelection");
 const exportMeta = document.getElementById("exportMeta");
-const exportResolutionText = document.getElementById("exportResolutionText");
+const exportWidthInput = document.getElementById("exportWidthInput");
+const exportHeightInput = document.getElementById("exportHeightInput");
 const exportScaleButtonsGroup = document.getElementById("exportScaleButtons");
 const exportScaleButtons = Array.from(
   exportOverlay.querySelectorAll(".export-scale-button")
@@ -99,7 +130,7 @@ const LOW_WEIGHT_MULTIPLIER = 0.12;
 const HIGH_WEIGHT_MULTIPLIER = 4.5;
 const ERASER_PERCENT_SIZE_MULTIPLIER = 2;
 const ERASER_GLOBAL_SIZE_MULTIPLIER = 2.5;
-const MIN_CAMERA_SCALE = 0.03;
+const MIN_CAMERA_SCALE = 0.005;
 const MAX_CAMERA_SCALE = 6;
 const CURSOR_TRAIL_FADE_MS = 4000;
 const EXPORT_SELECTION_PADDING = 18;
@@ -109,15 +140,23 @@ const EXPORT_GIF_FRAME_DELAY_MS = 50;
 const GIF_JS_LIBRARY_URL = "gif.js";
 const GIF_JS_WORKER_URL = "gif.worker.js";
 const GIFUCT_MODULE_URL = "./gifuct-js.bundle.mjs";
+const EXPORT_MIN_DIMENSION = 1;
+const EXPORT_MAX_DIMENSION = 10000;
 const EXPORT_SCALE_PRESETS = [5, 10, 25, 50, 100, 200];
 const BRUSH_CROP_MIN_SIZE = 4;
 const GIF_TRANSPARENT_MATTE = "#00ff01";
 const GIF_TRANSPARENT_MATTE_HEX = 0x00ff01;
 const STAMP_INDEX_CELL_SIZE = 256;
+const STAMP_VIEWPORT_CULL_MARGIN_PX = 640;
+const TRANSPARENT_STAMP_SRC =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 const ERASER_SAMPLE_GRID_SIZE = 5;
 const ERASER_PATH_STEP_FACTOR = 0.6;
 const ERASER_PATH_MIN_STEP = 6;
 const ERASER_MAX_SAMPLES_PER_FRAME = 24;
+const SPRAY_MIN_STAMPS = 3;
+const SPRAY_MAX_STAMPS = 34;
+const SHAPE_DRAG_THRESHOLD_PX = 5;
 
 const state = {
   brushes: [],
@@ -130,14 +169,21 @@ const state = {
   panning: null,
   touchPointers: new Map(),
   touchGesture: null,
+  drawMode: "pencil",
+  shapeDraft: null,
   strokeById: new Map(),
   stampSpatialBuckets: new Map(),
   stampSpatialCells: new WeakMap(),
+  stampCount: 0,
+  stampVisibilityRafId: null,
   urlRefCounts: new Map(),
   nextBrushId: 1,
   nextStrokeId: 1,
   saveTimerId: null,
   soloBrushId: null,
+  activeStockBrushFolderId: null,
+  stockBrushLoadingFolderId: null,
+  gifAnimationsPaused: false,
   sidebarCollapsed: false,
   sidebarTab: "main",
   brushGalleryCollapsed: false,
@@ -185,7 +231,19 @@ let suppressTintPickerClick = false;
 let suppressNextTintInputClick = false;
 let suppressNextCanvasBgInputClick = false;
 const tintFilterCache = new Map();
+const stockBrushIconPaths = new Map();
 const NO_TINT_SETTINGS = { color: "#ffffff", amountPercent: 0 };
+const gifPauseObserver = new MutationObserver((mutations) => {
+  if (!state.gifAnimationsPaused) {
+    return;
+  }
+
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      applyGifPauseStateToNode(node);
+    }
+  }
+});
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -498,6 +556,146 @@ function isGifUrl(url) {
     return false;
   }
   return /^data:image\/gif/i.test(url) || /\.gif(?:$|[?#])/i.test(url);
+}
+
+function getImageGifSource(image) {
+  if (!(image instanceof HTMLImageElement)) {
+    return "";
+  }
+
+  return (
+    image.dataset.gifPausedSrc ||
+    image.dataset.brushUrl ||
+    image.getAttribute("src") ||
+    image.currentSrc ||
+    ""
+  );
+}
+
+function isViewportCulledStamp(image) {
+  return image instanceof HTMLImageElement && image.dataset.viewportCulled === "true";
+}
+
+function captureImageStillFrame(image) {
+  const width = Math.max(1, image.naturalWidth || image.width || 1);
+  const height = Math.max(1, image.naturalHeight || image.height || 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) {
+    return "";
+  }
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/png");
+}
+
+function freezeGifImage(image) {
+  if (
+    !(image instanceof HTMLImageElement) ||
+    image.dataset.gifPausedSrc ||
+    isViewportCulledStamp(image)
+  ) {
+    return;
+  }
+
+  const source = getImageGifSource(image);
+  if (!isGifUrl(source)) {
+    return;
+  }
+
+  if (!image.complete || !image.naturalWidth || !image.naturalHeight) {
+    if (image.dataset.gifPausePending) {
+      return;
+    }
+    image.dataset.gifPausePending = "true";
+    image.addEventListener(
+      "load",
+      () => {
+        delete image.dataset.gifPausePending;
+        if (state.gifAnimationsPaused) {
+          freezeGifImage(image);
+        }
+      },
+      { once: true }
+    );
+    return;
+  }
+
+  try {
+    const stillFrameUrl = captureImageStillFrame(image);
+    if (!stillFrameUrl) {
+      return;
+    }
+    image.dataset.gifPausedSrc = image.getAttribute("src") || source;
+    image.src = stillFrameUrl;
+  } catch (error) {
+    // If the image cannot be captured, leave it animated rather than breaking it.
+  }
+}
+
+function resumeGifImage(image) {
+  if (!(image instanceof HTMLImageElement)) {
+    return;
+  }
+
+  delete image.dataset.gifPausePending;
+  const pausedSource = image.dataset.gifPausedSrc;
+  if (!pausedSource) {
+    return;
+  }
+
+  image.src = pausedSource;
+  delete image.dataset.gifPausedSrc;
+}
+
+function applyGifPauseStateToImage(image) {
+  if (state.gifAnimationsPaused) {
+    freezeGifImage(image);
+  }
+}
+
+function applyGifPauseStateToNode(node) {
+  if (!state.gifAnimationsPaused || !(node instanceof Element)) {
+    return;
+  }
+
+  if (node instanceof HTMLImageElement) {
+    freezeGifImage(node);
+  }
+
+  const images = node.querySelectorAll("img");
+  for (const image of images) {
+    freezeGifImage(image);
+  }
+}
+
+function updateGifPauseButtonUI() {
+  gifPauseButton.classList.toggle("is-paused", state.gifAnimationsPaused);
+  gifPauseButton.setAttribute("aria-pressed", String(state.gifAnimationsPaused));
+  gifPauseButton.setAttribute(
+    "aria-label",
+    state.gifAnimationsPaused ? "Resume GIF animations" : "Pause GIF animations"
+  );
+  gifPauseButton.title = state.gifAnimationsPaused
+    ? "Resume GIF animations"
+    : "Pause GIF animations";
+}
+
+function setGifAnimationsPaused(paused) {
+  state.gifAnimationsPaused = Boolean(paused);
+
+  const images = Array.from(document.querySelectorAll("img"));
+  for (const image of images) {
+    if (state.gifAnimationsPaused) {
+      freezeGifImage(image);
+    } else {
+      resumeGifImage(image);
+    }
+  }
+
+  updateGifPauseButtonUI();
+  scheduleStampVisibilityRefresh();
 }
 
 function loadGifLibrary() {
@@ -832,7 +1030,10 @@ function openBrushCropPopup(brush) {
   brushCropCancelButton.disabled = false;
   brushCropModal.classList.add("is-open");
   brushCropModal.setAttribute("aria-hidden", "false");
+  delete brushCropImage.dataset.gifPausePending;
+  delete brushCropImage.dataset.gifPausedSrc;
   brushCropImage.src = imageUrl;
+  applyGifPauseStateToImage(brushCropImage);
   if (brushCropImage.complete && brushCropImage.naturalWidth > 0) {
     renderBrushCropModal();
   }
@@ -849,6 +1050,8 @@ function closeBrushCropModal() {
   state.brushCropEditor.drag = null;
   brushCropModal.classList.remove("is-open");
   brushCropModal.setAttribute("aria-hidden", "true");
+  delete brushCropImage.dataset.gifPausePending;
+  delete brushCropImage.dataset.gifPausedSrc;
   brushCropImage.src = "";
 }
 
@@ -1135,6 +1338,7 @@ function updateSliderText() {
   rotationValue.textContent = String(rotationSlider.value);
   opacityValue.textContent = String(opacitySlider.value);
   cursorTrailCountValue.textContent = String(cursorTrailCountSlider.value);
+  spraySpreadValue.textContent = String(spraySpreadSlider.value);
   tintAmountValue.textContent = String(tintAmountSlider.value);
 }
 
@@ -1151,6 +1355,7 @@ function updateBrushDataToggleUI() {
 function setBrushGalleryCollapsed(collapsed) {
   state.brushGalleryCollapsed = Boolean(collapsed);
   renderBrushGallery();
+  renderStockBrushButtons();
 }
 
 function setSliderGroupCollapsed(groupId, collapsed) {
@@ -1312,6 +1517,37 @@ function updateCursorTrailUI() {
   enforceCursorTrailLimit();
 }
 
+function isShapeDrawMode(mode) {
+  return SHAPE_DRAW_MODES.has(mode);
+}
+
+function updateDrawModeUI() {
+  const isSprayMode = state.drawMode === "spray";
+  if (drawModeButtons) {
+    const buttons = Array.from(drawModeButtons.querySelectorAll(".draw-mode-button"));
+    for (const button of buttons) {
+      const isActive = button.dataset.drawMode === state.drawMode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    }
+  }
+  spraySpreadGroup.hidden = !isSprayMode;
+  spraySpreadSlider.disabled = !isSprayMode;
+}
+
+function setDrawMode(nextMode) {
+  if (!DRAW_MODES.includes(nextMode)) {
+    return;
+  }
+  if (state.drawMode === nextMode) {
+    return;
+  }
+  cancelShapeDraft();
+  state.drawMode = nextMode;
+  updateDrawModeUI();
+  scheduleSessionSave();
+}
+
 function spawnCursorTrailStamp(worldX, worldY) {
   const limit = getCursorTrailLimit();
   while (state.cursorTrailEntries.length >= limit) {
@@ -1343,6 +1579,9 @@ function spawnCursorTrailStamp(worldX, worldY) {
   trailStamp.src = brush.url;
   trailStamp.alt = "";
   trailStamp.draggable = false;
+  trailStamp.loading = "lazy";
+  trailStamp.decoding = "async";
+  applyGifPauseStateToImage(trailStamp);
   trailStamp.style.width = `${width}px`;
   trailStamp.style.height = `${height}px`;
   trailStamp.style.left = `${worldX - width / 2}px`;
@@ -1569,7 +1808,99 @@ function worldToScreen(worldX, worldY) {
 }
 
 function getVisibleStampElements() {
-  return Array.from(world.children).filter((element) => element.classList.contains("stamp"));
+  return Array.from(world.getElementsByClassName("stamp"));
+}
+
+function getViewportWorldBounds(marginPx = STAMP_VIEWPORT_CULL_MARGIN_PX) {
+  const rect = viewport.getBoundingClientRect();
+  const scale = Math.max(0.0001, state.camera.scale);
+  return {
+    left: (-marginPx - state.camera.x) / scale,
+    top: (-marginPx - state.camera.y) / scale,
+    right: (rect.width + marginPx - state.camera.x) / scale,
+    bottom: (rect.height + marginPx - state.camera.y) / scale
+  };
+}
+
+function getCachedStampWorldBounds(element) {
+  const left = Number(element.dataset.worldLeft);
+  const top = Number(element.dataset.worldTop);
+  const right = Number(element.dataset.worldRight);
+  const bottom = Number(element.dataset.worldBottom);
+  if (
+    Number.isFinite(left) &&
+    Number.isFinite(top) &&
+    Number.isFinite(right) &&
+    Number.isFinite(bottom)
+  ) {
+    return { left, top, right, bottom };
+  }
+  return getStampWorldBounds(element);
+}
+
+function setStampViewportRendered(stamp, rendered) {
+  if (!(stamp instanceof HTMLImageElement)) {
+    return;
+  }
+
+  if (rendered) {
+    if (isViewportCulledStamp(stamp)) {
+      delete stamp.dataset.viewportCulled;
+      stamp.classList.remove("is-culled");
+      const source = stamp.dataset.brushUrl || stamp.dataset.gifPausedSrc || "";
+      if (source && stamp.getAttribute("src") !== source) {
+        stamp.src = source;
+      }
+      applyGifPauseStateToImage(stamp);
+    }
+    return;
+  }
+
+  if (state.gifAnimationsPaused || isViewportCulledStamp(stamp)) {
+    return;
+  }
+
+  stamp.dataset.viewportCulled = "true";
+  stamp.classList.add("is-culled");
+  stamp.src = TRANSPARENT_STAMP_SRC;
+}
+
+function updateStampViewportVisibility(stamp, viewportBounds = getViewportWorldBounds()) {
+  if (!(stamp instanceof HTMLImageElement) || !stamp.classList.contains("stamp")) {
+    return;
+  }
+
+  const bounds = getCachedStampWorldBounds(stamp);
+  setStampViewportRendered(stamp, rectsIntersect(bounds, viewportBounds));
+}
+
+function refreshStampViewportVisibility() {
+  const viewportBounds = getViewportWorldBounds();
+  const stamps = world.getElementsByClassName("stamp");
+  for (let index = 0; index < stamps.length; index += 1) {
+    updateStampViewportVisibility(stamps[index], viewportBounds);
+  }
+}
+
+function scheduleStampVisibilityRefresh() {
+  if (state.stampVisibilityRafId !== null) {
+    return;
+  }
+  state.stampVisibilityRafId = window.requestAnimationFrame(() => {
+    state.stampVisibilityRafId = null;
+    refreshStampViewportVisibility();
+  });
+}
+
+function restoreAllCulledStampSources() {
+  if (state.stampVisibilityRafId !== null) {
+    window.cancelAnimationFrame(state.stampVisibilityRafId);
+    state.stampVisibilityRafId = null;
+  }
+  const stamps = world.getElementsByClassName("stamp");
+  for (let index = 0; index < stamps.length; index += 1) {
+    setStampViewportRendered(stamps[index], true);
+  }
 }
 
 function getStampWorldBoundsFromLayout(left, top, width, height, rotationDegrees) {
@@ -1643,6 +1974,10 @@ function registerStampSpatialCells(element) {
   }
   const rotation = Number(element.dataset.rotation) || 0;
   const bounds = getStampWorldBoundsFromLayout(left, top, width, height, rotation);
+  element.dataset.worldLeft = String(bounds.left);
+  element.dataset.worldTop = String(bounds.top);
+  element.dataset.worldRight = String(bounds.right);
+  element.dataset.worldBottom = String(bounds.bottom);
   const minCellX = getStampIndexCellCoord(bounds.left);
   const maxCellX = getStampIndexCellCoord(bounds.right);
   const minCellY = getStampIndexCellCoord(bounds.top);
@@ -1792,23 +2127,56 @@ function setFixedRectStyle(element, left, top, width, height) {
   element.style.height = `${Math.max(0, height)}px`;
 }
 
-function getExportScaleMultiplier() {
-  const minPresetPercent = Math.max(1, Math.min(...EXPORT_SCALE_PRESETS));
-  return clamp(Number(state.exportScalePercent) / 100, minPresetPercent / 100, 8);
+function getExportBaseResolution(bounds) {
+  const normalized = normalizeExportSelectionBounds(bounds);
+  return {
+    width: Math.max(1, normalized.right - normalized.left),
+    height: Math.max(1, normalized.bottom - normalized.top)
+  };
+}
+
+function getExportMinScaleMultiplier(bounds) {
+  const base = getExportBaseResolution(bounds);
+  return EXPORT_MIN_DIMENSION / Math.max(base.width, base.height);
+}
+
+function getExportMaxScaleMultiplier(bounds) {
+  const base = getExportBaseResolution(bounds);
+  return Math.max(
+    getExportMinScaleMultiplier(bounds),
+    Math.min(EXPORT_MAX_DIMENSION / base.width, EXPORT_MAX_DIMENSION / base.height)
+  );
+}
+
+function getExportScaleMultiplier(bounds = null) {
+  const rawMultiplier = Number(state.exportScalePercent) / 100;
+  if (!bounds) {
+    return Number.isFinite(rawMultiplier) ? rawMultiplier : 1;
+  }
+  return clamp(
+    Number.isFinite(rawMultiplier) ? rawMultiplier : 1,
+    getExportMinScaleMultiplier(bounds),
+    getExportMaxScaleMultiplier(bounds)
+  );
 }
 
 function getExportScaledResolution(bounds) {
   const normalized = normalizeExportSelectionBounds(bounds);
-  const multiplier = getExportScaleMultiplier();
+  const multiplier = getExportScaleMultiplier(normalized);
   const width = Math.max(1, Math.round((normalized.right - normalized.left) * multiplier));
   const height = Math.max(1, Math.round((normalized.bottom - normalized.top) * multiplier));
   return { width, height };
 }
 
+function updateExportResolutionInputs(resolution) {
+  exportWidthInput.value = String(clamp(Math.round(resolution.width), 1, EXPORT_MAX_DIMENSION));
+  exportHeightInput.value = String(clamp(Math.round(resolution.height), 1, EXPORT_MAX_DIMENSION));
+}
+
 function updateExportScaleButtonsUI() {
   for (const button of exportScaleButtons) {
     const scale = Number(button.dataset.scale);
-    const isActive = scale === state.exportScalePercent;
+    const isActive = Math.abs(scale - Number(state.exportScalePercent)) < 0.0001;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   }
@@ -1820,6 +2188,33 @@ function setExportScalePercent(nextScalePercent) {
     return;
   }
   state.exportScalePercent = numericScale;
+  updateExportScaleButtonsUI();
+  updateExportOverlayGeometry();
+}
+
+function setExportResolutionFromInput(axis, rawValue) {
+  if (!state.exportMode || !state.exportSelectionBounds) {
+    return;
+  }
+
+  const requested = Number(rawValue);
+  if (!Number.isFinite(requested)) {
+    updateExportOverlayGeometry();
+    return;
+  }
+
+  const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
+  const base = getExportBaseResolution(normalized);
+  const sourceDimension = axis === "height" ? base.height : base.width;
+  const targetDimension = clamp(Math.round(requested), EXPORT_MIN_DIMENSION, EXPORT_MAX_DIMENSION);
+  const requestedMultiplier = targetDimension / sourceDimension;
+  const nextMultiplier = clamp(
+    requestedMultiplier,
+    getExportMinScaleMultiplier(normalized),
+    getExportMaxScaleMultiplier(normalized)
+  );
+
+  state.exportScalePercent = nextMultiplier * 100;
   updateExportScaleButtonsUI();
   updateExportOverlayGeometry();
 }
@@ -1893,7 +2288,7 @@ function updateExportOverlayGeometry() {
   exportMeta.style.transform = "translateX(-50%)";
 
   const scaledResolution = getExportScaledResolution(normalized);
-  exportResolutionText.textContent = `${scaledResolution.width}x${scaledResolution.height}px`;
+  updateExportResolutionInputs(scaledResolution);
 }
 
 function updateExportModeUI() {
@@ -1938,6 +2333,9 @@ function enterExportMode() {
   }
   if (state.erasing) {
     stopErasing(state.erasing.pointerId);
+  }
+  if (state.shapeDraft) {
+    cancelShapeDraft();
   }
   if (state.panning) {
     stopPanning(state.panning.pointerId);
@@ -2202,7 +2600,10 @@ function showShortcutPreviewAt(clientX, clientY) {
   const rotation = parseNumericInputValue(rotationSlider, 0);
   const opacity = clamp(Number(opacitySlider.value) / 100, 0, 1);
 
+  delete shortcutPreview.dataset.gifPausePending;
+  delete shortcutPreview.dataset.gifPausedSrc;
   shortcutPreview.src = brush.url;
+  applyGifPauseStateToImage(shortcutPreview);
   shortcutPreview.style.left = `${left}px`;
   shortcutPreview.style.top = `${top}px`;
   shortcutPreview.style.width = `${displayWidth}px`;
@@ -2253,6 +2654,33 @@ function cancelErasingForGesture() {
   state.erasing = null;
 }
 
+function hideShapePreview() {
+  shapePreview.className = "";
+  shapePreview.style.width = "0";
+  shapePreview.style.height = "0";
+  shapePreview.style.transform = "none";
+}
+
+function cancelShapeDraft() {
+  if (
+    state.shapeDraft &&
+    state.shapeDraft.pointerId !== null &&
+    viewport.hasPointerCapture(state.shapeDraft.pointerId)
+  ) {
+    viewport.releasePointerCapture(state.shapeDraft.pointerId);
+  }
+  state.shapeDraft = null;
+  viewport.classList.remove("is-drawing");
+  hideShapePreview();
+}
+
+function cancelShapeDraftForGesture() {
+  if (!state.shapeDraft) {
+    return;
+  }
+  cancelShapeDraft();
+}
+
 function startTouchGestureFromActiveTouches() {
   const touchEntries = Array.from(state.touchPointers.entries());
   if (touchEntries.length < 2) {
@@ -2264,6 +2692,9 @@ function startTouchGestureFromActiveTouches() {
   }
   if (state.erasing) {
     cancelErasingForGesture();
+  }
+  if (state.shapeDraft) {
+    cancelShapeDraftForGesture();
   }
   if (state.panning) {
     stopPanning(state.panning.pointerId);
@@ -2454,6 +2885,7 @@ function removeStampElementFromState(element, removalContext = null) {
     unregisterStampSpatialCells(element);
     decrementUrlRef(element.dataset.brushUrl);
     element.remove();
+    state.stampCount = Math.max(0, state.stampCount - 1);
   }
 }
 
@@ -2570,7 +3002,7 @@ function queueErasePoint(erasing, x, y) {
 }
 
 function getVisibleStampCount() {
-  return world.getElementsByClassName("stamp").length;
+  return state.stampCount;
 }
 
 function notifyStampLimitReached() {
@@ -2648,6 +3080,9 @@ function buildSessionSnapshot() {
     soloBrushId: Number.isFinite(Number(state.soloBrushId))
       ? Number(state.soloBrushId)
       : null,
+    activeStockBrushFolderId: typeof state.activeStockBrushFolderId === "string"
+      ? state.activeStockBrushFolderId
+      : null,
     camera: {
       x: state.camera.x,
       y: state.camera.y,
@@ -2665,6 +3100,8 @@ function buildSessionSnapshot() {
       renderLinear: renderModeToggle.checked,
       cursorTrailEnabled: cursorTrailToggle.checked,
       cursorTrailCount: parseNumericInputValue(cursorTrailCountSlider, 24),
+      drawMode: state.drawMode,
+      spraySpread: parseNumericInputValue(spraySpreadSlider, 64),
       sidebarCollapsed: state.sidebarCollapsed,
       sidebarTab: state.sidebarTab,
       brushGalleryCollapsed: state.brushGalleryCollapsed,
@@ -2744,8 +3181,11 @@ function createStampElement(stampData, brush, fallbackTintSettings = null) {
   stamp.src = brush.url;
   stamp.alt = "";
   stamp.draggable = false;
+  stamp.loading = "lazy";
+  stamp.decoding = "async";
   stamp.dataset.brushUrl = brush.url;
   stamp.dataset.brushId = String(brush.id);
+  applyGifPauseStateToImage(stamp);
   stamp.style.width = `${width}px`;
   stamp.style.height = `${height}px`;
   stamp.style.left = `${Number(stampData.left) || 0}px`;
@@ -2802,7 +3242,9 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
       stamp.dataset.strokeId = String(stroke.id);
       if (appendToWorld) {
         world.appendChild(stamp);
+        state.stampCount += 1;
         registerStampSpatialCells(stamp);
+        updateStampViewportVisibility(stamp);
         incrementUrlRef(brush.url);
       }
       stroke.elements.push(stamp);
@@ -2813,6 +3255,9 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
     }
   }
 
+  if (appendToWorld && restored.length) {
+    scheduleStampVisibilityRefresh();
+  }
   return restored;
 }
 
@@ -2873,6 +3318,15 @@ async function restoreSessionState() {
 
     const snapshotSoloBrushId = Number(snapshot.soloBrushId);
     state.soloBrushId = Number.isFinite(snapshotSoloBrushId) ? snapshotSoloBrushId : null;
+    const snapshotStockFolderId =
+      typeof snapshot.activeStockBrushFolderId === "string"
+        ? snapshot.activeStockBrushFolderId
+        : "";
+    state.activeStockBrushFolderId = STOCK_BRUSH_FOLDERS.some(
+      (folder) => folder.id === snapshotStockFolderId
+    )
+      ? snapshotStockFolderId
+      : null;
     const soloBrush = getSoloBrush();
     if (soloBrush) {
       soloBrush.enabled = true;
@@ -2888,6 +3342,7 @@ async function restoreSessionState() {
 
     world.innerHTML = "";
     clearStampSpatialIndex();
+    state.stampCount = 0;
     state.urlRefCounts.clear();
     state.strokes = [];
     state.history = [];
@@ -2946,6 +3401,8 @@ async function restoreSessionState() {
     renderModeToggle.checked = Boolean(controls.renderLinear);
     cursorTrailToggle.checked = Boolean(controls.cursorTrailEnabled);
     setInputNumericValue(cursorTrailCountSlider, controls.cursorTrailCount);
+    state.drawMode = DRAW_MODES.includes(controls.drawMode) ? controls.drawMode : "pencil";
+    setInputNumericValue(spraySpreadSlider, controls.spraySpread);
     state.sidebarCollapsed = Boolean(controls.sidebarCollapsed);
     state.sidebarTab = controls.sidebarTab === "settings" ? "settings" : "main";
     state.brushGalleryCollapsed = Boolean(controls.brushGalleryCollapsed);
@@ -2971,6 +3428,8 @@ async function restoreSessionState() {
     updateConsistentModeUI();
     updateRenderModeUI();
     updateCursorTrailUI();
+    updateDrawModeUI();
+    updateGifPauseButtonUI();
     updateRotationIndicator();
     updateSidebarVisibilityUI();
     updateSidebarTabUI();
@@ -2980,6 +3439,7 @@ async function restoreSessionState() {
     updateUndoState();
     updateBrushStatus();
     renderBrushGallery();
+    renderStockBrushButtons();
     refreshBrushTintOnVisibleElements();
     renderCamera();
     return true;
@@ -3048,6 +3508,111 @@ function updateBrushStatus(customMessage) {
     `Loaded ${state.brushes.length} brush image(s). ${enabledCount} active.`;
 }
 
+function getStockBrushFiles(folder) {
+  if (!folder || !Array.isArray(folder.files)) {
+    return [];
+  }
+  return folder.files.filter((filePath) =>
+    typeof filePath === "string" && ALLOWED_EXTENSIONS.test(filePath)
+  );
+}
+
+function getStockBrushFolderById(folderId) {
+  return STOCK_BRUSH_FOLDERS.find((folder) => folder && folder.id === folderId) || null;
+}
+
+function getOrderedStockBrushFolders() {
+  const foldersByName = new Map(
+    STOCK_BRUSH_FOLDERS.map((folder) => [String(folder?.name || ""), folder])
+  );
+  const orderedFolders = [];
+  for (const folderName of STOCK_BRUSH_FOLDER_ORDER) {
+    const folder = foldersByName.get(folderName);
+    if (folder) {
+      orderedFolders.push(folder);
+      foldersByName.delete(folderName);
+    }
+  }
+  orderedFolders.push(...foldersByName.values());
+  return orderedFolders;
+}
+
+function encodeStockBrushPath(filePath) {
+  return String(filePath)
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function getStockBrushFileName(filePath) {
+  const parts = String(filePath).split("/");
+  return parts[parts.length - 1] || "brush";
+}
+
+function getStockBrushIconPath(folder) {
+  if (!folder || !folder.id) {
+    return "";
+  }
+  const cachedPath = stockBrushIconPaths.get(folder.id);
+  if (cachedPath) {
+    return cachedPath;
+  }
+  const files = getStockBrushFiles(folder);
+  if (!files.length) {
+    return "";
+  }
+  const iconPath = files[Math.floor(Math.random() * files.length)];
+  stockBrushIconPaths.set(folder.id, iconPath);
+  return iconPath;
+}
+
+function renderStockBrushButtons() {
+  if (!stockBrushButtons) {
+    return;
+  }
+
+  const folders = getOrderedStockBrushFolders().filter((folder) => getStockBrushFiles(folder).length);
+  const showBrushData = !state.brushGalleryCollapsed;
+  stockBrushButtons.hidden = !showBrushData || folders.length === 0;
+  stockBrushButtons.innerHTML = "";
+  if (!showBrushData || !folders.length) {
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const folder of folders) {
+    const button = document.createElement("button");
+    const iconPath = getStockBrushIconPath(folder);
+    const isActive = state.activeStockBrushFolderId === folder.id;
+    const isLoading = state.stockBrushLoadingFolderId === folder.id;
+    button.type = "button";
+    button.className = "stock-brush-button";
+    button.dataset.stockBrushFolderId = folder.id;
+    button.title = `Load ${folder.name} stock brushes`;
+    button.setAttribute("aria-label", `Load ${folder.name} stock brushes`);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.disabled = Boolean(state.stockBrushLoadingFolderId);
+    button.classList.toggle("is-active", isActive);
+    button.classList.toggle("is-loading", isLoading);
+
+    if (iconPath) {
+      const icon = document.createElement("img");
+      icon.className = "stock-brush-icon";
+      icon.src = encodeStockBrushPath(iconPath);
+      icon.alt = "";
+      icon.draggable = false;
+      icon.loading = "lazy";
+      icon.decoding = "async";
+      applyGifPauseStateToImage(icon);
+      button.appendChild(icon);
+    }
+
+    fragment.appendChild(button);
+  }
+
+  stockBrushButtons.appendChild(fragment);
+}
+
 function createBrushActionButton(action, label, isActive, title) {
   const button = document.createElement("button");
   button.type = "button";
@@ -3112,6 +3677,9 @@ function renderBrushGallery() {
     preview.src = brush.url;
     preview.alt = brush.name;
     preview.draggable = false;
+    preview.loading = "lazy";
+    preview.decoding = "async";
+    applyGifPauseStateToImage(preview);
     applyBrushTintStyle(preview, !brush.enabled, NO_TINT_SETTINGS);
 
     const name = document.createElement("p");
@@ -3242,8 +3810,18 @@ function screenToWorld(clientX, clientY) {
 function renderCamera() {
   world.style.transform =
     `translate(${state.camera.x}px, ${state.camera.y}px) scale(${state.camera.scale})`;
+  scheduleStampVisibilityRefresh();
   if (state.exportMode) {
     updateExportOverlayGeometry();
+  }
+  if (state.shapeDraft) {
+    updateShapePreview(
+      state.shapeDraft.mode,
+      state.shapeDraft.anchorX,
+      state.shapeDraft.anchorY,
+      state.shapeDraft.currentX,
+      state.shapeDraft.currentY
+    );
   }
 }
 
@@ -3290,16 +3868,26 @@ function detachStrokeFromWorld(stroke) {
   for (const element of stroke.elements) {
     unregisterStampSpatialCells(element);
     decrementUrlRef(element.dataset.brushUrl);
-    element.remove();
+    if (element.parentElement === world) {
+      element.remove();
+      state.stampCount = Math.max(0, state.stampCount - 1);
+    }
   }
+  scheduleStampVisibilityRefresh();
 }
 
 function appendStrokeToWorld(stroke) {
+  const viewportBounds = getViewportWorldBounds();
   for (const element of stroke.elements) {
+    if (element.parentElement !== world) {
+      state.stampCount += 1;
+    }
     world.appendChild(element);
     registerStampSpatialCells(element);
+    updateStampViewportVisibility(element, viewportBounds);
     incrementUrlRef(element.dataset.brushUrl);
   }
+  scheduleStampVisibilityRefresh();
 }
 
 function pushHistoryAction(action) {
@@ -3373,10 +3961,13 @@ function undoEraseAction(action) {
       const insertWorldIndex = Math.max(0, Math.min(preferredWorldIndex, world.childElementCount));
       const beforeNode = world.children[insertWorldIndex] || null;
       world.insertBefore(removal.element, beforeNode);
+      state.stampCount += 1;
       registerStampSpatialCells(removal.element);
+      updateStampViewportVisibility(removal.element);
       incrementUrlRef(removal.element.dataset.brushUrl);
     }
   }
+  scheduleStampVisibilityRefresh();
 }
 
 function redoEraseAction(action) {
@@ -3467,6 +4058,7 @@ function clearAllStrokes() {
     detachStrokeFromWorld(stroke);
   }
   clearStampSpatialIndex();
+  state.stampCount = 0;
   if (state.exportMode) {
     exitExportMode();
   }
@@ -3516,6 +4108,34 @@ function pickRandomBrush() {
   return candidates[candidates.length - 1];
 }
 
+function ensureDrawableBrushes() {
+  if (!state.brushes.length) {
+    updateBrushStatus("Load brush data before drawing.");
+    return false;
+  }
+
+  if (!hasEnabledBrushes()) {
+    updateBrushStatus("Enable at least one brush image before drawing.");
+    return false;
+  }
+
+  return true;
+}
+
+function getSpacingValue() {
+  return Math.max(1, Number(spacingSlider.value) || 1);
+}
+
+function getSpraySpreadValue() {
+  return Math.max(1, Number(spraySpreadSlider.value) || 1);
+}
+
+function getSprayStampCount(spread) {
+  const spacing = getSpacingValue();
+  const density = Math.max(1, spread / Math.max(1, spacing));
+  return clamp(Math.round(density * density * 3), SPRAY_MIN_STAMPS, SPRAY_MAX_STAMPS);
+}
+
 function placeBrush(x, y, stroke) {
   if (getVisibleStampCount() >= MAX_VISIBLE_STAMPS) {
     notifyStampLimitReached();
@@ -3527,24 +4147,19 @@ function placeBrush(x, y, stroke) {
     return false;
   }
 
-  let width = 0;
-  let height = 0;
-  if (consistentToggle.checked) {
-    width = Math.max(4, Number(consistentSizeSlider.value));
-    height = Math.max(4, width * (brush.height / brush.width));
-  } else {
-    const scale = Number(sizeSlider.value) / 100;
-    width = Math.max(4, brush.width * scale);
-    height = Math.max(4, brush.height * scale);
-  }
+  const { width, height } = getBrushPlacementSize(brush);
   const stamp = document.createElement("img");
 
   stamp.className = "stamp";
   stamp.src = brush.url;
   stamp.alt = "";
   stamp.draggable = false;
+  stamp.loading = "lazy";
+  stamp.decoding = "async";
   stamp.dataset.brushUrl = brush.url;
   stamp.dataset.brushId = String(brush.id);
+  stamp.dataset.strokeId = String(stroke.id);
+  applyGifPauseStateToImage(stamp);
   stamp.style.width = `${width}px`;
   stamp.style.height = `${height}px`;
   stamp.style.left = `${x - width / 2}px`;
@@ -3559,10 +4174,211 @@ function placeBrush(x, y, stroke) {
   applyBrushTintStyle(stamp, false, tintSettings);
 
   world.appendChild(stamp);
+  state.stampCount += 1;
   registerStampSpatialCells(stamp);
+  updateStampViewportVisibility(stamp);
   incrementUrlRef(brush.url);
   stroke.elements.push(stamp);
+  scheduleStampVisibilityRefresh();
   return true;
+}
+
+function placeSpray(x, y, stroke) {
+  const spread = getSpraySpreadValue();
+  const stampCount = getSprayStampCount(spread);
+  let placedAny = false;
+
+  for (let index = 0; index < stampCount; index += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.sqrt(Math.random()) * spread;
+    if (placeBrush(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, stroke)) {
+      placedAny = true;
+    } else if (getVisibleStampCount() >= MAX_VISIBLE_STAMPS) {
+      break;
+    }
+  }
+
+  return placedAny;
+}
+
+function placeLineBrushes(stroke, startX, startY, endX, endY) {
+  let placedAny = placeBrush(startX, startY, stroke);
+  const spacing = getSpacingValue();
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const distance = Math.hypot(dx, dy);
+  if (distance === 0) {
+    return placedAny;
+  }
+
+  const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
+  const stepX = dx / distance;
+  const stepY = dy / distance;
+  let traveled = spacing;
+  let placedAfterStart = 0;
+  while (traveled <= distance && placedAfterStart < capacity) {
+    if (!placeBrush(startX + stepX * traveled, startY + stepY * traveled, stroke)) {
+      break;
+    }
+    placedAny = true;
+    placedAfterStart += 1;
+    traveled += spacing;
+  }
+
+  return placedAny;
+}
+
+function getRectBoundsFromPoints(startX, startY, endX, endY) {
+  return {
+    left: Math.min(startX, endX),
+    top: Math.min(startY, endY),
+    right: Math.max(startX, endX),
+    bottom: Math.max(startY, endY)
+  };
+}
+
+function getCircleBoundsFromPoints(startX, startY, endX, endY) {
+  const size = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
+  return {
+    left: endX >= startX ? startX : startX - size,
+    top: endY >= startY ? startY : startY - size,
+    right: endX >= startX ? startX + size : startX,
+    bottom: endY >= startY ? startY + size : startY
+  };
+}
+
+function getGridAxisPositions(min, max, spacing) {
+  const size = Math.max(0, max - min);
+  const count = Math.max(1, Math.floor(size / spacing) + 1);
+  const usedSize = (count - 1) * spacing;
+  const start = min + (size - usedSize) / 2;
+  const positions = [];
+  for (let index = 0; index < count; index += 1) {
+    positions.push(start + index * spacing);
+  }
+  return positions;
+}
+
+function placeRectBrushes(stroke, startX, startY, endX, endY) {
+  const bounds = getRectBoundsFromPoints(startX, startY, endX, endY);
+  const spacing = getSpacingValue();
+  const xPositions = getGridAxisPositions(bounds.left, bounds.right, spacing);
+  const yPositions = getGridAxisPositions(bounds.top, bounds.bottom, spacing);
+  const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
+  let placedAny = false;
+  if (capacity <= 0) {
+    notifyStampLimitReached();
+    return false;
+  }
+
+  for (const y of yPositions) {
+    for (const x of xPositions) {
+      if (stroke.elements.length >= capacity) {
+        return placedAny;
+      }
+      if (!placeBrush(x, y, stroke)) {
+        return placedAny;
+      }
+      placedAny = true;
+    }
+  }
+
+  return placedAny;
+}
+
+function placeCircleBrushes(stroke, startX, startY, endX, endY) {
+  const bounds = getCircleBoundsFromPoints(startX, startY, endX, endY);
+  const spacing = getSpacingValue();
+  const xPositions = getGridAxisPositions(bounds.left, bounds.right, spacing);
+  const yPositions = getGridAxisPositions(bounds.top, bounds.bottom, spacing);
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  const radius = Math.max(0, (bounds.right - bounds.left) / 2);
+  const radiusSq = radius * radius;
+  const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
+  let placedAny = false;
+  if (capacity <= 0) {
+    notifyStampLimitReached();
+    return false;
+  }
+
+  for (const y of yPositions) {
+    for (const x of xPositions) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      if (dx * dx + dy * dy > radiusSq) {
+        continue;
+      }
+      if (stroke.elements.length >= capacity) {
+        return placedAny;
+      }
+      if (!placeBrush(x, y, stroke)) {
+        return placedAny;
+      }
+      placedAny = true;
+    }
+  }
+
+  if (!placedAny) {
+    placedAny = placeBrush(centerX, centerY, stroke);
+  }
+  return placedAny;
+}
+
+function setShapePreviewBox(bounds, className) {
+  const topLeft = worldToScreen(bounds.left, bounds.top);
+  const bottomRight = worldToScreen(bounds.right, bounds.bottom);
+  const left = Math.min(topLeft.x, bottomRight.x);
+  const top = Math.min(topLeft.y, bottomRight.y);
+  const width = Math.abs(bottomRight.x - topLeft.x);
+  const height = Math.abs(bottomRight.y - topLeft.y);
+  shapePreview.className = `is-visible ${className}`;
+  shapePreview.style.left = `${left}px`;
+  shapePreview.style.top = `${top}px`;
+  shapePreview.style.width = `${width}px`;
+  shapePreview.style.height = `${height}px`;
+  shapePreview.style.transform = "none";
+}
+
+function updateShapePreview(mode, startX, startY, endX, endY) {
+  if (mode === "line") {
+    const start = worldToScreen(startX, startY);
+    const end = worldToScreen(endX, endY);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    shapePreview.className = "is-visible is-line";
+    shapePreview.style.left = `${start.x}px`;
+    shapePreview.style.top = `${start.y}px`;
+    shapePreview.style.width = `${Math.hypot(dx, dy)}px`;
+    shapePreview.style.height = "0";
+    shapePreview.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    return;
+  }
+
+  if (mode === "box") {
+    setShapePreviewBox(getRectBoundsFromPoints(startX, startY, endX, endY), "is-box");
+    return;
+  }
+
+  if (mode === "circle") {
+    setShapePreviewBox(getCircleBoundsFromPoints(startX, startY, endX, endY), "is-circle");
+  }
+}
+
+function commitShapeStroke(mode, startX, startY, endX, endY) {
+  const stroke = { id: state.nextStrokeId, elements: [] };
+  state.nextStrokeId += 1;
+
+  if (mode === "line") {
+    placeLineBrushes(stroke, startX, startY, endX, endY);
+  } else if (mode === "box") {
+    placeRectBrushes(stroke, startX, startY, endX, endY);
+  } else if (mode === "circle") {
+    placeCircleBrushes(stroke, startX, startY, endX, endY);
+  }
+
+  pushStroke(stroke);
+  return stroke.elements.length > 0;
 }
 
 function placeAlongPath(drawing, x, y) {
@@ -3570,7 +4386,7 @@ function placeAlongPath(drawing, x, y) {
     return;
   }
 
-  const spacing = Number(spacingSlider.value);
+  const spacing = getSpacingValue();
   const dx = x - drawing.lastPlacedX;
   const dy = y - drawing.lastPlacedY;
   const distance = Math.hypot(dx, dy);
@@ -3588,7 +4404,10 @@ function placeAlongPath(drawing, x, y) {
   while (remaining >= spacing) {
     cursorX += stepX * spacing;
     cursorY += stepY * spacing;
-    if (!placeBrush(cursorX, cursorY, drawing.stroke)) {
+    const placed = drawing.mode === "spray"
+      ? placeSpray(cursorX, cursorY, drawing.stroke)
+      : placeBrush(cursorX, cursorY, drawing.stroke);
+    if (!placed) {
       drawing.limitReached = true;
       break;
     }
@@ -3953,6 +4772,7 @@ async function confirmExport() {
 
   const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
   const resolution = getExportScaledResolution(normalized);
+  restoreAllCulledStampSources();
   const entries = collectExportStampEntries(normalized);
   const hasGif = hasGifStampOnCanvas();
   const timestamp = Date.now();
@@ -3982,6 +4802,7 @@ async function confirmExport() {
     exportButton.classList.remove("is-loading");
     updateUndoState();
     updateExportModeUI();
+    scheduleStampVisibilityRefresh();
   }
 }
 
@@ -4008,6 +4829,21 @@ async function readFileAsDataUrl(file) {
   });
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 function isAllowedImage(file) {
   if (!file || !file.name) {
     return false;
@@ -4015,10 +4851,84 @@ function isAllowedImage(file) {
   return ALLOWED_EXTENSIONS.test(file.name);
 }
 
-function unloadBrushDataSelection() {
-  if (!state.brushes.length) {
+async function loadStockBrushFolder(folderId) {
+  if (state.stockBrushLoadingFolderId) {
+    return;
+  }
+
+  const folder = getStockBrushFolderById(folderId);
+  const files = getStockBrushFiles(folder);
+  if (!folder || !files.length) {
+    return;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  state.stockBrushLoadingFolderId = folder.id;
+  renderStockBrushButtons();
+  updateBrushStatus(`Loading ${folder.name} stock brushes...`);
+
+  try {
+    const loadedBrushData = await mapWithConcurrency(files, 18, async (filePath) => {
+      try {
+        const url = encodeStockBrushPath(filePath);
+        const dimensions = await getImageDimensions(url);
+        return {
+          url,
+          name: getStockBrushFileName(filePath),
+          width: dimensions.width,
+          height: dimensions.height,
+          originalUrl: url,
+          originalWidth: dimensions.width,
+          originalHeight: dimensions.height,
+          cropRect: null,
+          enabled: true,
+          weightMode: "normal"
+        };
+      } catch (error) {
+        return null;
+      }
+    });
+    const loaded = loadedBrushData.filter(Boolean);
+    if (!loaded.length) {
+      updateBrushStatus(`Could not load ${folder.name} stock brushes.`);
+      return;
+    }
+
+    const previousBrushUrls = state.brushes.map((brush) => brush.url);
+    state.brushes = loaded.map((brushData) => {
+      const brush = {
+        id: state.nextBrushId,
+        ...brushData
+      };
+      state.nextBrushId += 1;
+      return brush;
+    });
+    state.soloBrushId = null;
+    state.activeStockBrushFolderId = folder.id;
+    for (const oldUrl of previousBrushUrls) {
+      maybeReleaseObjectUrl(oldUrl);
+    }
+
+    brushInput.value = "";
     updateBrushStatus();
     renderBrushGallery();
+    updateEraseCursorGeometry();
+    scheduleSessionSave();
+  } finally {
+    state.stockBrushLoadingFolderId = null;
+    renderStockBrushButtons();
+  }
+}
+
+function unloadBrushDataSelection() {
+  if (!state.brushes.length) {
+    state.activeStockBrushFolderId = null;
+    updateBrushStatus();
+    renderBrushGallery();
+    renderStockBrushButtons();
     return;
   }
 
@@ -4029,6 +4939,7 @@ function unloadBrushDataSelection() {
   const previousBrushUrls = state.brushes.map((brush) => brush.url);
   state.brushes = [];
   state.soloBrushId = null;
+  state.activeStockBrushFolderId = null;
   for (const oldUrl of previousBrushUrls) {
     maybeReleaseObjectUrl(oldUrl);
   }
@@ -4036,6 +4947,7 @@ function unloadBrushDataSelection() {
   brushInput.value = "";
   updateBrushStatus();
   renderBrushGallery();
+  renderStockBrushButtons();
   updateEraseCursorGeometry();
   scheduleSessionSave();
 }
@@ -4082,6 +4994,7 @@ async function loadBrushFiles(files) {
 
   state.brushes = loaded;
   state.soloBrushId = null;
+  state.activeStockBrushFolderId = null;
   for (const oldUrl of previousBrushUrls) {
     maybeReleaseObjectUrl(oldUrl);
   }
@@ -4089,10 +5002,12 @@ async function loadBrushFiles(files) {
   if (state.brushes.length) {
     updateBrushStatus();
     renderBrushGallery();
+    renderStockBrushButtons();
     scheduleSessionSave();
   } else {
     updateBrushStatus("Could not load image data from selection.");
     renderBrushGallery();
+    renderStockBrushButtons();
     scheduleSessionSave();
   }
 }
@@ -4198,11 +5113,9 @@ function startErasing(event) {
   const point = screenToWorld(event.clientX, event.clientY);
   const radiusWorld = getCurrentEraserDiameterWorld() / 2;
   const worldOrder = new Map();
-  for (let index = 0; index < world.children.length; index += 1) {
-    const element = world.children[index];
-    if (element.classList && element.classList.contains("stamp")) {
-      worldOrder.set(element, index);
-    }
+  const stamps = world.getElementsByClassName("stamp");
+  for (let index = 0; index < stamps.length; index += 1) {
+    worldOrder.set(stamps[index], index);
   }
   const removalContext = {
     records: [],
@@ -4247,13 +5160,7 @@ function stopErasing(pointerId) {
 }
 
 function startDrawing(event) {
-  if (!state.brushes.length) {
-    updateBrushStatus("Load brush data before drawing.");
-    return;
-  }
-
-  if (!hasEnabledBrushes()) {
-    updateBrushStatus("Enable at least one brush image before drawing.");
+  if (!ensureDrawableBrushes()) {
     return;
   }
 
@@ -4261,12 +5168,16 @@ function startDrawing(event) {
   const stroke = { id: state.nextStrokeId, elements: [] };
   state.nextStrokeId += 1;
 
-  if (!placeBrush(point.x, point.y, stroke)) {
+  const placed = state.drawMode === "spray"
+    ? placeSpray(point.x, point.y, stroke)
+    : placeBrush(point.x, point.y, stroke);
+  if (!placed) {
     return;
   }
 
   state.drawing = {
     pointerId: event.pointerId,
+    mode: state.drawMode,
     stroke,
     lastPlacedX: point.x,
     lastPlacedY: point.y,
@@ -4287,6 +5198,98 @@ function stopDrawing(pointerId) {
   }
   state.drawing = null;
   viewport.classList.remove("is-drawing");
+}
+
+function startShapeDrawing(event) {
+  if (!ensureDrawableBrushes()) {
+    return;
+  }
+
+  const point = screenToWorld(event.clientX, event.clientY);
+  if (
+    state.shapeDraft &&
+    state.shapeDraft.mode === state.drawMode &&
+    state.shapeDraft.pointerId === null
+  ) {
+    state.shapeDraft.pointerId = event.pointerId;
+    state.shapeDraft.fromPending = true;
+    state.shapeDraft.currentX = point.x;
+    state.shapeDraft.currentY = point.y;
+    state.shapeDraft.startClientX = event.clientX;
+    state.shapeDraft.startClientY = event.clientY;
+    state.shapeDraft.dragging = false;
+  } else {
+    cancelShapeDraft();
+    state.shapeDraft = {
+      mode: state.drawMode,
+      anchorX: point.x,
+      anchorY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+      pointerId: event.pointerId,
+      fromPending: false,
+      dragging: false,
+      startClientX: event.clientX,
+      startClientY: event.clientY
+    };
+  }
+
+  viewport.classList.add("is-drawing");
+  updateShapePreview(
+    state.shapeDraft.mode,
+    state.shapeDraft.anchorX,
+    state.shapeDraft.anchorY,
+    point.x,
+    point.y
+  );
+  viewport.setPointerCapture(event.pointerId);
+}
+
+function updateShapeDrawing(event) {
+  const draft = state.shapeDraft;
+  if (!draft) {
+    return;
+  }
+
+  const point = screenToWorld(event.clientX, event.clientY);
+  if (draft.pointerId === event.pointerId) {
+    const dragDistance = Math.hypot(event.clientX - draft.startClientX, event.clientY - draft.startClientY);
+    if (dragDistance >= SHAPE_DRAG_THRESHOLD_PX) {
+      draft.dragging = true;
+    }
+    draft.currentX = point.x;
+    draft.currentY = point.y;
+    updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, point.x, point.y);
+    return;
+  }
+
+  if (draft.pointerId === null) {
+    updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, point.x, point.y);
+  }
+}
+
+function stopShapeDrawing(pointerId) {
+  const draft = state.shapeDraft;
+  if (!draft || draft.pointerId !== pointerId) {
+    return;
+  }
+
+  if (viewport.hasPointerCapture(pointerId)) {
+    viewport.releasePointerCapture(pointerId);
+  }
+
+  viewport.classList.remove("is-drawing");
+  if (!draft.dragging && !draft.fromPending) {
+    draft.pointerId = null;
+    draft.currentX = draft.anchorX;
+    draft.currentY = draft.anchorY;
+    hideShapePreview();
+    return;
+  }
+
+  commitShapeStroke(draft.mode, draft.anchorX, draft.anchorY, draft.currentX, draft.currentY);
+  state.shapeDraft = null;
+  hideShapePreview();
 }
 
 function startPanning(event, captureElement = viewport) {
@@ -4360,6 +5363,11 @@ function onPointerDown(event) {
     return;
   }
 
+  if (isShapeDrawMode(state.drawMode)) {
+    startShapeDrawing(event);
+    return;
+  }
+
   startDrawing(event);
 }
 
@@ -4406,6 +5414,13 @@ function onPointerMove(event) {
     queueErasePoint(state.erasing, point.x, point.y);
   }
 
+  if (state.shapeDraft) {
+    if (state.shapeDraft.pointerId === event.pointerId) {
+      event.preventDefault();
+    }
+    updateShapeDrawing(event);
+  }
+
   updateCursorTrailAtClientPoint(event.clientX, event.clientY);
 }
 
@@ -4426,6 +5441,7 @@ function onPointerUp(event) {
 
   stopPanning(event.pointerId);
   stopErasing(event.pointerId);
+  stopShapeDrawing(event.pointerId);
   stopDrawing(event.pointerId);
   updateEraseCursorVisibility();
 }
@@ -4502,6 +5518,7 @@ function openClearConfirmModal() {
   if (getVisibleStampCount() === 0) {
     return;
   }
+  cancelShapeDraft();
   clearConfirmModal.classList.add("is-open");
   clearConfirmModal.setAttribute("aria-hidden", "false");
   confirmNoButton.focus();
@@ -4517,6 +5534,7 @@ function setEraseMode(nextValue) {
   state.eraseMode = Boolean(nextValue);
   if (state.eraseMode) {
     clearCursorTrail();
+    cancelShapeDraft();
   }
   if (!state.eraseMode && state.erasing) {
     stopErasing(state.erasing.pointerId);
@@ -4624,6 +5642,13 @@ function onExportScaleButtonClick(event) {
   setExportScalePercent(Number(button.dataset.scale));
 }
 
+function onExportResolutionInput(axis, input) {
+  if (!input || String(input.value).trim() === "") {
+    return;
+  }
+  setExportResolutionFromInput(axis, input.value);
+}
+
 initializeSliderGroupToggles();
 
 brushDataToggleButton.addEventListener("click", () => {
@@ -4638,6 +5663,16 @@ unloadBrushDataButton.addEventListener("click", (event) => {
   unloadBrushDataSelection();
 });
 brushGallery.addEventListener("click", onBrushGalleryClick);
+if (stockBrushButtons) {
+  stockBrushButtons.addEventListener("click", (event) => {
+    const button = event.target.closest(".stock-brush-button");
+    if (!button || button.disabled) {
+      return;
+    }
+    event.preventDefault();
+    void loadStockBrushFolder(button.dataset.stockBrushFolderId || "");
+  });
+}
 dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
   dropZone.classList.add("is-over");
@@ -4778,6 +5813,20 @@ cursorTrailCountSlider.addEventListener("input", () => {
   enforceCursorTrailLimit();
   scheduleSessionSave();
 });
+if (drawModeButtons) {
+  drawModeButtons.addEventListener("click", (event) => {
+    const button = event.target.closest(".draw-mode-button");
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    setDrawMode(button.dataset.drawMode || "pencil");
+  });
+}
+spraySpreadSlider.addEventListener("input", () => {
+  updateSliderText();
+  scheduleSessionSave();
+});
 sidebarOptionsButton.addEventListener("click", () => {
   state.sidebarTab = state.sidebarTab === "settings" ? "main" : "settings";
   updateSidebarTabUI();
@@ -4858,6 +5907,9 @@ exportCancelButton.addEventListener("click", () => {
   }
   exitExportMode({ focusButton: true });
 });
+gifPauseButton.addEventListener("click", () => {
+  setGifAnimationsPaused(!state.gifAnimationsPaused);
+});
 confirmYesButton.addEventListener("click", () => {
   clearAllStrokes();
   closeClearConfirmModal();
@@ -4909,6 +5961,24 @@ exportOverlay.addEventListener("contextmenu", (event) => {
   }
 });
 exportScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
+exportWidthInput.addEventListener("input", () => {
+  onExportResolutionInput("width", exportWidthInput);
+});
+exportHeightInput.addEventListener("input", () => {
+  onExportResolutionInput("height", exportHeightInput);
+});
+exportWidthInput.addEventListener("blur", () => {
+  updateExportOverlayGeometry();
+});
+exportHeightInput.addEventListener("blur", () => {
+  updateExportOverlayGeometry();
+});
+exportWidthInput.addEventListener("focus", () => {
+  exportWidthInput.select();
+});
+exportHeightInput.addEventListener("focus", () => {
+  exportHeightInput.select();
+});
 document.addEventListener("pointerdown", (event) => {
   if (!state.tintPopoverOpen) {
     return;
@@ -4928,6 +5998,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.brushCropEditor.open) {
     event.preventDefault();
     closeBrushCropModal();
+    return;
+  }
+  if (event.key === "Escape" && state.shapeDraft) {
+    event.preventDefault();
+    cancelShapeDraft();
     return;
   }
   if (event.key === "Escape" && state.exportMode) {
@@ -4966,6 +6041,7 @@ document.addEventListener("keyup", (event) => {
 });
 window.addEventListener("blur", () => {
   stopRotationIndicatorDrag();
+  cancelShapeDraft();
   if (state.eraseCursorRafId !== null) {
     window.cancelAnimationFrame(state.eraseCursorRafId);
     state.eraseCursorRafId = null;
@@ -5027,6 +6103,7 @@ document.addEventListener("visibilitychange", () => {
     flushSessionSaveNow();
   }
 });
+gifPauseObserver.observe(document.body, { childList: true, subtree: true });
 
 async function initializeApp() {
   const restored = await restoreSessionState();
@@ -5041,6 +6118,8 @@ async function initializeApp() {
   updateConsistentModeUI();
   updateRenderModeUI();
   updateCursorTrailUI();
+  updateDrawModeUI();
+  updateGifPauseButtonUI();
   updateRotationIndicator();
   updateSidebarVisibilityUI();
   updateSidebarTabUI();
@@ -5050,6 +6129,7 @@ async function initializeApp() {
   updateUndoState();
   updateBrushStatus();
   renderBrushGallery();
+  renderStockBrushButtons();
   renderCamera();
 }
 
