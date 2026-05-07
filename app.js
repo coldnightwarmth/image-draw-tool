@@ -6,29 +6,82 @@ const STOCK_BRUSH_FOLDERS = Array.isArray(window.STOCK_BRUSH_FOLDERS)
 const STOCK_BRUSH_FOLDER_ORDER = [
   "radial",
   "flower",
-  "glitch_square",
-  "glitch_square2",
-  "green_square",
+  "garden",
+  "stroke",
+  "squares",
   "futari glitch",
   "esp ra de glitch",
   "laser data",
   "particles",
-  "garden",
   "3d",
-  "misc",
   "pixel art+games",
+  "anime",
+  "misc",
   "esp ra de",
   "esp ra de characters",
   "framing"
 ];
 const DRAW_MODES = ["pencil", "spray", "line", "box", "circle"];
 const SHAPE_DRAW_MODES = new Set(["line", "box", "circle"]);
+const SIDEBAR_TABS = ["draw", "brushes", "edit", "export", "community", "settings"];
+const EDIT_LAYER_LIVE_MOVE_LIMIT = 1000;
+const MAX_LAYER_SEQUENCE_EFFECTS = 3;
+const LAYER_SEQUENCE_EFFECT_OPTIONS = [
+  { value: "show-hide", label: "Show/Hide" },
+  { value: "move", label: "Move" },
+  { value: "rotate", label: "Rotate" },
+  { value: "scale", label: "Scale" },
+  { value: "color-cycle", label: "Color Cycle" },
+  { value: "image-cycle", label: "Image Cycle" }
+];
+const LAYER_SEQUENCE_TIMING_OPTIONS = [
+  { value: "pulse", label: "Pulse" },
+  { value: "wave", label: "Bounce" },
+  { value: "step", label: "Step" },
+  { value: "random", label: "Random" },
+  { value: "all", label: "All" }
+];
+const LAYER_SEQUENCE_MOVE_MODE_OPTIONS = [
+  { value: "left", label: "left" },
+  { value: "right", label: "right" },
+  { value: "up", label: "up" },
+  { value: "down", label: "down" },
+  { value: "circle", label: "circle" },
+  { value: "swing", label: "swing" },
+  { value: "random", label: "random" }
+];
+const LAYER_SEQUENCE_DEFAULT_SETTINGS = {
+  showHideFade: false,
+  showHideFadeLength: 300,
+  moveInstant: false,
+  moveMode: "left",
+  moveStrength: 80,
+  moveSpeed: 45,
+  colorCycleColor: "#ff00ff",
+  colorCycleAmount: 70,
+  colorCycleInstant: false,
+  colorCycleSpeed: 45,
+  rotateSpeed: 45,
+  scaleSpeed: 45,
+  scaleAmount: 50,
+  imageCycleRandom: false,
+  pulseSpeed: 35,
+  pulseRate: 35,
+  waveSpeed: 45,
+  waveReverse: false,
+  stepLength: 350,
+  stepAmount: 1,
+  randomSpeed: 45
+};
 const SESSION_STORAGE_KEY = "random-brush-drawer-session-v1";
 const SESSION_STORAGE_POINTER_KEY = `${SESSION_STORAGE_KEY}-pointer`;
 const SESSION_STORAGE_TAB_ID_KEY = `${SESSION_STORAGE_KEY}-tab-id`;
 const SESSION_IDB_PREFIX = "idb:";
 const SESSION_IDB_NAME = "image-brush-session-cache";
 const SESSION_IDB_STORE_NAME = "snapshots";
+const SAVED_COMPOSITIONS_INDEX_KEY = "saved-compositions:index";
+const SAVED_COMPOSITION_KEY_PREFIX = "saved-composition:";
+const FAVORITE_BRUSH_SOURCES_KEY = "favorite-brush-sources:v1";
 const SAVE_DEBOUNCE_MS = 140;
 
 const viewport = document.getElementById("viewport");
@@ -38,6 +91,17 @@ const controlsMain = document.getElementById("controlsMain");
 const settingsPanel = document.getElementById("settingsPanel");
 const sidebarOptionsButton = document.getElementById("sidebarOptionsButton");
 const sidebarToggleButton = document.getElementById("sidebarToggleButton");
+const sidebarPanels = Array.from(document.querySelectorAll("[data-sidebar-panel]"));
+const mainModeBar = document.getElementById("mainModeBar");
+const mainModeTabButtons = Array.from(document.querySelectorAll(".main-mode-tab-button"));
+const drawingBrushDataSlot = document.getElementById("drawingBrushDataSlot");
+const brushDataPanel = document.getElementById("brushDataPanel");
+const brushDataControlGroup = document.getElementById("brushDataControlGroup");
+const editLayerList = document.getElementById("editLayerList");
+const editLayerDeleteDropzone = document.getElementById("editLayerDeleteDropzone");
+const saveCompositionButton = document.getElementById("saveCompositionButton");
+const savedCompositionsStatus = document.getElementById("savedCompositionsStatus");
+const savedCompositionsGallery = document.getElementById("savedCompositionsGallery");
 const brushDataToggleButton = document.getElementById("brushDataToggleButton");
 const dropZone = document.getElementById("dropZone");
 const dropZoneHeader = document.getElementById("dropZoneHeader");
@@ -45,6 +109,11 @@ const dropZonePrompt = document.getElementById("dropZonePrompt");
 const unloadBrushDataButton = document.getElementById("unloadBrushDataButton");
 const brushGallery = document.getElementById("brushGallery");
 const stockBrushButtons = document.getElementById("stockBrushButtons");
+const brushSortControls = document.getElementById("brushSortControls");
+const brushSortSelect = document.getElementById("brushSortSelect");
+const loadAllStockBrushesButton = document.getElementById("loadAllStockBrushesButton");
+const loadFavoriteBrushesButton = document.getElementById("loadFavoriteBrushesButton");
+const loadFavoriteBrushesFullButton = document.getElementById("loadFavoriteBrushesFullButton");
 const brushInput = document.getElementById("brushInput");
 const brushStatus = document.getElementById("brushStatus");
 const sizeScaleGroup = document.getElementById("sizeScaleGroup");
@@ -70,7 +139,25 @@ const tintAmountSlider = document.getElementById("tintAmountSlider");
 const tintAmountValue = document.getElementById("tintAmountValue");
 const canvasBgColorLabel = document.getElementById("canvasBgColorLabel");
 const canvasBgColorInput = document.getElementById("canvasBgColorInput");
+const exportCanvasBgColorLabel = document.getElementById("exportCanvasBgColorLabel");
+const exportCanvasBgColorInput = document.getElementById("exportCanvasBgColorInput");
+const exportBgImageButton = document.getElementById("exportBgImageButton");
+const exportBgImagePreview = document.getElementById("exportBgImagePreview");
+const exportBgImageInput = document.getElementById("exportBgImageInput");
+const exportBgImageControls = document.getElementById("exportBgImageControls");
+const exportBgImageOpacitySlider = document.getElementById("exportBgImageOpacitySlider");
+const exportBgImageOpacityValue = document.getElementById("exportBgImageOpacityValue");
+const exportBgImageModeLabel = document.getElementById("exportBgImageModeLabel");
+const exportBgImageTileToggle = document.getElementById("exportBgImageTileToggle");
+const exportBgImageTileSizeGroup = document.getElementById("exportBgImageTileSizeGroup");
+const exportBgImageTileSizeSlider = document.getElementById("exportBgImageTileSizeSlider");
+const exportBgImageTileSizeValue = document.getElementById("exportBgImageTileSizeValue");
 const exportBackgroundToggle = document.getElementById("exportBackgroundToggle");
+const exportSeeBeyondToggle = document.getElementById("exportSeeBeyondToggle");
+const gifCountToggle = document.getElementById("gifCountToggle");
+const gifCountIndicator = document.getElementById("gifCountIndicator");
+const gifPauseToggle = document.getElementById("gifPauseToggle");
+const brushPreviewToggle = document.getElementById("brushPreviewToggle");
 const filterDefs = document.getElementById("filterDefs");
 const opacitySlider = document.getElementById("opacitySlider");
 const opacityValue = document.getElementById("opacityValue");
@@ -82,6 +169,7 @@ const cursorTrailCountSlider = document.getElementById("cursorTrailCountSlider")
 const cursorTrailCountValue = document.getElementById("cursorTrailCountValue");
 const eraseCursor = document.getElementById("eraseCursor");
 const shapePreview = document.getElementById("shapePreview");
+const brushCursorPreview = document.getElementById("brushCursorPreview");
 const shortcutPreview = document.getElementById("shortcutPreview");
 const drawModeButtons = document.getElementById("drawModeButtons");
 const spraySpreadGroup = document.getElementById("spraySpreadGroup");
@@ -92,12 +180,16 @@ const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
 const clearButton = document.getElementById("clearButton");
 const exportActions = document.getElementById("exportActions");
+const exportModeButton = document.getElementById("exportModeButton");
 const exportButton = document.getElementById("exportButton");
 const exportCancelButton = document.getElementById("exportCancelButton");
 const gifPauseButton = document.getElementById("gifPauseButton");
 const clearConfirmModal = document.getElementById("clearConfirmModal");
 const confirmYesButton = document.getElementById("confirmYesButton");
 const confirmNoButton = document.getElementById("confirmNoButton");
+const savedDeleteConfirmModal = document.getElementById("savedDeleteConfirmModal");
+const savedDeleteConfirmYesButton = document.getElementById("savedDeleteConfirmYesButton");
+const savedDeleteConfirmNoButton = document.getElementById("savedDeleteConfirmNoButton");
 const brushCropModal = document.getElementById("brushCropModal");
 const brushCropDialog = document.getElementById("brushCropDialog");
 const brushCropStage = document.getElementById("brushCropStage");
@@ -109,25 +201,67 @@ const brushCropShadeBottom = document.getElementById("brushCropShadeBottom");
 const brushCropShadeLeft = document.getElementById("brushCropShadeLeft");
 const brushCropConfirmButton = document.getElementById("brushCropConfirmButton");
 const brushCropCancelButton = document.getElementById("brushCropCancelButton");
+const brushCropWidthInput = document.getElementById("brushCropWidthInput");
+const brushCropHeightInput = document.getElementById("brushCropHeightInput");
+const brushCropResolutionResetButton = document.getElementById("brushCropResolutionResetButton");
+const brushCropFrameControls = document.getElementById("brushCropFrameControls");
+const brushCropFrameTrack = document.getElementById("brushCropFrameTrack");
+const brushCropFrameSegments = document.getElementById("brushCropFrameSegments");
+const brushCropFrameSelection = document.getElementById("brushCropFrameSelection");
+const brushCropFrameStartHandle = document.getElementById("brushCropFrameStartHandle");
+const brushCropFrameEndHandle = document.getElementById("brushCropFrameEndHandle");
+const brushCropFrameReadout = document.getElementById("brushCropFrameReadout");
+const brushCropProbabilityControls = document.getElementById("brushCropProbabilityControls");
+const brushCropProbabilityButtons = brushCropProbabilityControls
+  ? Array.from(brushCropProbabilityControls.querySelectorAll(".brush-crop-probability-button"))
+  : [];
 const exportOverlay = document.getElementById("exportOverlay");
 const exportShadeTop = document.getElementById("exportShadeTop");
 const exportShadeRight = document.getElementById("exportShadeRight");
 const exportShadeBottom = document.getElementById("exportShadeBottom");
 const exportShadeLeft = document.getElementById("exportShadeLeft");
 const exportSelection = document.getElementById("exportSelection");
+const exportBgImageLayer = document.getElementById("exportBgImageLayer");
 const exportMeta = document.getElementById("exportMeta");
 const exportWidthInput = document.getElementById("exportWidthInput");
 const exportHeightInput = document.getElementById("exportHeightInput");
+const exportSidebarWidthInput = document.getElementById("exportSidebarWidthInput");
+const exportSidebarHeightInput = document.getElementById("exportSidebarHeightInput");
 const exportScaleButtonsGroup = document.getElementById("exportScaleButtons");
+const exportSidebarScaleButtonsGroup = document.getElementById("exportSidebarScaleButtons");
+const exportAnimationDurationLabel = document.getElementById("exportAnimationDurationLabel");
+const exportAnimationAutoToggle = document.getElementById("exportAnimationAutoToggle");
+const exportAnimationManualControls = document.getElementById("exportAnimationManualControls");
+const exportAnimationSecondsButtonsGroup = document.getElementById("exportAnimationSecondsButtons");
+const exportAnimationSecondsButtons = exportAnimationSecondsButtonsGroup
+  ? Array.from(exportAnimationSecondsButtonsGroup.querySelectorAll(".export-animation-seconds-button"))
+  : [];
+const exportFrameCountInput = document.getElementById("exportFrameCountInput");
+const exportVideoDurationLabel = document.getElementById("exportVideoDurationLabel");
+const exportVideoAutoToggle = document.getElementById("exportVideoAutoToggle");
+const exportVideoLengthRow = document.getElementById("exportVideoLengthRow");
+const exportVideoLengthInput = document.getElementById("exportVideoLengthInput");
+const exportVideoButton = document.getElementById("exportVideoButton");
+const exportVideoCancelButton = document.getElementById("exportVideoCancelButton");
 const exportScaleButtons = Array.from(
   exportOverlay.querySelectorAll(".export-scale-button")
 );
+const exportSidebarScaleButtons = exportSidebarScaleButtonsGroup
+  ? Array.from(exportSidebarScaleButtonsGroup.querySelectorAll(".export-scale-button"))
+  : [];
 const sliderToggleLabels = Array.from(
   document.querySelectorAll(".slider-toggle-label[data-slider-toggle-target]")
 );
 
-const LOW_WEIGHT_MULTIPLIER = 0.12;
-const HIGH_WEIGHT_MULTIPLIER = 4.5;
+const BRUSH_WEIGHT_MULTIPLIERS = {
+  standard: 8,
+  common: 3,
+  normal: 1,
+  uncommon: 0.35,
+  rare: 0.08,
+  low: 0.35,
+  high: 3
+};
 const ERASER_PERCENT_SIZE_MULTIPLIER = 2;
 const ERASER_GLOBAL_SIZE_MULTIPLIER = 2.5;
 const MIN_CAMERA_SCALE = 0.005;
@@ -137,6 +271,21 @@ const EXPORT_SELECTION_PADDING = 18;
 const EXPORT_MIN_SIZE = 24;
 const EXPORT_GIF_DURATION_MS = 2000;
 const EXPORT_GIF_FRAME_DELAY_MS = 50;
+const EXPORT_MAX_FRAME_COUNT = 512;
+const EXPORT_MANUAL_SECONDS_PRESETS = [0.5, 1, 2, 3, 4, 5];
+const EXPORT_VIDEO_MAX_DIMENSION = 1600;
+const EXPORT_VIDEO_MAX_SECONDS = 30;
+const EXPORT_VIDEO_FPS = 30;
+const EXPORT_PROGRESS_COLLECT_END = 5;
+const EXPORT_PROGRESS_DECODE_END = 18;
+const EXPORT_PROGRESS_DRAW_END = 55;
+const EXPORT_PROGRESS_PNG_ENCODE_HOLD = 88;
+const EXPORT_PROGRESS_ENCODE_END = 99;
+const EXPORT_BG_TILE_MIN_SIZE = 8;
+const EXPORT_BG_TILE_MID_SIZE = 1000;
+const EXPORT_BG_TILE_MAX_SIZE = 5000;
+const EXPORT_BG_TILE_SLIDER_MAX = 1000;
+const EXPORT_BG_TILE_SLIDER_MID = 750;
 const GIF_JS_LIBRARY_URL = "gif.js";
 const GIF_JS_WORKER_URL = "gif.worker.js";
 const GIFUCT_MODULE_URL = "./gifuct-js.bundle.mjs";
@@ -156,7 +305,57 @@ const ERASER_PATH_MIN_STEP = 6;
 const ERASER_MAX_SAMPLES_PER_FRAME = 24;
 const SPRAY_MIN_STAMPS = 3;
 const SPRAY_MAX_STAMPS = 34;
+const DEFAULT_SPRAY_SPREAD = 256;
 const SHAPE_DRAG_THRESHOLD_PX = 5;
+const PLACEMENT_CANCEL_CHECK_INTERVAL = 40;
+const EXPORT_CANCEL_CHECK_INTERVAL = 40;
+const BRUSH_FRAME_COUNT_DECODE_CONCURRENCY = 2;
+const SEQUENCE_INTERRUPT_TWEEN_MS = 160;
+const SEQUENCE_TRIGGER_PRIME_MS = 16;
+const SEQUENCE_DATASET_KEYS = [
+  "sequenceActive",
+  "sequenceBaseOpacity",
+  "sequenceBaseSrc",
+  "sequenceImageCycleKey",
+  "sequenceTriggerKey",
+  "sequenceHidden",
+  "sequenceVisibilityStart",
+  "sequenceVisibilityFrom",
+  "sequenceVisibilityTo",
+  "sequenceVisibilityDuration",
+  "sequenceMoveStart",
+  "sequenceMoveFromX",
+  "sequenceMoveFromY",
+  "sequenceMoveToX",
+  "sequenceMoveToY",
+  "sequenceMoveDuration",
+  "sequenceMoveExpanded",
+  "sequenceMoveCircleStep",
+  "sequenceRotateStart",
+  "sequenceRotateFrom",
+  "sequenceRotateTo",
+  "sequenceRotateDuration",
+  "sequenceScaleStart",
+  "sequenceScaleFrom",
+  "sequenceScaleTo",
+  "sequenceScaleDuration",
+  "sequenceScaleTarget",
+  "sequenceScaleExpanded",
+  "sequenceColorStart",
+  "sequenceColorFrom",
+  "sequenceColorTo",
+  "sequenceColorDuration",
+  "sequenceColorTarget",
+  "sequenceColorShifted"
+];
+const SEQUENCE_BASE_DATASET_KEYS = [
+  "sequenceActive",
+  "sequenceBaseOpacity",
+  "sequenceBaseSrc"
+];
+const SEQUENCE_SLOT_STATE_KEYS = SEQUENCE_DATASET_KEYS.filter(
+  (key) => !SEQUENCE_BASE_DATASET_KEYS.includes(key)
+);
 
 const state = {
   brushes: [],
@@ -165,12 +364,18 @@ const state = {
   redoHistory: [],
   camera: { x: 0, y: 0, scale: 1 },
   drawing: null,
+  placementTask: null,
+  sequenceExportActive: false,
   erasing: null,
   panning: null,
   touchPointers: new Map(),
   touchGesture: null,
   drawMode: "pencil",
   shapeDraft: null,
+  editLayerDrag: null,
+  editLayerMove: null,
+  sequenceRafId: null,
+  selectedEditLayerId: null,
   strokeById: new Map(),
   stampSpatialBuckets: new Map(),
   stampSpatialCells: new WeakMap(),
@@ -181,14 +386,33 @@ const state = {
   nextStrokeId: 1,
   saveTimerId: null,
   soloBrushId: null,
+  selectedBrushIds: new Set(),
+  favoriteBrushSources: new Set(),
+  favoriteReturnState: null,
   activeStockBrushFolderId: null,
   stockBrushLoadingFolderId: null,
   gifAnimationsPaused: false,
   sidebarCollapsed: false,
-  sidebarTab: "main",
+  sidebarTab: "draw",
+  previousSidebarTab: "draw",
   brushGalleryCollapsed: false,
+  brushGallerySort: "alpha",
+  savedCompositions: [],
+  savedCompositionsLoaded: false,
+  pendingSavedCompositionDeleteId: null,
   canvasBackgroundColor: "#ffffff",
   exportBackgroundEnabled: true,
+  exportSeeBeyondEnabled: true,
+  exportBgImageUrl: "",
+  exportBgImageObjectUrl: "",
+  exportBgImageOpacity: 100,
+  exportBgImageMode: "stretch",
+  exportBgImageTileSize: 128,
+  exportBgImageNaturalWidth: 0,
+  exportBgImageNaturalHeight: 0,
+  showGifCountIndicator: true,
+  showGifPauseButton: true,
+  brushPreviewEnabled: true,
   eraseMode: false,
   pointerInViewport: false,
   lastPointerClientX: 0,
@@ -197,6 +421,13 @@ const state = {
   cursorTrailLastWorldX: null,
   cursorTrailLastWorldY: null,
   exportMode: false,
+  exportTask: null,
+  lastExportSetup: null,
+  exportAnimationAuto: true,
+  exportAnimationSeconds: 3,
+  exportAnimationFrameCount: "",
+  exportVideoAuto: true,
+  exportVideoSeconds: 3,
   exportSelectionBounds: null,
   exportScalePercent: 100,
   exportDrag: null,
@@ -204,6 +435,15 @@ const state = {
   shortcutPreview: {
     brushId: null,
     hideTimerId: null
+  },
+  brushCursorPreview: {
+    brushId: null,
+    sourceUrl: "",
+    frozenUrl: "",
+    loadingUrl: "",
+    failedUrl: "",
+    renderedUrl: "",
+    loadToken: 0
   },
   eraseCursorRafId: null,
   eraseCursorRadiusScreen: 9,
@@ -216,6 +456,18 @@ const state = {
     imageUrl: "",
     imageWidth: 0,
     imageHeight: 0,
+    outputWidth: 0,
+    outputHeight: 0,
+    frameCount: 0,
+    frameStart: 0,
+    frameEnd: 0,
+    frameDrag: null,
+    frameAnimation: null,
+    frameControlsLoading: false,
+    framePreviewUrls: [],
+    framePreviewTimerId: null,
+    framePreviewIndex: 0,
+    weightMode: "normal",
     cropRect: null,
     drag: null
   }
@@ -228,10 +480,131 @@ let gifuctModulePromise = null;
 let tintNativePickerOpen = false;
 let canvasBgNativePickerOpen = false;
 let suppressTintPickerClick = false;
+
+function createCancellationError(message = "Operation cancelled.") {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function isCancellationError(error) {
+  return error && error.name === "AbortError";
+}
+
+function createCancellableTask(type) {
+  return {
+    type,
+    cancelled: false,
+    gif: null,
+    mediaRecorder: null,
+    cancel() {
+      this.cancelled = true;
+      if (this.gif && typeof this.gif.abort === "function") {
+        try {
+          this.gif.abort();
+        } catch (error) {
+          // GIF may already have finished or aborted.
+        }
+      }
+      if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+        try {
+          this.mediaRecorder.stop();
+        } catch (error) {
+          // Recorder may already have stopped.
+        }
+      }
+    }
+  };
+}
+
+function throwIfTaskCancelled(task) {
+  if (task && task.cancelled) {
+    throw createCancellationError();
+  }
+}
+
+async function yieldToMainThread(task = null) {
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  throwIfTaskCancelled(task);
+}
+
+async function waitForExportFrameDelay(durationMs, task = null) {
+  await new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(durationMs) || 0)));
+  throwIfTaskCancelled(task);
+}
+
+function setExportButtonContent(text, loading = false, button = exportButton) {
+  if (!button) {
+    return;
+  }
+  button.replaceChildren();
+  if (!loading) {
+    button.textContent = text;
+    return;
+  }
+
+  const spinner = document.createElement("span");
+  spinner.className = "export-loading-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+
+  const label = document.createElement("span");
+  label.className = "export-loading-label";
+  label.textContent = text;
+
+  button.appendChild(spinner);
+  button.appendChild(label);
+}
+
+function updateExportProgress(task, percent, label = "Exporting") {
+  if (!task || state.exportTask !== task) {
+    return;
+  }
+  const button = task.button || exportButton;
+  const progress = clamp(Math.round(Number(percent) || 0), 0, 100);
+  const displayLabel = task.cancelled ? "Cancelling export" : label;
+  task.progress = progress;
+  task.progressLabel = displayLabel;
+  button.style.setProperty("--export-progress", `${progress}%`);
+  setExportButtonContent(`${displayLabel} ${progress}%`, true, button);
+  button.setAttribute("aria-label", `${displayLabel} ${progress}%`);
+  button.title = `${displayLabel} ${progress}%`;
+}
+
+function resetExportProgress(button = exportButton, label = "Render GIF") {
+  if (!button) {
+    return;
+  }
+  button.style.removeProperty("--export-progress");
+  setExportButtonContent(label, false, button);
+}
+
+function cancelPlacementTask() {
+  if (!state.placementTask) {
+    return false;
+  }
+  state.placementTask.cancel();
+  updateBrushStatus("Cancelling placement...");
+  return true;
+}
+
+function cancelExportTask() {
+  if (!state.exportTask) {
+    return false;
+  }
+  state.exportTask.cancel();
+  updateExportModeUI();
+  updateBrushStatus("Cancelling export...");
+  return true;
+}
 let suppressNextTintInputClick = false;
 let suppressNextCanvasBgInputClick = false;
 const tintFilterCache = new Map();
+let exportTintScratchCanvas = null;
+const exportBackgroundImageCache = new Map();
 const stockBrushIconPaths = new Map();
+const brushFrameCountPromises = new Map();
+const brushFrameCountQueue = [];
+let activeBrushFrameCountDecodes = 0;
 const NO_TINT_SETTINGS = { color: "#ffffff", amountPercent: 0 };
 const gifPauseObserver = new MutationObserver((mutations) => {
   if (!state.gifAnimationsPaused) {
@@ -351,6 +724,33 @@ function normalizeTintSettings(tintSettings = null, fallbackTintSettings = null)
   return { color, amountPercent };
 }
 
+function getTintLayerList(tintSettings = null, fallbackTintSettings = null) {
+  const source = tintSettings == null && fallbackTintSettings != null
+    ? fallbackTintSettings
+    : tintSettings;
+  const rawLayers = Array.isArray(source?.layers) ? source.layers : [source];
+  return rawLayers
+    .map((layer) => normalizeTintSettings(layer, fallbackTintSettings))
+    .filter((layer) => layer.amountPercent > 0);
+}
+
+function createLayeredTintSettings(...tintSettingsList) {
+  const layers = [];
+  for (const tintSettings of tintSettingsList) {
+    layers.push(...getTintLayerList(tintSettings));
+  }
+
+  if (!layers.length) {
+    return NO_TINT_SETTINGS;
+  }
+
+  if (layers.length === 1) {
+    return layers[0];
+  }
+
+  return { layers };
+}
+
 function getCurrentTintSettings() {
   return normalizeTintSettings({
     color: tintColorInput ? tintColorInput.value : "#ffffff",
@@ -359,30 +759,44 @@ function getCurrentTintSettings() {
 }
 
 function getTintMatrixValues(tintSettings) {
-  const normalized = normalizeTintSettings(tintSettings);
-  const amount = normalized.amountPercent / 100;
-  const { red, green, blue } = hexToRgbUnit(normalized.color);
-  const keep = 1 - amount;
+  const layers = getTintLayerList(tintSettings);
+  let keep = 1;
+  let redOffset = 0;
+  let greenOffset = 0;
+  let blueOffset = 0;
 
-  // Blend from original color to a flat selected-color overlay.
-  // At 100%, output RGB becomes exactly the selected color.
+  for (const layer of layers) {
+    const amount = layer.amountPercent / 100;
+    const color = hexToRgbUnit(layer.color);
+    const layerKeep = 1 - amount;
+    redOffset = redOffset * layerKeep + amount * color.red;
+    greenOffset = greenOffset * layerKeep + amount * color.green;
+    blueOffset = blueOffset * layerKeep + amount * color.blue;
+    keep *= layerKeep;
+  }
+
+  // Apply tint layers in order so sequence color effects stack on top of brush tint.
   return [
-    keep, 0, 0, 0, amount * red,
-    0, keep, 0, 0, amount * green,
-    0, 0, keep, 0, amount * blue,
+    keep, 0, 0, 0, redOffset,
+    0, keep, 0, 0, greenOffset,
+    0, 0, keep, 0, blueOffset,
     0, 0, 0, 1, 0
   ];
 }
 
 function getTintFilterId(tintSettings) {
-  const normalized = normalizeTintSettings(tintSettings);
-  if (normalized.amountPercent <= 0) {
+  const layers = getTintLayerList(tintSettings);
+  if (!layers.length) {
     return "";
   }
 
-  const colorToken = normalized.color.replace("#", "");
-  const amountToken = String(normalized.amountPercent).replace(/[^0-9a-z]+/gi, "_");
-  const key = `${colorToken}-${amountToken}`;
+  const key = layers
+    .map((layer) => {
+      const colorToken = layer.color.replace("#", "");
+      const amountToken = String(layer.amountPercent).replace(/[^0-9a-z]+/gi, "_");
+      return `${colorToken}-${amountToken}`;
+    })
+    .join("__");
   const cachedFilterId = tintFilterCache.get(key);
   if (cachedFilterId) {
     return cachedFilterId;
@@ -407,7 +821,7 @@ function getTintFilterId(tintSettings) {
 
   const colorMatrix = document.createElementNS(svgNamespace, "feColorMatrix");
   colorMatrix.setAttribute("type", "matrix");
-  const matrixValues = getTintMatrixValues(normalized);
+  const matrixValues = getTintMatrixValues({ layers });
   colorMatrix.setAttribute("values", matrixValues.map((value) => value.toFixed(6)).join(" "));
 
   filterElement.appendChild(colorMatrix);
@@ -417,8 +831,8 @@ function getTintFilterId(tintSettings) {
 }
 
 function getBrushTintCssFilter(disabled = false, tintSettings = null) {
-  const normalized = normalizeTintSettings(tintSettings, getCurrentTintSettings());
-  if (normalized.amountPercent <= 0) {
+  const normalized = tintSettings == null ? getCurrentTintSettings() : tintSettings;
+  if (!getTintLayerList(normalized).length) {
     return disabled ? "grayscale(0.75)" : "";
   }
 
@@ -461,6 +875,10 @@ function refreshBrushTintOnVisibleElements() {
 
   if (shortcutPreview.classList.contains("is-visible")) {
     applyBrushTintStyle(shortcutPreview, false, currentTint);
+  }
+
+  if (brushCursorPreview && brushCursorPreview.classList.contains("is-visible")) {
+    applyBrushTintStyle(brushCursorPreview, false, currentTint);
   }
 
   const thumbs = brushGallery.querySelectorAll(".brush-thumb");
@@ -558,6 +976,100 @@ function isGifUrl(url) {
   return /^data:image\/gif/i.test(url) || /\.gif(?:$|[?#])/i.test(url);
 }
 
+function getBrushSourceIsGif(brush) {
+  if (!brush) {
+    return false;
+  }
+  return (
+    isGifUrl(brush.url) ||
+    isGifUrl(brush.originalUrl) ||
+    /\.gif$/i.test(String(brush.name || ""))
+  );
+}
+
+function normalizeBrushFrameCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.max(1, Math.round(count)) : null;
+}
+
+function getBrushFrameCountLabel(brush) {
+  const count = normalizeBrushFrameCount(brush?.frameCount);
+  if (count) {
+    return count === 1 ? "1 frame" : `${count} frames`;
+  }
+  return getBrushSourceIsGif(brush) ? "... frames" : "1 frame";
+}
+
+function getBrushDimensionsLabel(brush) {
+  const width = Math.max(1, Math.round(Number(brush?.originalWidth) || Number(brush?.width) || 1));
+  const height = Math.max(1, Math.round(Number(brush?.originalHeight) || Number(brush?.height) || 1));
+  return `${width}x${height}`;
+}
+
+function getBrushMetaText(brush) {
+  return `${getBrushFrameCountLabel(brush)} / ${getBrushDimensionsLabel(brush)}`;
+}
+
+function clearBrushFrameCountJobs() {
+  brushFrameCountPromises.clear();
+  brushFrameCountQueue.length = 0;
+}
+
+function runBrushFrameCountQueue() {
+  while (
+    activeBrushFrameCountDecodes < BRUSH_FRAME_COUNT_DECODE_CONCURRENCY &&
+    brushFrameCountQueue.length
+  ) {
+    const job = brushFrameCountQueue.shift();
+    activeBrushFrameCountDecodes += 1;
+
+    window.setTimeout(() => {
+      decodeGifAnimation(job.sourceUrl)
+        .then((animation) => normalizeBrushFrameCount(animation?.frames?.length) || 1)
+        .catch(() => 1)
+        .then((count) => {
+          const currentBrush = findBrushById(job.brushId);
+          if (!currentBrush || (currentBrush.originalUrl || currentBrush.url) !== job.sourceUrl) {
+            return;
+          }
+          currentBrush.frameCount = count;
+          if (state.sidebarTab === "brushes") {
+            renderBrushGallery();
+          }
+          scheduleSessionSave();
+        })
+        .finally(() => {
+          brushFrameCountPromises.delete(job.brushId);
+          activeBrushFrameCountDecodes = Math.max(0, activeBrushFrameCountDecodes - 1);
+          runBrushFrameCountQueue();
+        });
+    }, 0);
+  }
+}
+
+function ensureBrushFrameCount(brush) {
+  if (!brush || !getBrushSourceIsGif(brush)) {
+    if (brush && !normalizeBrushFrameCount(brush.frameCount)) {
+      brush.frameCount = 1;
+    }
+    return;
+  }
+
+  if (normalizeBrushFrameCount(brush.frameCount)) {
+    return;
+  }
+
+  const brushId = Number(brush.id);
+  if (!Number.isFinite(brushId) || brushFrameCountPromises.has(brushId)) {
+    return;
+  }
+
+  const sourceUrl = brush.originalUrl || brush.url;
+  brushFrameCountPromises.set(brushId, true);
+  brushFrameCountQueue.push({ brushId, sourceUrl });
+  runBrushFrameCountQueue();
+}
+
 function getImageGifSource(image) {
   if (!(image instanceof HTMLImageElement)) {
     return "";
@@ -565,15 +1077,48 @@ function getImageGifSource(image) {
 
   return (
     image.dataset.gifPausedSrc ||
-    image.dataset.brushUrl ||
     image.getAttribute("src") ||
     image.currentSrc ||
+    image.dataset.brushUrl ||
     ""
   );
 }
 
+function markGifPlaybackStart(image, source = "") {
+  if (!(image instanceof HTMLImageElement)) {
+    return;
+  }
+  const gifSource = source || getImageGifSource(image);
+  if (!isGifUrl(gifSource)) {
+    delete image.dataset.gifPlaybackSource;
+    delete image.dataset.gifPlaybackStartedAt;
+    return;
+  }
+  if (image.dataset.gifPlaybackSource !== gifSource || !Number.isFinite(Number(image.dataset.gifPlaybackStartedAt))) {
+    image.dataset.gifPlaybackSource = gifSource;
+    image.dataset.gifPlaybackStartedAt = String(performance.now());
+  }
+}
+
 function isViewportCulledStamp(image) {
   return image instanceof HTMLImageElement && image.dataset.viewportCulled === "true";
+}
+
+function isImageLayerPaused(image) {
+  if (!(image instanceof HTMLImageElement) || !image.classList.contains("stamp")) {
+    return false;
+  }
+  const strokeId = Number(image.dataset.strokeId);
+  const stroke = Number.isFinite(strokeId) ? state.strokeById.get(strokeId) : null;
+  return Boolean(stroke?.animationPaused);
+}
+
+function shouldPauseGifImage(image) {
+  return state.gifAnimationsPaused || isImageLayerPaused(image);
+}
+
+function isStrokeSequencePaused(stroke) {
+  return Boolean(state.gifAnimationsPaused || stroke?.animationPaused);
 }
 
 function captureImageStillFrame(image) {
@@ -603,7 +1148,6 @@ function freezeGifImage(image) {
   if (!isGifUrl(source)) {
     return;
   }
-
   if (!image.complete || !image.naturalWidth || !image.naturalHeight) {
     if (image.dataset.gifPausePending) {
       return;
@@ -613,7 +1157,7 @@ function freezeGifImage(image) {
       "load",
       () => {
         delete image.dataset.gifPausePending;
-        if (state.gifAnimationsPaused) {
+        if (shouldPauseGifImage(image)) {
           freezeGifImage(image);
         }
       },
@@ -646,31 +1190,58 @@ function resumeGifImage(image) {
   }
 
   image.src = pausedSource;
+  markGifPlaybackStart(image, pausedSource);
   delete image.dataset.gifPausedSrc;
 }
 
 function applyGifPauseStateToImage(image) {
-  if (state.gifAnimationsPaused) {
+  if (shouldPauseGifImage(image)) {
     freezeGifImage(image);
+  } else {
+    markGifPlaybackStart(image);
   }
 }
 
+function applyBrushGalleryPreviewAnimationState(preview, brush) {
+  if (!(preview instanceof HTMLImageElement)) {
+    return;
+  }
+
+  if (brush && brush.enabled === false) {
+    preview.dataset.forceGifStill = "true";
+    freezeGifImage(preview);
+    return;
+  }
+
+  delete preview.dataset.forceGifStill;
+  applyGifPauseStateToImage(preview);
+}
+
 function applyGifPauseStateToNode(node) {
-  if (!state.gifAnimationsPaused || !(node instanceof Element)) {
+  if (!(node instanceof Element)) {
     return;
   }
 
   if (node instanceof HTMLImageElement) {
-    freezeGifImage(node);
+    if (node.dataset.forceGifStill === "true") {
+      freezeGifImage(node);
+      return;
+    }
+    applyGifPauseStateToImage(node);
   }
 
   const images = node.querySelectorAll("img");
   for (const image of images) {
-    freezeGifImage(image);
+    if (image.dataset.forceGifStill === "true") {
+      freezeGifImage(image);
+      continue;
+    }
+    applyGifPauseStateToImage(image);
   }
 }
 
 function updateGifPauseButtonUI() {
+  gifPauseButton.hidden = state.showGifPauseButton === false;
   gifPauseButton.classList.toggle("is-paused", state.gifAnimationsPaused);
   gifPauseButton.setAttribute("aria-pressed", String(state.gifAnimationsPaused));
   gifPauseButton.setAttribute(
@@ -680,22 +1251,34 @@ function updateGifPauseButtonUI() {
   gifPauseButton.title = state.gifAnimationsPaused
     ? "Resume GIF animations"
     : "Pause GIF animations";
+  updateGifPauseButtonPosition();
+}
+
+function updateGifPauseButtonPosition() {
+  if (!gifPauseButton) {
+    return;
+  }
+
+  const baseLeft = 14;
+  const gap = 10;
+  const shouldFollowCounter =
+    gifCountIndicator &&
+    state.showGifCountIndicator !== false &&
+    !gifCountIndicator.hidden;
+
+  if (!shouldFollowCounter) {
+    gifPauseButton.style.left = `${baseLeft}px`;
+    return;
+  }
+
+  const rect = gifCountIndicator.getBoundingClientRect();
+  gifPauseButton.style.left = `${Math.round(rect.right + gap)}px`;
 }
 
 function setGifAnimationsPaused(paused) {
   state.gifAnimationsPaused = Boolean(paused);
-
-  const images = Array.from(document.querySelectorAll("img"));
-  for (const image of images) {
-    if (state.gifAnimationsPaused) {
-      freezeGifImage(image);
-    } else {
-      resumeGifImage(image);
-    }
-  }
-
+  applyGlobalGifPauseState(state.gifAnimationsPaused);
   updateGifPauseButtonUI();
-  scheduleStampVisibilityRefresh();
 }
 
 function loadGifLibrary() {
@@ -870,6 +1453,264 @@ function isFullBrushCropRect(rect, fullWidth, fullHeight) {
   );
 }
 
+function normalizeBrushFrameRange(range, frameCount) {
+  const count = Math.max(0, Math.floor(Number(frameCount) || 0));
+  if (count <= 0) {
+    return null;
+  }
+
+  let start = Math.floor(Number(range?.start));
+  let end = Math.floor(Number(range?.end));
+  if (!Number.isFinite(start)) {
+    start = 0;
+  }
+  if (!Number.isFinite(end)) {
+    end = count;
+  }
+
+  start = clamp(start, 0, Math.max(0, count - 1));
+  end = clamp(end, start + 1, count);
+  return { start, end };
+}
+
+function isFullBrushFrameRange(range, frameCount) {
+  const normalized = normalizeBrushFrameRange(range, frameCount);
+  const count = Math.max(0, Math.floor(Number(frameCount) || 0));
+  return !normalized || normalized.start <= 0 && normalized.end >= count;
+}
+
+function getBrushCropAspectRatio() {
+  const rect = state.brushCropEditor.cropRect || {};
+  const width = Math.max(1, Number(rect.width) || Number(state.brushCropEditor.imageWidth) || 1);
+  const height = Math.max(1, Number(rect.height) || Number(state.brushCropEditor.imageHeight) || 1);
+  return width / height;
+}
+
+function setBrushCropOutputSize(width, height) {
+  state.brushCropEditor.outputWidth = clamp(Math.round(Number(width) || 1), 1, EXPORT_MAX_DIMENSION);
+  state.brushCropEditor.outputHeight = clamp(Math.round(Number(height) || 1), 1, EXPORT_MAX_DIMENSION);
+}
+
+function normalizeBrushWeightMode(weightMode) {
+  const mode = String(weightMode || "normal").toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(BRUSH_WEIGHT_MULTIPLIERS, mode)) {
+    if (mode === "low") {
+      return "uncommon";
+    }
+    if (mode === "high") {
+      return "common";
+    }
+    return mode;
+  }
+  return "normal";
+}
+
+function updateBrushCropProbabilityUI() {
+  const activeMode = normalizeBrushWeightMode(state.brushCropEditor.weightMode);
+  for (const button of brushCropProbabilityButtons) {
+    const isActive = normalizeBrushWeightMode(button.dataset.weightMode) === activeMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  }
+}
+
+function syncBrushCropOutputToAspect(axis = "width") {
+  const aspectRatio = getBrushCropAspectRatio();
+  if (axis === "height") {
+    const height = Math.max(1, Number(state.brushCropEditor.outputHeight) || 1);
+    setBrushCropOutputSize(height * aspectRatio, height);
+    return;
+  }
+
+  const width = Math.max(1, Number(state.brushCropEditor.outputWidth) || 1);
+  setBrushCropOutputSize(width, width / aspectRatio);
+}
+
+function getBrushCropNativeOutputSize() {
+  const rect = state.brushCropEditor.cropRect || {};
+  return {
+    width: Math.max(1, Math.round(Number(rect.width) || Number(state.brushCropEditor.imageWidth) || 1)),
+    height: Math.max(1, Math.round(Number(rect.height) || Number(state.brushCropEditor.imageHeight) || 1))
+  };
+}
+
+function updateBrushCropResolutionInputs() {
+  if (!brushCropWidthInput || !brushCropHeightInput) {
+    return;
+  }
+  brushCropWidthInput.value = String(Math.max(1, Math.round(Number(state.brushCropEditor.outputWidth) || 1)));
+  brushCropHeightInput.value = String(Math.max(1, Math.round(Number(state.brushCropEditor.outputHeight) || 1)));
+  if (brushCropResolutionResetButton) {
+    const nativeSize = getBrushCropNativeOutputSize();
+    const outputWidth = Math.max(1, Math.round(Number(state.brushCropEditor.outputWidth) || 1));
+    const outputHeight = Math.max(1, Math.round(Number(state.brushCropEditor.outputHeight) || 1));
+    brushCropResolutionResetButton.hidden =
+      outputWidth === nativeSize.width && outputHeight === nativeSize.height;
+  }
+}
+
+function updateBrushCropFrameControls() {
+  if (
+    !brushCropFrameControls ||
+    !brushCropFrameSegments ||
+    !brushCropFrameSelection ||
+    !brushCropFrameStartHandle ||
+    !brushCropFrameEndHandle
+  ) {
+    return;
+  }
+
+  const frameCount = Math.max(0, Math.floor(Number(state.brushCropEditor.frameCount) || 0));
+  const isGifEditor = getBrushSourceIsGif({
+    url: state.brushCropEditor.imageUrl,
+    originalUrl: state.brushCropEditor.imageUrl
+  });
+  const showLoadingTrack = isGifEditor && state.brushCropEditor.frameControlsLoading;
+  brushCropFrameControls.hidden = frameCount <= 1 && !showLoadingTrack;
+  if (frameCount <= 1) {
+    if (showLoadingTrack) {
+      if (brushCropFrameSegments.dataset.frameCount !== "loading") {
+        brushCropFrameSegments.dataset.frameCount = "loading";
+        brushCropFrameSegments.innerHTML = "";
+      }
+      brushCropFrameSelection.style.left = "0%";
+      brushCropFrameSelection.style.width = "100%";
+      brushCropFrameStartHandle.hidden = true;
+      brushCropFrameEndHandle.hidden = true;
+      if (brushCropFrameReadout) {
+        brushCropFrameReadout.textContent = "loading frames...";
+      }
+    }
+    return;
+  }
+  brushCropFrameStartHandle.hidden = false;
+  brushCropFrameEndHandle.hidden = false;
+
+  const range = normalizeBrushFrameRange(
+    { start: state.brushCropEditor.frameStart, end: state.brushCropEditor.frameEnd },
+    frameCount
+  ) || { start: 0, end: frameCount };
+  state.brushCropEditor.frameStart = range.start;
+  state.brushCropEditor.frameEnd = range.end;
+
+  if (Number(brushCropFrameSegments.dataset.frameCount) !== frameCount) {
+    brushCropFrameSegments.dataset.frameCount = String(frameCount);
+    brushCropFrameSegments.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < frameCount; index += 1) {
+      const segment = document.createElement("span");
+      segment.className = "brush-crop-frame-segment";
+      fragment.appendChild(segment);
+    }
+    brushCropFrameSegments.appendChild(fragment);
+  }
+
+  const startPercent = (range.start / frameCount) * 100;
+  const endPercent = (range.end / frameCount) * 100;
+  brushCropFrameSelection.style.left = `${startPercent}%`;
+  brushCropFrameSelection.style.width = `${Math.max(0, endPercent - startPercent)}%`;
+  brushCropFrameStartHandle.style.left = `${startPercent}%`;
+  brushCropFrameEndHandle.style.left = `${endPercent}%`;
+  brushCropFrameStartHandle.setAttribute("aria-valuenow", String(range.start + 1));
+  brushCropFrameEndHandle.setAttribute("aria-valuenow", String(range.end));
+  if (brushCropFrameReadout) {
+    brushCropFrameReadout.textContent = `frames ${range.start + 1}-${range.end} / ${frameCount}`;
+  }
+}
+
+function updateBrushCropFrameRangeFromPointer(clientX, edge) {
+  const frameCount = Math.max(0, Math.floor(Number(state.brushCropEditor.frameCount) || 0));
+  if (!brushCropFrameTrack || frameCount <= 1) {
+    return;
+  }
+
+  const rect = brushCropFrameTrack.getBoundingClientRect();
+  const ratio = rect.width > 0 ? clamp((clientX - rect.left) / rect.width, 0, 1) : 0;
+  const frame = clamp(Math.round(ratio * frameCount), 0, frameCount);
+  if (edge === "start") {
+    state.brushCropEditor.frameStart = clamp(frame, 0, Math.max(0, state.brushCropEditor.frameEnd - 1));
+  } else {
+    state.brushCropEditor.frameEnd = clamp(frame, state.brushCropEditor.frameStart + 1, frameCount);
+  }
+  updateBrushCropFrameControls();
+  startBrushCropFramePreview();
+}
+
+function clearBrushCropFramePreviewTimer() {
+  const timerId = state.brushCropEditor.framePreviewTimerId;
+  if (timerId !== null) {
+    window.clearTimeout(timerId);
+  }
+  state.brushCropEditor.framePreviewTimerId = null;
+}
+
+function getBrushCropFramePreviewUrl(index) {
+  const animation = state.brushCropEditor.frameAnimation;
+  const frames = Array.isArray(animation?.frames) ? animation.frames : [];
+  const frame = frames[index];
+  if (!frame) {
+    return "";
+  }
+
+  if (state.brushCropEditor.framePreviewUrls[index]) {
+    return state.brushCropEditor.framePreviewUrls[index];
+  }
+
+  try {
+    const url = frame.toDataURL("image/png");
+    state.brushCropEditor.framePreviewUrls[index] = url;
+    return url;
+  } catch (error) {
+    return "";
+  }
+}
+
+function startBrushCropFramePreview() {
+  clearBrushCropFramePreviewTimer();
+  if (!state.brushCropEditor.open || !brushCropImage) {
+    return;
+  }
+
+  const animation = state.brushCropEditor.frameAnimation;
+  const frames = Array.isArray(animation?.frames) ? animation.frames : [];
+  const frameCount = frames.length;
+  if (frameCount <= 1) {
+    return;
+  }
+
+  const step = () => {
+    if (!state.brushCropEditor.open) {
+      return;
+    }
+
+    const range = normalizeBrushFrameRange(
+      { start: state.brushCropEditor.frameStart, end: state.brushCropEditor.frameEnd },
+      frameCount
+    ) || { start: 0, end: frameCount };
+    let index = Math.floor(Number(state.brushCropEditor.framePreviewIndex) || range.start);
+    if (index < range.start || index >= range.end) {
+      index = range.start;
+    }
+
+    const previewUrl = getBrushCropFramePreviewUrl(index);
+    if (previewUrl) {
+      delete brushCropImage.dataset.gifPausePending;
+      delete brushCropImage.dataset.gifPausedSrc;
+      brushCropImage.src = previewUrl;
+    }
+
+    const durations = Array.isArray(animation.durations) ? animation.durations : [];
+    const delay = Math.max(
+      20,
+      Number.isFinite(Number(durations[index])) ? Number(durations[index]) : EXPORT_GIF_FRAME_DELAY_MS
+    );
+    state.brushCropEditor.framePreviewIndex = index + 1 >= range.end ? range.start : index + 1;
+    state.brushCropEditor.framePreviewTimerId = window.setTimeout(step, delay);
+  };
+
+  step();
+}
+
 function readBlobAsDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -910,15 +1751,22 @@ async function cropStaticImageToDataUrl(sourceUrl, cropRect) {
   return canvas.toDataURL("image/png");
 }
 
-async function cropAnimatedGifToDataUrl(sourceUrl, cropRect) {
+async function cropAnimatedGifToDataUrl(sourceUrl, cropRect, frameRange = null) {
   await loadGifLibrary();
   const animation = await decodeGifAnimation(sourceUrl);
+  const sourceFrames = Array.isArray(animation.frames) ? animation.frames : [];
+  const range = normalizeBrushFrameRange(frameRange, sourceFrames.length) || {
+    start: 0,
+    end: sourceFrames.length
+  };
 
   const gif = new window.GIF({
     workers: 2,
     quality: 10,
     width: cropRect.width,
     height: cropRect.height,
+    background: GIF_TRANSPARENT_MATTE,
+    transparent: GIF_TRANSPARENT_MATTE_HEX,
     workerScript: GIF_JS_WORKER_URL
   });
 
@@ -931,13 +1779,16 @@ async function cropAnimatedGifToDataUrl(sourceUrl, cropRect) {
   }
 
   const durations = Array.isArray(animation.durations) ? animation.durations : [];
-  const sourceFrames = Array.isArray(animation.frames) ? animation.frames : [];
-  for (let index = 0; index < sourceFrames.length; index += 1) {
+  for (let index = range.start; index < range.end; index += 1) {
     const sourceFrame = sourceFrames[index];
     if (!sourceFrame) {
       continue;
     }
-    frameCtx.clearRect(0, 0, cropRect.width, cropRect.height);
+    frameCtx.save();
+    frameCtx.globalCompositeOperation = "copy";
+    frameCtx.fillStyle = GIF_TRANSPARENT_MATTE;
+    frameCtx.fillRect(0, 0, cropRect.width, cropRect.height);
+    frameCtx.globalCompositeOperation = "source-over";
     frameCtx.drawImage(
       sourceFrame,
       cropRect.x,
@@ -949,11 +1800,12 @@ async function cropAnimatedGifToDataUrl(sourceUrl, cropRect) {
       cropRect.width,
       cropRect.height
     );
+    frameCtx.restore();
     const delay = Math.max(
       20,
       Number.isFinite(Number(durations[index])) ? Number(durations[index]) : EXPORT_GIF_FRAME_DELAY_MS
     );
-    gif.addFrame(frameCanvas, { copy: true, delay });
+    gif.addFrame(frameCanvas, { copy: true, delay, dispose: 2 });
   }
 
   const blob = await new Promise((resolve, reject) => {
@@ -964,7 +1816,7 @@ async function cropAnimatedGifToDataUrl(sourceUrl, cropRect) {
   return readBlobAsDataUrl(blob);
 }
 
-async function applyCropToBrush(brushId, cropRect) {
+async function applyCropToBrush(brushId, cropRect, options = {}) {
   const brush = findBrushById(brushId);
   if (!brush) {
     return;
@@ -973,36 +1825,63 @@ async function applyCropToBrush(brushId, cropRect) {
   const fullWidth = getBrushOriginalWidth(brush);
   const fullHeight = getBrushOriginalHeight(brush);
   const normalizedRect = normalizeBrushCropRect(cropRect, fullWidth, fullHeight);
+  const outputWidth = clamp(Math.round(Number(options.outputWidth) || normalizedRect.width), 1, EXPORT_MAX_DIMENSION);
+  const outputHeight = clamp(Math.round(Number(options.outputHeight) || normalizedRect.height), 1, EXPORT_MAX_DIMENSION);
+  const nextWeightMode = normalizeBrushWeightMode(options.weightMode || brush.weightMode);
 
   const sourceUrl = getBrushOriginalUrl(brush);
   if (!sourceUrl) {
     return;
   }
 
-  if (isFullBrushCropRect(normalizedRect, fullWidth, fullHeight)) {
+  const isGifBrush =
+    isGifUrl(sourceUrl) ||
+    /\.gif$/i.test(String(brush.name || ""));
+  const frameCount = Math.max(0, Math.floor(Number(options.frameCount) || Number(brush.frameCount) || 0));
+  const frameRange = isGifBrush
+    ? normalizeBrushFrameRange(options.frameRange || brush.frameRange, frameCount)
+    : null;
+  const hasPartialFrameRange = isGifBrush && frameRange && !isFullBrushFrameRange(frameRange, frameCount);
+
+  if (isFullBrushCropRect(normalizedRect, fullWidth, fullHeight) && !hasPartialFrameRange) {
     brush.url = sourceUrl;
-    brush.width = fullWidth;
-    brush.height = fullHeight;
+    brush.width = outputWidth;
+    brush.height = outputHeight;
     brush.cropRect = null;
+    brush.frameRange = null;
+    brush.frameCount = isGifBrush
+      ? normalizeBrushFrameCount(frameCount) || normalizeBrushFrameCount(brush.frameCount)
+      : 1;
+    brush.weightMode = nextWeightMode;
+    if (state.brushCursorPreview.brushId === brush.id) {
+      resetBrushCursorPreviewSource();
+    }
     renderBrushGallery();
     updateBrushStatus();
+    updateBrushCursorPreview();
     scheduleSessionSave();
     return;
   }
 
-  const isGifBrush =
-    isGifUrl(sourceUrl) ||
-    /\.gif$/i.test(String(brush.name || ""));
   const croppedUrl = isGifBrush
-    ? await cropAnimatedGifToDataUrl(sourceUrl, normalizedRect)
+    ? await cropAnimatedGifToDataUrl(sourceUrl, normalizedRect, frameRange)
     : await cropStaticImageToDataUrl(sourceUrl, normalizedRect);
 
   brush.url = croppedUrl;
-  brush.width = normalizedRect.width;
-  brush.height = normalizedRect.height;
-  brush.cropRect = normalizedRect;
+  brush.width = outputWidth;
+  brush.height = outputHeight;
+  brush.cropRect = isFullBrushCropRect(normalizedRect, fullWidth, fullHeight) ? null : normalizedRect;
+  brush.frameRange = hasPartialFrameRange ? frameRange : null;
+  brush.frameCount = hasPartialFrameRange
+    ? Math.max(1, frameRange.end - frameRange.start)
+    : normalizeBrushFrameCount(brush.frameCount);
+  brush.weightMode = nextWeightMode;
+  if (state.brushCursorPreview.brushId === brush.id) {
+    resetBrushCursorPreviewSource();
+  }
   renderBrushGallery();
   updateBrushStatus();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 }
 
@@ -1024,6 +1903,20 @@ function openBrushCropPopup(brush) {
   state.brushCropEditor.imageUrl = imageUrl;
   state.brushCropEditor.imageWidth = fullWidth;
   state.brushCropEditor.imageHeight = fullHeight;
+  setBrushCropOutputSize(
+    Math.max(1, Number(brush.width) || currentCrop.width),
+    Math.max(1, Number(brush.height) || currentCrop.height)
+  );
+  state.brushCropEditor.frameCount = 0;
+  state.brushCropEditor.frameStart = 0;
+  state.brushCropEditor.frameEnd = 0;
+  state.brushCropEditor.frameDrag = null;
+  state.brushCropEditor.frameAnimation = null;
+  state.brushCropEditor.frameControlsLoading = false;
+  state.brushCropEditor.framePreviewUrls = [];
+  state.brushCropEditor.framePreviewIndex = 0;
+  clearBrushCropFramePreviewTimer();
+  state.brushCropEditor.weightMode = normalizeBrushWeightMode(brush.weightMode);
   state.brushCropEditor.cropRect = currentCrop;
   state.brushCropEditor.drag = null;
   brushCropConfirmButton.disabled = false;
@@ -1034,18 +1927,91 @@ function openBrushCropPopup(brush) {
   delete brushCropImage.dataset.gifPausedSrc;
   brushCropImage.src = imageUrl;
   applyGifPauseStateToImage(brushCropImage);
+  const isGifBrush = getBrushSourceIsGif({ ...brush, url: imageUrl, originalUrl: imageUrl });
+  if (isGifBrush) {
+    const initialFrameCount =
+      normalizeBrushFrameCount(brush.frameCount) ||
+      normalizeBrushFrameCount(brush.frameRange?.end) ||
+      0;
+    const initialRange = normalizeBrushFrameRange(brush.frameRange, initialFrameCount) || {
+      start: 0,
+      end: initialFrameCount
+    };
+    state.brushCropEditor.frameCount = initialFrameCount;
+    state.brushCropEditor.frameStart = initialRange.start;
+    state.brushCropEditor.frameEnd = initialRange.end;
+    state.brushCropEditor.frameControlsLoading = !initialFrameCount;
+  }
+  updateBrushCropResolutionInputs();
+  updateBrushCropFrameControls();
+  updateBrushCropProbabilityUI();
+  void loadBrushCropFrameControls(brush);
   if (brushCropImage.complete && brushCropImage.naturalWidth > 0) {
     renderBrushCropModal();
   }
   setTintPopoverOpen(false);
 }
 
+async function loadBrushCropFrameControls(brush) {
+  const sourceUrl = getBrushOriginalUrl(brush);
+  if (!sourceUrl || !getBrushSourceIsGif({ ...brush, url: sourceUrl, originalUrl: sourceUrl })) {
+    return;
+  }
+
+  const brushId = Number(brush.id);
+  try {
+    const animation = await decodeGifAnimation(sourceUrl);
+    if (!state.brushCropEditor.open || Number(state.brushCropEditor.brushId) !== brushId) {
+      return;
+    }
+    const frameCount = Math.max(0, Array.isArray(animation.frames) ? animation.frames.length : 0);
+    const range = normalizeBrushFrameRange(brush.frameRange, frameCount) || {
+      start: 0,
+      end: frameCount
+    };
+    state.brushCropEditor.frameCount = frameCount;
+    state.brushCropEditor.frameStart = range.start;
+    state.brushCropEditor.frameEnd = range.end;
+    state.brushCropEditor.frameAnimation = animation;
+    state.brushCropEditor.frameControlsLoading = false;
+    state.brushCropEditor.framePreviewUrls = [];
+    state.brushCropEditor.framePreviewIndex = range.start;
+    const liveBrush = findBrushById(brushId);
+    if (liveBrush && frameCount > 0) {
+      liveBrush.frameCount = frameCount;
+      scheduleSessionSave();
+    }
+    updateBrushCropFrameControls();
+    startBrushCropFramePreview();
+  } catch (error) {
+    if (state.brushCropEditor.open && Number(state.brushCropEditor.brushId) === brushId) {
+      state.brushCropEditor.frameCount = 0;
+      state.brushCropEditor.frameAnimation = null;
+      state.brushCropEditor.frameControlsLoading = false;
+      state.brushCropEditor.framePreviewUrls = [];
+      updateBrushCropFrameControls();
+    }
+  }
+}
+
 function closeBrushCropModal() {
+  clearBrushCropFramePreviewTimer();
   state.brushCropEditor.open = false;
   state.brushCropEditor.brushId = null;
   state.brushCropEditor.imageUrl = "";
   state.brushCropEditor.imageWidth = 0;
   state.brushCropEditor.imageHeight = 0;
+  state.brushCropEditor.outputWidth = 0;
+  state.brushCropEditor.outputHeight = 0;
+  state.brushCropEditor.frameCount = 0;
+  state.brushCropEditor.frameStart = 0;
+  state.brushCropEditor.frameEnd = 0;
+  state.brushCropEditor.frameDrag = null;
+  state.brushCropEditor.frameAnimation = null;
+  state.brushCropEditor.frameControlsLoading = false;
+  state.brushCropEditor.framePreviewUrls = [];
+  state.brushCropEditor.framePreviewIndex = 0;
+  state.brushCropEditor.weightMode = "normal";
   state.brushCropEditor.cropRect = null;
   state.brushCropEditor.drag = null;
   brushCropModal.classList.remove("is-open");
@@ -1100,6 +2066,8 @@ function renderBrushCropModal() {
   setBrushCropRectStyle(brushCropShadeBottom, 0, bottom, imageRect.width, imageRect.height - bottom);
   setBrushCropRectStyle(brushCropShadeLeft, 0, top, left, height);
   setBrushCropRectStyle(brushCropShadeRight, right, top, imageRect.width - right, height);
+  updateBrushCropResolutionInputs();
+  updateBrushCropFrameControls();
 }
 
 function beginBrushCropDrag(event, mode, edge = "") {
@@ -1177,6 +2145,7 @@ function onBrushCropPointerMove(event) {
     state.brushCropEditor.imageWidth,
     state.brushCropEditor.imageHeight
   );
+  syncBrushCropOutputToAspect("width");
   renderBrushCropModal();
 }
 
@@ -1205,7 +2174,16 @@ async function confirmBrushCropModal() {
   brushCropConfirmButton.disabled = true;
   brushCropCancelButton.disabled = true;
   try {
-    await applyCropToBrush(state.brushCropEditor.brushId, state.brushCropEditor.cropRect || {});
+    await applyCropToBrush(state.brushCropEditor.brushId, state.brushCropEditor.cropRect || {}, {
+      outputWidth: state.brushCropEditor.outputWidth,
+      outputHeight: state.brushCropEditor.outputHeight,
+      frameCount: state.brushCropEditor.frameCount,
+      frameRange: {
+        start: state.brushCropEditor.frameStart,
+        end: state.brushCropEditor.frameEnd
+      },
+      weightMode: state.brushCropEditor.weightMode
+    });
     closeBrushCropModal();
   } catch (error) {
     brushCropConfirmButton.disabled = false;
@@ -1286,6 +2264,47 @@ async function readSnapshotFromIndexedDb(tabId) {
   });
 }
 
+async function deleteSnapshotFromIndexedDb(tabId) {
+  const database = await openSnapshotDb();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(SESSION_IDB_STORE_NAME, "readwrite");
+    transaction.objectStore(SESSION_IDB_STORE_NAME).delete(tabId);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Snapshot delete failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Snapshot delete aborted"));
+  });
+}
+
+async function getSavedCompositionIndex() {
+  try {
+    const raw = await readSnapshotFromIndexedDb(SAVED_COMPOSITIONS_INDEX_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((entry) => entry && typeof entry.id === "string")
+      .map((entry) => ({
+        id: entry.id,
+        savedAt: Number(entry.savedAt) || Date.now(),
+        stampCount: Math.max(0, Number(entry.stampCount) || 0),
+        brushCount: Math.max(0, Number(entry.brushCount) || 0),
+        thumbnailUrl: typeof entry.thumbnailUrl === "string" ? entry.thumbnailUrl : "",
+        stockCategory:
+          typeof entry.stockCategory === "string" && entry.stockCategory.trim()
+            ? entry.stockCategory.trim()
+            : "custom"
+      }))
+      .sort((left, right) => Number(right.savedAt) - Number(left.savedAt));
+  } catch (error) {
+    return [];
+  }
+}
+
+async function writeSavedCompositionIndex(entries) {
+  await writeSnapshotToIndexedDb(SAVED_COMPOSITIONS_INDEX_KEY, JSON.stringify(entries));
+}
+
 function getSessionStorageItemSafe(key) {
   try {
     return sessionStorage.getItem(key);
@@ -1311,8 +2330,176 @@ function removeSessionStorageItemSafe(key) {
   }
 }
 
+function getLocalStorageItemSafe(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    return null;
+  }
+}
+
+function setLocalStorageItemSafe(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 function isBlobUrl(url) {
   return typeof url === "string" && url.startsWith("blob:");
+}
+
+function normalizeFavoriteBrushSource(source) {
+  return typeof source === "string" && source.trim() ? source.trim() : "";
+}
+
+function getBrushFavoriteSource(brush) {
+  return normalizeFavoriteBrushSource(brush?.originalUrl || brush?.url || "");
+}
+
+function loadFavoriteBrushSources() {
+  const raw = getLocalStorageItemSafe(FAVORITE_BRUSH_SOURCES_KEY);
+  if (!raw) {
+    state.favoriteBrushSources = new Set();
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    state.favoriteBrushSources = new Set(
+      Array.isArray(parsed)
+        ? parsed.map(normalizeFavoriteBrushSource).filter(Boolean)
+        : []
+    );
+  } catch (error) {
+    state.favoriteBrushSources = new Set();
+  }
+}
+
+function saveFavoriteBrushSources() {
+  const sources = state.favoriteBrushSources instanceof Set
+    ? Array.from(state.favoriteBrushSources).filter(Boolean)
+    : [];
+  setLocalStorageItemSafe(FAVORITE_BRUSH_SOURCES_KEY, JSON.stringify(sources));
+}
+
+function isBrushSourceFavorite(source) {
+  const normalized = normalizeFavoriteBrushSource(source);
+  return Boolean(normalized && state.favoriteBrushSources instanceof Set && state.favoriteBrushSources.has(normalized));
+}
+
+function isBrushFavorite(brush) {
+  return isBrushSourceFavorite(getBrushFavoriteSource(brush));
+}
+
+function updateFavoriteBrushButtons() {
+  const count = state.favoriteBrushSources instanceof Set ? state.favoriteBrushSources.size : 0;
+  const disabled = Boolean(state.stockBrushLoadingFolderId) || count === 0;
+  for (const button of [loadFavoriteBrushesButton, loadFavoriteBrushesFullButton]) {
+    if (!button) {
+      continue;
+    }
+    button.disabled = disabled;
+    button.classList.toggle("is-active", state.activeStockBrushFolderId === "favorites");
+    button.classList.toggle("is-loading", state.stockBrushLoadingFolderId === "favorites");
+  }
+}
+
+function toggleBrushFavorite(brush) {
+  const source = getBrushFavoriteSource(brush);
+  if (!source) {
+    return false;
+  }
+  if (!(state.favoriteBrushSources instanceof Set)) {
+    state.favoriteBrushSources = new Set();
+  }
+  if (state.favoriteBrushSources.has(source)) {
+    state.favoriteBrushSources.delete(source);
+  } else {
+    state.favoriteBrushSources.add(source);
+  }
+  saveFavoriteBrushSources();
+  updateFavoriteBrushButtons();
+  return true;
+}
+
+function cloneBrushForReturnState(brush) {
+  return {
+    ...brush,
+    cropRect: brush?.cropRect ? { ...brush.cropRect } : null,
+    frameRange: brush?.frameRange ? { ...brush.frameRange } : null
+  };
+}
+
+function captureFavoriteReturnState() {
+  return {
+    brushes: state.brushes.map(cloneBrushForReturnState),
+    nextBrushId: state.nextBrushId,
+    soloBrushId: state.soloBrushId,
+    selectedBrushIds: state.selectedBrushIds instanceof Set
+      ? Array.from(state.selectedBrushIds)
+      : [],
+    activeStockBrushFolderId: state.activeStockBrushFolderId,
+    sidebarTab: state.sidebarTab,
+    previousSidebarTab: state.previousSidebarTab,
+    sidebarCollapsed: state.sidebarCollapsed,
+    brushGalleryCollapsed: state.brushGalleryCollapsed,
+    brushGallerySort: state.brushGallerySort
+  };
+}
+
+function restoreFavoriteReturnState() {
+  const snapshot = state.favoriteReturnState;
+  if (!snapshot) {
+    return false;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  state.brushes = Array.isArray(snapshot.brushes)
+    ? snapshot.brushes.map(cloneBrushForReturnState)
+    : [];
+  clearBrushFrameCountJobs();
+  state.nextBrushId = Math.max(1, Number(snapshot.nextBrushId) || 1);
+  const brushIds = new Set(state.brushes.map((brush) => brush.id));
+  const soloBrushId = Number(snapshot.soloBrushId);
+  state.soloBrushId = Number.isFinite(soloBrushId) && brushIds.has(soloBrushId)
+    ? soloBrushId
+    : null;
+  state.selectedBrushIds = new Set(
+    Array.isArray(snapshot.selectedBrushIds)
+      ? snapshot.selectedBrushIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && brushIds.has(id))
+      : []
+  );
+  state.activeStockBrushFolderId =
+    typeof snapshot.activeStockBrushFolderId === "string" && snapshot.activeStockBrushFolderId
+      ? snapshot.activeStockBrushFolderId
+      : null;
+  state.sidebarTab = normalizeSidebarTab(snapshot.sidebarTab);
+  state.previousSidebarTab = normalizeSidebarTab(snapshot.previousSidebarTab);
+  state.sidebarCollapsed = Boolean(snapshot.sidebarCollapsed);
+  state.brushGalleryCollapsed = Boolean(snapshot.brushGalleryCollapsed);
+  state.brushGallerySort = normalizeBrushGallerySort(snapshot.brushGallerySort);
+  state.favoriteReturnState = null;
+  state.stockBrushLoadingFolderId = null;
+  state.brushCursorPreview.brushId = null;
+  resetBrushCursorPreviewSource();
+
+  updateBrushStatus();
+  renderBrushGallery();
+  renderStockBrushButtons();
+  updateSidebarVisibilityUI();
+  updateSidebarTabUI();
+  updateEraseCursorGeometry();
+  updateBrushCursorPreview();
+  scheduleSessionSave();
+  return true;
 }
 
 function findBrushById(id) {
@@ -1329,6 +2516,38 @@ function getSoloBrush() {
     return null;
   }
   return brush;
+}
+
+function getSelectedBrushes() {
+  if (!(state.selectedBrushIds instanceof Set) || !state.selectedBrushIds.size) {
+    return [];
+  }
+
+  const selectedBrushes = [];
+  for (const brush of state.brushes) {
+    if (state.selectedBrushIds.has(brush.id) && brush.enabled) {
+      selectedBrushes.push(brush);
+    }
+  }
+
+  if (selectedBrushes.length !== state.selectedBrushIds.size) {
+    state.selectedBrushIds = new Set(selectedBrushes.map((brush) => brush.id));
+  }
+
+  return selectedBrushes;
+}
+
+function clearSelectedBrushes() {
+  if (state.selectedBrushIds instanceof Set) {
+    state.selectedBrushIds.clear();
+  } else {
+    state.selectedBrushIds = new Set();
+  }
+}
+
+function setSoloBrushId(brushId) {
+  clearSelectedBrushes();
+  state.soloBrushId = Number.isFinite(Number(brushId)) ? Number(brushId) : null;
 }
 
 function updateSliderText() {
@@ -1356,6 +2575,10 @@ function setBrushGalleryCollapsed(collapsed) {
   state.brushGalleryCollapsed = Boolean(collapsed);
   renderBrushGallery();
   renderStockBrushButtons();
+}
+
+function normalizeBrushGallerySort(sortMode) {
+  return ["alpha", "area-asc", "area-desc"].includes(sortMode) ? sortMode : "alpha";
 }
 
 function setSliderGroupCollapsed(groupId, collapsed) {
@@ -1451,6 +2674,7 @@ function updateConsistentModeUI() {
 
 function updateRenderModeUI() {
   renderModeLabel.textContent = renderModeToggle.checked ? "linear" : "point";
+  updateBrushCursorPreview();
 }
 
 function resetCursorTrailAnchor() {
@@ -1543,8 +2767,12 @@ function setDrawMode(nextMode) {
     return;
   }
   cancelShapeDraft();
+  if (state.eraseMode) {
+    setEraseMode(false);
+  }
   state.drawMode = nextMode;
   updateDrawModeUI();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 }
 
@@ -1610,7 +2838,13 @@ function spawnCursorTrailStamp(worldX, worldY) {
 }
 
 function updateCursorTrailAtClientPoint(clientX, clientY) {
-  if (!cursorTrailToggle.checked || state.eraseMode || state.panning || !state.pointerInViewport) {
+  if (
+    !cursorTrailToggle.checked ||
+    state.exportMode ||
+    state.eraseMode ||
+    state.panning ||
+    !state.pointerInViewport
+  ) {
     resetCursorTrailAnchor();
     return;
   }
@@ -1669,26 +2903,332 @@ function applyCanvasBackgroundColor(nextColor) {
   if (canvasBgColorInput && canvasBgColorInput.value !== normalized) {
     canvasBgColorInput.value = normalized;
   }
+  if (exportCanvasBgColorInput && exportCanvasBgColorInput.value !== normalized) {
+    exportCanvasBgColorInput.value = normalized;
+  }
+}
+
+function revokeExportBackgroundImageUrl() {
+  if (state.exportBgImageObjectUrl) {
+    URL.revokeObjectURL(state.exportBgImageObjectUrl);
+  }
+  state.exportBgImageObjectUrl = "";
+}
+
+function normalizeExportBgTileSize(value) {
+  return clamp(
+    Math.round(Number(value) || 128),
+    EXPORT_BG_TILE_MIN_SIZE,
+    EXPORT_BG_TILE_MAX_SIZE
+  );
+}
+
+function mapExportBgTileSliderToSize(value) {
+  const sliderValue = clamp(
+    Number(value) || 0,
+    0,
+    EXPORT_BG_TILE_SLIDER_MAX
+  );
+  if (sliderValue <= EXPORT_BG_TILE_SLIDER_MID) {
+    const progress = sliderValue / EXPORT_BG_TILE_SLIDER_MID;
+    return normalizeExportBgTileSize(
+      EXPORT_BG_TILE_MIN_SIZE +
+        (EXPORT_BG_TILE_MID_SIZE - EXPORT_BG_TILE_MIN_SIZE) * progress
+    );
+  }
+
+  const progress = (sliderValue - EXPORT_BG_TILE_SLIDER_MID) /
+    (EXPORT_BG_TILE_SLIDER_MAX - EXPORT_BG_TILE_SLIDER_MID);
+  const eased = progress * progress * (3 - 2 * progress);
+  return normalizeExportBgTileSize(
+    EXPORT_BG_TILE_MID_SIZE +
+      (EXPORT_BG_TILE_MAX_SIZE - EXPORT_BG_TILE_MID_SIZE) * eased
+  );
+}
+
+function mapExportBgTileSizeToSlider(value) {
+  const size = normalizeExportBgTileSize(value);
+  if (size <= EXPORT_BG_TILE_MID_SIZE) {
+    const progress = (size - EXPORT_BG_TILE_MIN_SIZE) /
+      (EXPORT_BG_TILE_MID_SIZE - EXPORT_BG_TILE_MIN_SIZE);
+    return Math.round(progress * EXPORT_BG_TILE_SLIDER_MID);
+  }
+
+  let low = EXPORT_BG_TILE_SLIDER_MID;
+  let high = EXPORT_BG_TILE_SLIDER_MAX;
+  for (let index = 0; index < 16; index += 1) {
+    const middle = (low + high) / 2;
+    if (mapExportBgTileSliderToSize(middle) < size) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return Math.round((low + high) / 2);
+}
+
+function updateExportBackgroundImageLayer() {
+  if (!exportBgImageLayer) {
+    return;
+  }
+
+  const imageUrl = state.exportBgImageUrl || "";
+  const selectionBounds = state.exportSelectionBounds
+    ? normalizeExportSelectionBounds(state.exportSelectionBounds)
+    : null;
+  const shouldShow = Boolean(state.exportMode && imageUrl && selectionBounds);
+  exportBgImageLayer.hidden = !shouldShow;
+  if (!shouldShow) {
+    exportBgImageLayer.style.removeProperty("background-image");
+    return;
+  }
+
+  const boundsWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
+  const boundsHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
+  exportBgImageLayer.style.left = `${selectionBounds.left}px`;
+  exportBgImageLayer.style.top = `${selectionBounds.top}px`;
+  exportBgImageLayer.style.width = `${boundsWidth}px`;
+  exportBgImageLayer.style.height = `${boundsHeight}px`;
+
+  const opacity = clamp(Number(state.exportBgImageOpacity) || 0, 0, 100);
+  exportBgImageLayer.style.backgroundImage = `url("${imageUrl.replace(/"/g, '\\"')}")`;
+  exportBgImageLayer.style.opacity = String(opacity / 100);
+  exportBgImageLayer.style.backgroundPosition = "center";
+
+  if (state.exportBgImageMode === "tile") {
+    const tileWidth = normalizeExportBgTileSize(state.exportBgImageTileSize);
+    const naturalWidth = Math.max(1, Number(state.exportBgImageNaturalWidth) || tileWidth);
+    const naturalHeight = Math.max(1, Number(state.exportBgImageNaturalHeight) || tileWidth);
+    const tileHeight = Math.max(1, Math.round(tileWidth * (naturalHeight / naturalWidth)));
+    exportBgImageLayer.style.backgroundRepeat = "repeat";
+    exportBgImageLayer.style.backgroundSize = `${tileWidth}px ${tileHeight}px`;
+  } else {
+    exportBgImageLayer.style.backgroundRepeat = "no-repeat";
+    exportBgImageLayer.style.backgroundSize = "cover";
+  }
+}
+
+function updateExportBackgroundImageUI() {
+  const hasImage = Boolean(state.exportBgImageUrl);
+  if (exportBgImageButton) {
+    exportBgImageButton.classList.toggle("has-image", hasImage);
+  }
+  if (exportBgImagePreview) {
+    exportBgImagePreview.style.backgroundImage = hasImage ? `url("${state.exportBgImageUrl.replace(/"/g, '\\"')}")` : "";
+  }
+  if (exportBgImageControls) {
+    exportBgImageControls.hidden = !hasImage;
+  }
+  if (exportBgImageOpacitySlider) {
+    exportBgImageOpacitySlider.disabled = !hasImage;
+    exportBgImageOpacitySlider.value = String(clamp(Number(state.exportBgImageOpacity) || 0, 0, 100));
+  }
+  if (exportBgImageOpacityValue) {
+    exportBgImageOpacityValue.textContent = String(clamp(Math.round(Number(state.exportBgImageOpacity) || 0), 0, 100));
+  }
+  if (exportBgImageTileToggle) {
+    exportBgImageTileToggle.disabled = !hasImage;
+    exportBgImageTileToggle.checked = state.exportBgImageMode === "tile";
+  }
+  if (exportBgImageModeLabel) {
+    exportBgImageModeLabel.textContent = state.exportBgImageMode === "tile" ? "tile" : "stretch";
+  }
+  if (exportBgImageTileSizeGroup) {
+    exportBgImageTileSizeGroup.hidden = !hasImage || state.exportBgImageMode !== "tile";
+  }
+  if (exportBgImageTileSizeSlider) {
+    exportBgImageTileSizeSlider.disabled = !hasImage || state.exportBgImageMode !== "tile";
+    exportBgImageTileSizeSlider.value = String(mapExportBgTileSizeToSlider(state.exportBgImageTileSize));
+  }
+  if (exportBgImageTileSizeValue) {
+    exportBgImageTileSizeValue.textContent = String(normalizeExportBgTileSize(state.exportBgImageTileSize));
+  }
+  updateExportBackgroundImageLayer();
+}
+
+function loadExportBackgroundImageFile(file) {
+  if (!file || !(String(file.type || "").startsWith("image/") || ALLOWED_EXTENSIONS.test(file.name || ""))) {
+    return;
+  }
+
+  readFileAsDataUrl(file)
+    .then((dataUrl) => {
+      revokeExportBackgroundImageUrl();
+      state.exportBgImageUrl = dataUrl;
+      state.exportBgImageNaturalWidth = 0;
+      state.exportBgImageNaturalHeight = 0;
+      updateExportBackgroundImageUI();
+
+      const probe = new Image();
+      probe.onload = () => {
+        if (state.exportBgImageUrl !== dataUrl) {
+          return;
+        }
+        state.exportBgImageNaturalWidth = probe.naturalWidth || 0;
+        state.exportBgImageNaturalHeight = probe.naturalHeight || 0;
+        updateExportBackgroundImageUI();
+        scheduleSessionSave();
+      };
+      probe.src = dataUrl;
+      scheduleSessionSave();
+    })
+    .catch(() => {
+      updateBrushStatus("Could not load background image.");
+    });
 }
 
 function updateSettingsPanelUI() {
   if (canvasBgColorInput) {
     canvasBgColorInput.value = normalizeHexColor(state.canvasBackgroundColor, "#ffffff");
   }
+  if (exportCanvasBgColorInput) {
+    exportCanvasBgColorInput.value = normalizeHexColor(state.canvasBackgroundColor, "#ffffff");
+  }
   if (exportBackgroundToggle) {
     exportBackgroundToggle.checked = Boolean(state.exportBackgroundEnabled);
+  }
+  if (exportSeeBeyondToggle) {
+    exportSeeBeyondToggle.checked = state.exportSeeBeyondEnabled !== false;
+  }
+  updateExportBackgroundImageUI();
+  updateExportAnimationUI();
+  if (gifCountToggle) {
+    gifCountToggle.checked = Boolean(state.showGifCountIndicator);
+  }
+  if (gifPauseToggle) {
+    gifPauseToggle.checked = state.showGifPauseButton !== false;
+  }
+  if (brushPreviewToggle) {
+    brushPreviewToggle.checked = state.brushPreviewEnabled !== false;
+  }
+}
+
+function isGifStampElement(element) {
+  if (!(element instanceof HTMLImageElement)) {
+    return false;
+  }
+
+  const brushId = Number(element.dataset.brushId);
+  const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+  const brushName = brush ? String(brush.name || "") : "";
+  const sourceUrl =
+    element.dataset.brushUrl ||
+    element.dataset.gifPausedSrc ||
+    element.currentSrc ||
+    element.getAttribute("src") ||
+    (brush ? String(brush.url || "") : "");
+
+  return isGifUrl(sourceUrl) || /\.gif$/i.test(brushName);
+}
+
+function getPlacedGifCount() {
+  let gifCount = 0;
+  for (const element of getVisibleStampElements()) {
+    if (isGifStampElement(element)) {
+      gifCount += 1;
+    }
+  }
+  return gifCount;
+}
+
+function updateGifCountIndicator() {
+  if (!gifCountIndicator) {
+    return;
+  }
+
+  const shouldShow = Boolean(state.showGifCountIndicator);
+  gifCountIndicator.hidden = !shouldShow;
+  if (!shouldShow) {
+    updateGifPauseButtonPosition();
+    return;
+  }
+
+  const gifCount = getPlacedGifCount();
+  gifCountIndicator.textContent = `${gifCount.toLocaleString()} ${gifCount === 1 ? "gif" : "gifs"}`;
+  updateGifPauseButtonPosition();
+}
+
+function normalizeSidebarTab(tab) {
+  if (tab === "main") {
+    return "draw";
+  }
+  return SIDEBAR_TABS.includes(tab) ? tab : "draw";
+}
+
+function isDrawingModeActive() {
+  return state.sidebarTab === "draw" || state.sidebarTab === "brushes";
+}
+
+function isLeftDragPanModeActive() {
+  return ["edit", "settings"].includes(state.sidebarTab);
+}
+
+function setSidebarTab(tab, options = {}) {
+  if (state.exportTask) {
+    return;
+  }
+
+  const nextTab = normalizeSidebarTab(tab);
+  if (state.sidebarTab === nextTab) {
+    if (state.sidebarCollapsed) {
+      state.sidebarCollapsed = false;
+      updateSidebarVisibilityUI();
+      scheduleSessionSave();
+    }
+    updateSidebarTabUI();
+    return;
+  }
+
+  if (nextTab !== "export" && state.exportMode && !options.keepExportMode) {
+    exitExportMode();
+  }
+
+  if (nextTab === "settings") {
+    state.previousSidebarTab = state.sidebarTab === "settings" ? "draw" : state.sidebarTab;
+  } else if (state.sidebarTab !== "settings") {
+    state.previousSidebarTab = nextTab;
+  }
+
+  state.sidebarTab = nextTab;
+  if (nextTab !== "draw" && nextTab !== "brushes") {
+    cancelShapeDraft();
+    clearCursorTrail();
+  }
+  updateSidebarTabUI();
+  renderBrushGallery();
+  updateEraseCursorVisibility();
+  updateBrushCursorPreview();
+  scheduleSessionSave();
+}
+
+function updateBrushDataControlPlacement(activeTab) {
+  if (!brushDataControlGroup || !drawingBrushDataSlot || !brushDataPanel) {
+    return;
+  }
+
+  const target = activeTab === "brushes" ? brushDataPanel : drawingBrushDataSlot;
+  if (brushDataControlGroup.parentElement !== target) {
+    target.appendChild(brushDataControlGroup);
   }
 }
 
 function updateSidebarTabUI() {
-  const isSettingsTab = state.sidebarTab === "settings";
-  if (controlsMain) {
-    controlsMain.hidden = isSettingsTab;
+  const activeTab = normalizeSidebarTab(state.sidebarTab);
+  state.sidebarTab = activeTab;
+  controlsPanel.dataset.sidebarMode = activeTab;
+  viewport.classList.toggle("is-editing-layers", activeTab === "edit");
+  updateBrushDataControlPlacement(activeTab);
+
+  for (const panel of sidebarPanels) {
+    panel.hidden = panel.dataset.sidebarPanel !== activeTab;
   }
-  if (settingsPanel) {
-    settingsPanel.hidden = !isSettingsTab;
+
+  if (controlsMain && !controlsMain.dataset.sidebarPanel) {
+    controlsMain.hidden = activeTab !== "draw";
   }
+
   if (sidebarOptionsButton) {
+    const isSettingsTab = activeTab === "settings";
     sidebarOptionsButton.classList.toggle("is-active", isSettingsTab);
     sidebarOptionsButton.setAttribute("aria-pressed", String(isSettingsTab));
     sidebarOptionsButton.setAttribute(
@@ -1696,9 +3236,21 @@ function updateSidebarTabUI() {
       isSettingsTab ? "Show drawing controls" : "Show settings"
     );
   }
-  if (isSettingsTab) {
+
+  for (const button of mainModeTabButtons) {
+    const buttonTab = normalizeSidebarTab(button.dataset.sidebarTab);
+    const isActive = buttonTab === activeTab;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  }
+
+  if (activeTab !== "draw") {
     setTintPopoverOpen(false);
   }
+  if (activeTab === "community" && !state.savedCompositionsLoaded) {
+    void loadSavedCompositions();
+  }
+  renderEditLayers();
 }
 
 function updateSidebarVisibilityUI() {
@@ -1751,6 +3303,7 @@ function applyRotationFromIndicatorPointer(clientX, clientY) {
   updateSliderText();
   updateRotationIndicator();
   updateActiveStrokeTailRotation();
+  updateBrushCursorPreview();
   scheduleSessionSave();
   return true;
 }
@@ -1808,7 +3361,9 @@ function worldToScreen(worldX, worldY) {
 }
 
 function getVisibleStampElements() {
-  return Array.from(world.getElementsByClassName("stamp"));
+  return Array.from(world.getElementsByClassName("stamp")).filter(
+    (element) => !element.classList.contains("is-layer-hidden")
+  );
 }
 
 function getViewportWorldBounds(marginPx = STAMP_VIEWPORT_CULL_MARGIN_PX) {
@@ -2168,17 +3723,183 @@ function getExportScaledResolution(bounds) {
   return { width, height };
 }
 
+function getSavedExportScalePercent() {
+  const scalePercent = Number(state.exportScalePercent);
+  return Number.isFinite(scalePercent) && scalePercent > 0 ? scalePercent : 100;
+}
+
+function rememberCurrentExportSetup() {
+  if (!state.exportMode || !state.exportSelectionBounds) {
+    return;
+  }
+
+  state.lastExportSetup = {
+    selectionBounds: { ...normalizeExportSelectionBounds(state.exportSelectionBounds) },
+    scalePercent: getSavedExportScalePercent()
+  };
+  scheduleSessionSave();
+}
+
+function clearRememberedExportSetup() {
+  state.lastExportSetup = null;
+}
+
+function getRememberedExportSetup() {
+  if (!state.lastExportSetup || !state.lastExportSetup.selectionBounds) {
+    return null;
+  }
+
+  const selectionBounds = normalizeExportSelectionBounds(state.lastExportSetup.selectionBounds);
+  const scalePercent = Number(state.lastExportSetup.scalePercent);
+  return {
+    selectionBounds,
+    scalePercent: Number.isFinite(scalePercent) && scalePercent > 0 ? scalePercent : 100
+  };
+}
+
+function normalizeExportSetupSnapshot(setup) {
+  if (!setup || !setup.selectionBounds) {
+    return null;
+  }
+  const selectionBounds = normalizeExportSelectionBounds(setup.selectionBounds);
+  const scalePercent = Number(setup.scalePercent);
+  return {
+    selectionBounds,
+    scalePercent: Number.isFinite(scalePercent) && scalePercent > 0 ? scalePercent : 100
+  };
+}
+
+function rectContainsRect(outer, inner) {
+  const epsilon = 0.001;
+  return (
+    inner.left >= outer.left - epsilon &&
+    inner.right <= outer.right + epsilon &&
+    inner.top >= outer.top - epsilon &&
+    inner.bottom <= outer.bottom + epsilon
+  );
+}
+
+function updateRememberedExportSetupForAddedStroke(stroke) {
+  const remembered = getRememberedExportSetup();
+  if (!remembered || !stroke || !Array.isArray(stroke.elements)) {
+    return;
+  }
+
+  for (const element of stroke.elements) {
+    if (element.parentElement !== world) {
+      continue;
+    }
+    if (!rectContainsRect(remembered.selectionBounds, getStampWorldBounds(element))) {
+      clearRememberedExportSetup();
+      return;
+    }
+  }
+}
+
 function updateExportResolutionInputs(resolution) {
-  exportWidthInput.value = String(clamp(Math.round(resolution.width), 1, EXPORT_MAX_DIMENSION));
-  exportHeightInput.value = String(clamp(Math.round(resolution.height), 1, EXPORT_MAX_DIMENSION));
+  const width = String(clamp(Math.round(resolution.width), 1, EXPORT_MAX_DIMENSION));
+  const height = String(clamp(Math.round(resolution.height), 1, EXPORT_MAX_DIMENSION));
+  exportWidthInput.value = width;
+  exportHeightInput.value = height;
+  if (exportSidebarWidthInput) {
+    exportSidebarWidthInput.value = width;
+  }
+  if (exportSidebarHeightInput) {
+    exportSidebarHeightInput.value = height;
+  }
 }
 
 function updateExportScaleButtonsUI() {
-  for (const button of exportScaleButtons) {
+  const currentScalePercent = Number(state.exportScalePercent);
+  const safeScalePercent = Number.isFinite(currentScalePercent) && currentScalePercent > 0
+    ? currentScalePercent
+    : 100;
+  const normalized = state.exportSelectionBounds
+    ? normalizeExportSelectionBounds(state.exportSelectionBounds)
+    : null;
+  const maxScalePercent = normalized ? getExportMaxScaleMultiplier(normalized) * 100 : Number.POSITIVE_INFINITY;
+  const nearestScale = EXPORT_SCALE_PRESETS.reduce((nearest, preset) => {
+    const nearestDistance = Math.abs(nearest - safeScalePercent);
+    const presetDistance = Math.abs(preset - safeScalePercent);
+    return presetDistance < nearestDistance ? preset : nearest;
+  }, EXPORT_SCALE_PRESETS[0]);
+  const hasExactPreset = EXPORT_SCALE_PRESETS.some(
+    (preset) => Math.abs(preset - safeScalePercent) < 0.0001
+  );
+  const customScaleLabel = `${Math.round(safeScalePercent)}%`;
+
+  for (const button of [...exportScaleButtons, ...exportSidebarScaleButtons]) {
     const scale = Number(button.dataset.scale);
-    const isActive = Math.abs(scale - Number(state.exportScalePercent)) < 0.0001;
+    const isActive = Math.abs(scale - nearestScale) < 0.0001;
+    const displayedScale = isActive && !hasExactPreset ? safeScalePercent : scale;
+    const isOverLimit = displayedScale > maxScalePercent + 0.0001;
+    button.textContent = isActive && !hasExactPreset ? customScaleLabel : `${scale}%`;
     button.classList.toggle("is-active", isActive);
+    button.classList.toggle("is-over-limit", isOverLimit);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.setAttribute(
+      "aria-label",
+      isOverLimit
+        ? `${button.textContent} export scale exceeds 10000px limit`
+        : `${button.textContent} export scale`
+    );
+    button.disabled = Boolean(state.exportTask);
+  }
+}
+
+function getExportFrameCountOverride() {
+  const value = String(state.exportAnimationFrameCount || "").trim();
+  if (!value) {
+    return null;
+  }
+  const numericValue = Math.floor(Number(value));
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+  return clamp(numericValue, 1, EXPORT_MAX_FRAME_COUNT);
+}
+
+function updateExportAnimationUI() {
+  const isAuto = state.exportAnimationAuto !== false;
+  const hasFrameCountOverride = Boolean(String(state.exportAnimationFrameCount || "").trim());
+  if (exportAnimationDurationLabel) {
+    exportAnimationDurationLabel.textContent = isAuto ? "gif duration: auto" : "gif duration: manual";
+  }
+  if (exportAnimationAutoToggle) {
+    exportAnimationAutoToggle.checked = isAuto;
+    exportAnimationAutoToggle.disabled = Boolean(state.exportTask);
+  }
+  if (exportAnimationManualControls) {
+    exportAnimationManualControls.hidden = isAuto;
+  }
+  for (const button of exportAnimationSecondsButtons) {
+    const seconds = Number(button.dataset.seconds);
+    const isActive =
+      !hasFrameCountOverride &&
+      Math.abs(seconds - Number(state.exportAnimationSeconds)) < 0.0001;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+    button.disabled = isAuto || Boolean(state.exportTask);
+  }
+  if (exportFrameCountInput) {
+    exportFrameCountInput.value = state.exportAnimationFrameCount || "";
+    exportFrameCountInput.disabled = isAuto || Boolean(state.exportTask);
+  }
+
+  const videoAuto = state.exportVideoAuto !== false;
+  if (exportVideoDurationLabel) {
+    exportVideoDurationLabel.textContent = videoAuto ? "video duration: auto" : "video duration: manual";
+  }
+  if (exportVideoAutoToggle) {
+    exportVideoAutoToggle.checked = videoAuto;
+    exportVideoAutoToggle.disabled = Boolean(state.exportTask);
+  }
+  if (exportVideoLengthRow) {
+    exportVideoLengthRow.hidden = videoAuto;
+  }
+  if (exportVideoLengthInput) {
+    exportVideoLengthInput.value = String(state.exportVideoSeconds ?? 3);
+    exportVideoLengthInput.disabled = videoAuto || Boolean(state.exportTask);
   }
 }
 
@@ -2221,16 +3942,7 @@ function setExportResolutionFromInput(axis, rawValue) {
 
 function hasGifStampOnCanvas() {
   for (const element of getVisibleStampElements()) {
-    const brushId = Number(element.dataset.brushId);
-    const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
-    const brushName = brush ? String(brush.name || "") : "";
-    const brushUrl =
-      element.dataset.brushUrl ||
-      element.currentSrc ||
-      element.getAttribute("src") ||
-      (brush ? String(brush.url || "") : "");
-
-    if (isGifUrl(brushUrl) || /\.gif$/i.test(brushName)) {
+    if (isGifStampElement(element)) {
       return true;
     }
   }
@@ -2244,6 +3956,7 @@ function updateExportOverlayGeometry() {
 
   const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
   state.exportSelectionBounds = normalized;
+  exportOverlay.classList.toggle("is-see-beyond-off", state.exportSeeBeyondEnabled === false);
 
   const topLeft = worldToScreen(normalized.left, normalized.top);
   const bottomRight = worldToScreen(normalized.right, normalized.bottom);
@@ -2255,6 +3968,7 @@ function updateExportOverlayGeometry() {
   const selectionHeight = Math.max(1, selectionBottom - selectionTop);
 
   setFixedRectStyle(exportSelection, selectionLeft, selectionTop, selectionWidth, selectionHeight);
+  updateExportBackgroundImageLayer();
 
   const viewportRect = viewport.getBoundingClientRect();
   const viewportLeft = viewportRect.left;
@@ -2289,25 +4003,68 @@ function updateExportOverlayGeometry() {
 
   const scaledResolution = getExportScaledResolution(normalized);
   updateExportResolutionInputs(scaledResolution);
+  updateExportScaleButtonsUI();
+  rememberCurrentExportSetup();
 }
 
 function updateExportModeUI() {
   const isOpen = Boolean(state.exportMode && state.exportSelectionBounds);
   exportOverlay.hidden = !isOpen;
   exportOverlay.setAttribute("aria-hidden", String(!isOpen));
-  exportButton.textContent = isOpen ? "Confirm Export" : "Export";
-  exportButton.classList.toggle("is-active", isOpen);
+  if (!state.exportTask) {
+    resetExportProgress(exportButton, "Render GIF");
+    resetExportProgress(exportVideoButton, "Render Video");
+    exportButton.setAttribute("aria-label", "Render GIF");
+    exportButton.title = "Render GIF";
+    if (exportVideoButton) {
+      exportVideoButton.setAttribute("aria-label", "Render Video");
+      exportVideoButton.title = "Render Video";
+    }
+  } else {
+    const activeButton = state.exportTask.button || exportButton;
+    if (!activeButton.style.getPropertyValue("--export-progress")) {
+      updateExportProgress(
+        state.exportTask,
+        state.exportTask.progress || 0,
+        state.exportTask.progressLabel || (state.exportTask.cancelled ? "Cancelling export" : "Exporting")
+      );
+    }
+  }
+  exportModeButton.setAttribute("aria-pressed", String(isOpen || state.sidebarTab === "export"));
+  exportModeButton.classList.toggle("is-active", isOpen || state.sidebarTab === "export");
   exportActions.classList.toggle("is-active", isOpen);
-  exportCancelButton.hidden = !isOpen;
-  exportCancelButton.disabled = !isOpen;
+  exportButton.disabled = !isOpen || Boolean(state.exportTask);
+  exportButton.classList.toggle("is-loading", Boolean(state.exportTask && state.exportTask.button === exportButton));
+  exportCancelButton.disabled = !state.exportTask;
+  if (exportVideoButton) {
+    exportVideoButton.disabled = !isOpen || Boolean(state.exportTask);
+    exportVideoButton.classList.toggle("is-loading", Boolean(state.exportTask && state.exportTask.button === exportVideoButton));
+  }
+  if (exportVideoCancelButton) {
+    exportVideoCancelButton.disabled = !state.exportTask;
+  }
+  exportModeButton.disabled = Boolean(state.exportTask) || getVisibleStampCount() === 0;
+  exportWidthInput.disabled = Boolean(state.exportTask);
+  exportHeightInput.disabled = Boolean(state.exportTask);
+  if (exportSidebarWidthInput) {
+    exportSidebarWidthInput.disabled = Boolean(state.exportTask);
+  }
+  if (exportSidebarHeightInput) {
+    exportSidebarHeightInput.disabled = Boolean(state.exportTask);
+  }
   updateExportScaleButtonsUI();
+  updateExportAnimationUI();
   if (isOpen) {
     updateExportOverlayGeometry();
+  } else {
+    updateExportBackgroundImageLayer();
   }
   updateEraseCursorVisibility();
+  updateBrushCursorPreview();
 }
 
 function exitExportMode(options = {}) {
+  rememberCurrentExportSetup();
   state.exportMode = false;
   state.exportSelectionBounds = null;
   state.exportDrag = null;
@@ -2315,11 +4072,15 @@ function exitExportMode(options = {}) {
   updateExportModeUI();
   updateUndoState();
   if (options.focusButton) {
-    exportButton.focus();
+    exportModeButton.focus();
   }
 }
 
 function enterExportMode() {
+  if (state.placementTask || state.exportTask) {
+    return;
+  }
+
   if (!getVisibleStampCount()) {
     return;
   }
@@ -2344,9 +4105,12 @@ function enterExportMode() {
     endTouchGesture();
   }
 
+  const remembered = getRememberedExportSetup();
   state.exportMode = true;
-  state.exportSelectionBounds = computeInitialExportSelectionBounds();
-  state.exportScalePercent = 100;
+  state.exportSelectionBounds = remembered
+    ? remembered.selectionBounds
+    : computeInitialExportSelectionBounds();
+  state.exportScalePercent = remembered ? remembered.scalePercent : 100;
   state.exportDrag = null;
   updateExportModeUI();
   updateUndoState();
@@ -2381,7 +4145,125 @@ function startExportSelectionDrag(pointerId, options) {
   }
 }
 
-function updateExportSelectionDrag(pointerId, clientX, clientY) {
+function getAspectLockedExportResizeBounds(origin, edge, point, symmetric = false) {
+  const normalized = normalizeExportSelectionBounds(origin);
+  const width = Math.max(EXPORT_MIN_SIZE, normalized.right - normalized.left);
+  const height = Math.max(EXPORT_MIN_SIZE, normalized.bottom - normalized.top);
+  const aspect = width / height;
+  const centerX = (normalized.left + normalized.right) / 2;
+  const centerY = (normalized.top + normalized.bottom) / 2;
+  const hasLeft = edge.includes("left");
+  const hasRight = edge.includes("right");
+  const hasTop = edge.includes("top");
+  const hasBottom = edge.includes("bottom");
+  const horizontal = hasLeft || hasRight;
+  const vertical = hasTop || hasBottom;
+
+  if (symmetric) {
+    let halfWidth = width / 2;
+    let halfHeight = height / 2;
+    if (horizontal) {
+      halfWidth = Math.max(EXPORT_MIN_SIZE / 2, Math.abs(point.x - centerX));
+    }
+    if (vertical) {
+      halfHeight = Math.max(EXPORT_MIN_SIZE / 2, Math.abs(point.y - centerY));
+    }
+    if (horizontal && vertical) {
+      const scale = Math.max(halfWidth / (width / 2), halfHeight / (height / 2));
+      halfWidth = Math.max(EXPORT_MIN_SIZE / 2, (width / 2) * scale);
+      halfHeight = Math.max(EXPORT_MIN_SIZE / 2, halfWidth / aspect);
+    } else if (horizontal) {
+      halfHeight = Math.max(EXPORT_MIN_SIZE / 2, halfWidth / aspect);
+    } else if (vertical) {
+      halfWidth = Math.max(EXPORT_MIN_SIZE / 2, halfHeight * aspect);
+    }
+    return {
+      left: centerX - halfWidth,
+      right: centerX + halfWidth,
+      top: centerY - halfHeight,
+      bottom: centerY + halfHeight
+    };
+  }
+
+  const next = { ...normalized };
+  if (horizontal && vertical) {
+    const anchorX = hasLeft ? normalized.right : normalized.left;
+    const anchorY = hasTop ? normalized.bottom : normalized.top;
+    let nextWidth = Math.max(EXPORT_MIN_SIZE, Math.abs(point.x - anchorX));
+    let nextHeight = Math.max(EXPORT_MIN_SIZE, Math.abs(point.y - anchorY));
+    if (nextWidth / nextHeight > aspect) {
+      nextWidth = nextHeight * aspect;
+    } else {
+      nextHeight = nextWidth / aspect;
+    }
+    next.left = hasLeft ? anchorX - nextWidth : anchorX;
+    next.right = hasRight ? anchorX + nextWidth : anchorX;
+    next.top = hasTop ? anchorY - nextHeight : anchorY;
+    next.bottom = hasBottom ? anchorY + nextHeight : anchorY;
+    return next;
+  }
+
+  if (horizontal) {
+    const anchorX = hasLeft ? normalized.right : normalized.left;
+    const nextWidth = Math.max(EXPORT_MIN_SIZE, Math.abs(point.x - anchorX));
+    const nextHeight = Math.max(EXPORT_MIN_SIZE, nextWidth / aspect);
+    next.left = hasLeft ? anchorX - nextWidth : anchorX;
+    next.right = hasRight ? anchorX + nextWidth : anchorX;
+    next.top = centerY - nextHeight / 2;
+    next.bottom = centerY + nextHeight / 2;
+    return next;
+  }
+
+  if (vertical) {
+    const anchorY = hasTop ? normalized.bottom : normalized.top;
+    const nextHeight = Math.max(EXPORT_MIN_SIZE, Math.abs(point.y - anchorY));
+    const nextWidth = Math.max(EXPORT_MIN_SIZE, nextHeight * aspect);
+    next.top = hasTop ? anchorY - nextHeight : anchorY;
+    next.bottom = hasBottom ? anchorY + nextHeight : anchorY;
+    next.left = centerX - nextWidth / 2;
+    next.right = centerX + nextWidth / 2;
+  }
+  return next;
+}
+
+function getSymmetricExportResizeBounds(origin, edge, point) {
+  const normalized = normalizeExportSelectionBounds(origin);
+  const centerX = (normalized.left + normalized.right) / 2;
+  const centerY = (normalized.top + normalized.bottom) / 2;
+  const hasHorizontal = edge.includes("left") || edge.includes("right");
+  const hasVertical = edge.includes("top") || edge.includes("bottom");
+  const halfWidth = hasHorizontal
+    ? Math.max(EXPORT_MIN_SIZE / 2, Math.abs(point.x - centerX))
+    : Math.max(EXPORT_MIN_SIZE / 2, (normalized.right - normalized.left) / 2);
+  const halfHeight = hasVertical
+    ? Math.max(EXPORT_MIN_SIZE / 2, Math.abs(point.y - centerY))
+    : Math.max(EXPORT_MIN_SIZE / 2, (normalized.bottom - normalized.top) / 2);
+  return {
+    left: centerX - halfWidth,
+    right: centerX + halfWidth,
+    top: centerY - halfHeight,
+    bottom: centerY + halfHeight
+  };
+}
+
+function getFreeExportResizeBounds(origin, edge, point) {
+  const next = { ...normalizeExportSelectionBounds(origin) };
+  if (edge.includes("left")) {
+    next.left = Math.min(point.x, next.right - EXPORT_MIN_SIZE);
+  }
+  if (edge.includes("right")) {
+    next.right = Math.max(point.x, next.left + EXPORT_MIN_SIZE);
+  }
+  if (edge.includes("top")) {
+    next.top = Math.min(point.y, next.bottom - EXPORT_MIN_SIZE);
+  }
+  if (edge.includes("bottom")) {
+    next.bottom = Math.max(point.y, next.top + EXPORT_MIN_SIZE);
+  }
+  return next;
+}
+
+function updateExportSelectionDrag(pointerId, clientX, clientY, modifiers = {}) {
   if (!state.exportDrag || state.exportDrag.pointerId !== pointerId || !state.exportSelectionBounds) {
     return;
   }
@@ -2399,18 +4281,16 @@ function updateExportSelectionDrag(pointerId, clientX, clientY) {
     next.bottom += deltaY;
   } else {
     const edge = String(state.exportDrag.edge || "");
-    if (edge.includes("left")) {
-      next.left = Math.min(point.x, next.right - EXPORT_MIN_SIZE);
-    }
-    if (edge.includes("right")) {
-      next.right = Math.max(point.x, next.left + EXPORT_MIN_SIZE);
-    }
-    if (edge.includes("top")) {
-      next.top = Math.min(point.y, next.bottom - EXPORT_MIN_SIZE);
-    }
-    if (edge.includes("bottom")) {
-      next.bottom = Math.max(point.y, next.top + EXPORT_MIN_SIZE);
-    }
+    const lockAspect = Boolean(modifiers.shiftKey);
+    const resizeFromCenter = Boolean(modifiers.altKey);
+    Object.assign(
+      next,
+      lockAspect
+        ? getAspectLockedExportResizeBounds(origin, edge, point, resizeFromCenter)
+        : resizeFromCenter
+        ? getSymmetricExportResizeBounds(origin, edge, point)
+        : getFreeExportResizeBounds(origin, edge, point)
+    );
   }
 
   state.exportSelectionBounds = normalizeExportSelectionBounds(next);
@@ -2497,6 +4377,7 @@ function updateEraseCursorPosition(clientX, clientY) {
 function updateEraseCursorVisibility() {
   const shouldShow =
     state.eraseMode &&
+    isDrawingModeActive() &&
     state.pointerInViewport &&
     !state.panning &&
     !state.touchGesture &&
@@ -2544,6 +4425,16 @@ function getShortcutPreviewBrush() {
   if (soloBrush) {
     state.shortcutPreview.brushId = soloBrush.id;
     return soloBrush;
+  }
+
+  const selectedBrushes = getSelectedBrushes();
+  if (selectedBrushes.length) {
+    const rememberedSelected = selectedBrushes.find(
+      (brush) => brush.id === Number(state.shortcutPreview.brushId)
+    );
+    const selectedBrush = rememberedSelected || selectedBrushes[0];
+    state.shortcutPreview.brushId = selectedBrush.id;
+    return selectedBrush;
   }
 
   const enabledBrush = state.brushes.find((brush) => brush.enabled);
@@ -2616,8 +4507,208 @@ function showShortcutPreviewAt(clientX, clientY) {
   scheduleShortcutPreviewHide();
 }
 
+function resetBrushCursorPreviewSource() {
+  state.brushCursorPreview.sourceUrl = "";
+  state.brushCursorPreview.frozenUrl = "";
+  state.brushCursorPreview.loadingUrl = "";
+  state.brushCursorPreview.failedUrl = "";
+  state.brushCursorPreview.renderedUrl = "";
+  state.brushCursorPreview.loadToken += 1;
+  if (brushCursorPreview) {
+    brushCursorPreview.removeAttribute("src");
+  }
+}
+
+function hideBrushCursorPreview(resetBrush = false) {
+  if (!brushCursorPreview) {
+    return;
+  }
+  brushCursorPreview.classList.remove("is-visible");
+  if (resetBrush) {
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
+  }
+}
+
+function isGifBrush(brush) {
+  if (!brush) {
+    return false;
+  }
+  return isGifUrl(brush.url) || /\.gif$/i.test(String(brush.name || ""));
+}
+
+function getBrushCursorPreviewBrush() {
+  const soloBrush = getSoloBrush();
+  if (soloBrush) {
+    state.brushCursorPreview.brushId = soloBrush.id;
+    return soloBrush;
+  }
+
+  const selectedBrushes = getSelectedBrushes();
+  if (selectedBrushes.length) {
+    const rememberedSelected = selectedBrushes.find(
+      (brush) => brush.id === Number(state.brushCursorPreview.brushId)
+    );
+    const selectedBrush = rememberedSelected || selectedBrushes[0];
+    state.brushCursorPreview.brushId = selectedBrush.id;
+    return selectedBrush;
+  }
+
+  const remembered = findBrushById(Number(state.brushCursorPreview.brushId));
+  if (remembered && remembered.enabled) {
+    return remembered;
+  }
+
+  const enabledBrush = state.brushes.find((brush) => brush.enabled) || null;
+  if (enabledBrush) {
+    state.brushCursorPreview.brushId = enabledBrush.id;
+  }
+  return enabledBrush;
+}
+
+function requestFrozenBrushCursorPreviewSource(sourceUrl) {
+  const previewState = state.brushCursorPreview;
+
+  if (previewState.sourceUrl !== sourceUrl) {
+    previewState.sourceUrl = sourceUrl;
+    previewState.frozenUrl = "";
+    previewState.loadingUrl = "";
+    previewState.failedUrl = "";
+    previewState.loadToken += 1;
+  }
+
+  if (previewState.frozenUrl) {
+    return previewState.frozenUrl;
+  }
+
+  if (previewState.loadingUrl === sourceUrl || previewState.failedUrl === sourceUrl) {
+    return "";
+  }
+
+  const token = previewState.loadToken + 1;
+  previewState.loadToken = token;
+  previewState.loadingUrl = sourceUrl;
+
+  const loader = new Image();
+  loader.onload = () => {
+    if (
+      state.brushCursorPreview.loadToken !== token ||
+      state.brushCursorPreview.sourceUrl !== sourceUrl
+    ) {
+      return;
+    }
+
+    let frozenUrl = "";
+    try {
+      frozenUrl = captureImageStillFrame(loader);
+    } catch (error) {
+      frozenUrl = "";
+    }
+    state.brushCursorPreview.loadingUrl = "";
+    if (frozenUrl) {
+      state.brushCursorPreview.frozenUrl = frozenUrl;
+      updateBrushCursorPreview();
+    } else {
+      state.brushCursorPreview.failedUrl = sourceUrl;
+      hideBrushCursorPreview();
+    }
+  };
+  loader.onerror = () => {
+    if (
+      state.brushCursorPreview.loadToken !== token ||
+      state.brushCursorPreview.sourceUrl !== sourceUrl
+    ) {
+      return;
+    }
+    state.brushCursorPreview.loadingUrl = "";
+    state.brushCursorPreview.failedUrl = sourceUrl;
+    hideBrushCursorPreview();
+  };
+  loader.src = sourceUrl;
+
+  return "";
+}
+
+function getBrushCursorPreviewSource(brush) {
+  if (!brush || typeof brush.url !== "string" || !brush.url) {
+    return "";
+  }
+
+  if (isGifBrush(brush)) {
+    return requestFrozenBrushCursorPreviewSource(brush.url);
+  }
+
+  if (state.brushCursorPreview.sourceUrl !== brush.url) {
+    state.brushCursorPreview.sourceUrl = brush.url;
+    state.brushCursorPreview.frozenUrl = "";
+    state.brushCursorPreview.loadingUrl = "";
+    state.brushCursorPreview.failedUrl = "";
+    state.brushCursorPreview.loadToken += 1;
+  }
+  return brush.url;
+}
+
+function shouldShowBrushCursorPreview() {
+  return Boolean(
+    brushCursorPreview &&
+      state.brushPreviewEnabled !== false &&
+      isDrawingModeActive() &&
+      state.pointerInViewport &&
+      !state.eraseMode &&
+      !state.panning &&
+      !state.touchGesture &&
+      !state.exportMode &&
+      !state.exportTask &&
+      !state.placementTask &&
+      !state.drawing &&
+      !state.erasing &&
+      !state.shapeDraft
+  );
+}
+
+function updateBrushCursorPreview() {
+  if (!shouldShowBrushCursorPreview()) {
+    hideBrushCursorPreview();
+    return;
+  }
+
+  const brush = getBrushCursorPreviewBrush();
+  if (!brush) {
+    hideBrushCursorPreview(true);
+    return;
+  }
+
+  const sourceUrl = getBrushCursorPreviewSource(brush);
+  if (!sourceUrl) {
+    hideBrushCursorPreview();
+    return;
+  }
+
+  const worldSize = getBrushPlacementSize(brush);
+  const displayWidth = Math.max(1, worldSize.width * state.camera.scale);
+  const displayHeight = Math.max(1, worldSize.height * state.camera.scale);
+  const left = state.lastPointerClientX - displayWidth / 2;
+  const top = state.lastPointerClientY - displayHeight / 2;
+  const rotation = parseNumericInputValue(rotationSlider, 0);
+
+  if (state.brushCursorPreview.renderedUrl !== sourceUrl) {
+    brushCursorPreview.src = sourceUrl;
+    state.brushCursorPreview.renderedUrl = sourceUrl;
+  }
+  brushCursorPreview.style.left = `${left}px`;
+  brushCursorPreview.style.top = `${top}px`;
+  brushCursorPreview.style.width = `${displayWidth}px`;
+  brushCursorPreview.style.height = `${displayHeight}px`;
+  brushCursorPreview.style.transform = `rotate(${rotation}deg)`;
+  brushCursorPreview.style.opacity = "0.2";
+  brushCursorPreview.style.imageRendering = renderModeToggle.checked ? "auto" : "pixelated";
+  applyBrushTintStyle(brushCursorPreview, false, getCurrentTintSettings());
+  brushCursorPreview.classList.add("is-visible");
+}
+
 function updatePanningStateClass() {
   viewport.classList.toggle("is-panning", Boolean(state.panning || state.touchGesture));
+  updateBrushCursorPreview();
 }
 
 function cancelDrawingForGesture() {
@@ -2672,6 +4763,7 @@ function cancelShapeDraft() {
   state.shapeDraft = null;
   viewport.classList.remove("is-drawing");
   hideShapePreview();
+  updateBrushCursorPreview();
 }
 
 function cancelShapeDraftForGesture() {
@@ -3005,15 +5097,657 @@ function getVisibleStampCount() {
   return state.stampCount;
 }
 
+function getSequenceSlotDatasetKey(slotIndex, key) {
+  const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
+  return `sequenceSlot${safeSlotIndex}${key.slice("sequence".length)}`;
+}
+
+function deleteSequenceRuntimeDataset(element) {
+  if (!element?.dataset) {
+    return;
+  }
+  for (const key of Object.keys(element.dataset)) {
+    if (key.startsWith("sequence")) {
+      delete element.dataset[key];
+    }
+  }
+}
+
+function loadSequenceSlotScratch(stamp, slotIndex) {
+  if (!stamp?.dataset) {
+    return;
+  }
+  for (const key of SEQUENCE_SLOT_STATE_KEYS) {
+    delete stamp.dataset[key];
+  }
+  for (const key of SEQUENCE_SLOT_STATE_KEYS) {
+    const slotKey = getSequenceSlotDatasetKey(slotIndex, key);
+    if (Object.prototype.hasOwnProperty.call(stamp.dataset, slotKey)) {
+      stamp.dataset[key] = stamp.dataset[slotKey];
+    }
+  }
+}
+
+function commitSequenceSlotScratch(stamp, slotIndex) {
+  if (!stamp?.dataset) {
+    return;
+  }
+  for (const key of SEQUENCE_SLOT_STATE_KEYS) {
+    const slotKey = getSequenceSlotDatasetKey(slotIndex, key);
+    if (Object.prototype.hasOwnProperty.call(stamp.dataset, key)) {
+      stamp.dataset[slotKey] = stamp.dataset[key];
+    } else {
+      delete stamp.dataset[slotKey];
+    }
+    delete stamp.dataset[key];
+  }
+}
+
+function cloneSequenceRuntime(runtime) {
+  if (!runtime || typeof runtime !== "object") {
+    return null;
+  }
+  const clone = { ...runtime };
+  if (Array.isArray(runtime.triggeredPulseByIndex)) {
+    clone.triggeredPulseByIndex = runtime.triggeredPulseByIndex.slice();
+  }
+  if (runtime.lastTriggeredIndexByPulse instanceof Map) {
+    clone.lastTriggeredIndexByPulse = new Map(runtime.lastTriggeredIndexByPulse);
+  }
+  if (runtime.triggeredPulseIdsThisFrame instanceof Set) {
+    clone.triggeredPulseIdsThisFrame = new Set(runtime.triggeredPulseIdsThisFrame);
+  }
+  return clone;
+}
+
+function createSequenceExportSnapshot() {
+  return state.strokes.map((stroke) => ({
+    stroke,
+    sequenceRuntime: cloneSequenceRuntime(stroke.sequenceRuntime),
+    sequenceSlotRuntimes: Array.isArray(stroke.sequenceSlotRuntimes)
+      ? stroke.sequenceSlotRuntimes.map(cloneSequenceRuntime)
+      : null,
+    elements: stroke.elements.map((element) => {
+      const dataset = {};
+      for (const key of Object.keys(element.dataset)) {
+        if (key.startsWith("sequence")) {
+          dataset[key] = element.dataset[key];
+        }
+      }
+      return {
+        element,
+        dataset,
+        src: element.getAttribute("src") || "",
+        opacity: element.style.opacity,
+        transform: element.style.transform,
+        filter: element.style.filter
+      };
+    })
+  }));
+}
+
+function restoreSequenceExportSnapshot(snapshot) {
+  const list = Array.isArray(snapshot) ? snapshot : [];
+  for (const strokeSnapshot of list) {
+    if (!strokeSnapshot || !strokeSnapshot.stroke) {
+      continue;
+    }
+    strokeSnapshot.stroke.sequenceRuntime = cloneSequenceRuntime(strokeSnapshot.sequenceRuntime);
+    strokeSnapshot.stroke.sequenceSlotRuntimes = Array.isArray(strokeSnapshot.sequenceSlotRuntimes)
+      ? strokeSnapshot.sequenceSlotRuntimes.map(cloneSequenceRuntime)
+      : null;
+    const elements = Array.isArray(strokeSnapshot.elements) ? strokeSnapshot.elements : [];
+    for (const elementSnapshot of elements) {
+      const element = elementSnapshot?.element;
+      if (!element) {
+        continue;
+      }
+      deleteSequenceRuntimeDataset(element);
+      for (const [key, value] of Object.entries(elementSnapshot.dataset || {})) {
+        element.dataset[key] = value;
+      }
+      if (element.getAttribute("src") !== elementSnapshot.src) {
+        element.src = elementSnapshot.src;
+      }
+      element.style.opacity = elementSnapshot.opacity;
+      element.style.transform = elementSnapshot.transform;
+      element.style.filter = elementSnapshot.filter || "";
+    }
+  }
+}
+
+function resetSequencesForExport() {
+  for (const stroke of state.strokes) {
+    resetStrokeSequenceRuntime(stroke);
+    for (const element of stroke.elements) {
+      resetStampSequenceStyle(element, true);
+    }
+  }
+}
+
+function hasActiveSequenceEffectOnCanvas() {
+  return state.strokes.some((stroke) => {
+    if (!stroke || stroke.hidden || !isLayerSequenceEnabled(stroke) || !Array.isArray(stroke.elements)) {
+      return false;
+    }
+    return getLayerSequenceSlots(stroke).some((slot) =>
+      isImplementedLayerSequenceEffect(slot.effect) &&
+        stroke.elements.some((element) => element.parentElement === world)
+    );
+  });
+}
+
 function notifyStampLimitReached() {
   updateBrushStatus(
     `Canvas limit reached (${MAX_VISIBLE_STAMPS.toLocaleString()} images). Undo or clear to add more.`
   );
 }
 
+function normalizeStrokeLayerType(layerType) {
+  if (layerType === "spray" || layerType === "line" || layerType === "box" || layerType === "circle") {
+    return layerType;
+  }
+  return "stroke";
+}
+
+function normalizeLayerSequenceValue(value, options) {
+  const allowed = new Set(options.map((option) => option.value));
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return allowed.has(String(candidate || "")) ? String(candidate) : options[0]?.value || "";
+}
+
+function normalizeLayerSequenceSlot(slot = {}) {
+  return {
+    effect: normalizeLayerSequenceValue(
+      slot.effect || slot.sequenceEffect || slot.sequenceEffects,
+      LAYER_SEQUENCE_EFFECT_OPTIONS
+    ),
+    timingStyle: normalizeLayerSequenceValue(
+      slot.timingStyle || slot.sequenceTimingStyle || slot.sequenceTimingStyles,
+      LAYER_SEQUENCE_TIMING_OPTIONS
+    ),
+    settings: normalizeLayerSequenceSettings(slot.settings || slot.sequenceSettings)
+  };
+}
+
+function normalizeExtraLayerSequenceSlots(slots) {
+  if (!Array.isArray(slots)) {
+    return [];
+  }
+  return slots.slice(0, MAX_LAYER_SEQUENCE_EFFECTS - 1).map(normalizeLayerSequenceSlot);
+}
+
+function getExtraLayerSequenceSlots(stroke) {
+  return normalizeExtraLayerSequenceSlots(stroke?.sequenceEffectSlots);
+}
+
+function setExtraLayerSequenceSlots(stroke, slots) {
+  if (!stroke) {
+    return;
+  }
+  stroke.sequenceEffectSlots = normalizeExtraLayerSequenceSlots(slots);
+}
+
+function getLayerSequenceSlotCount(stroke) {
+  return 1 + getExtraLayerSequenceSlots(stroke).length;
+}
+
+function getLayerSequenceSlots(stroke) {
+  return [
+    getLayerSequenceSlot(stroke, 0),
+    ...getExtraLayerSequenceSlots(stroke)
+  ].slice(0, MAX_LAYER_SEQUENCE_EFFECTS);
+}
+
+function isImplementedLayerSequenceEffect(effect) {
+  return (
+    effect === "show-hide" ||
+    effect === "move" ||
+    effect === "rotate" ||
+    effect === "scale" ||
+    effect === "color-cycle" ||
+    effect === "image-cycle"
+  );
+}
+
+function getLayerSequenceSlot(stroke, slotIndex = 0) {
+  const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
+  if (safeSlotIndex <= 0) {
+    return {
+      effect: normalizeLayerSequenceValue(
+        stroke?.sequenceEffect || stroke?.sequenceEffects,
+        LAYER_SEQUENCE_EFFECT_OPTIONS
+      ),
+      timingStyle: normalizeLayerSequenceValue(
+        stroke?.sequenceTimingStyle || stroke?.sequenceTimingStyles,
+        LAYER_SEQUENCE_TIMING_OPTIONS
+      ),
+      settings: normalizeLayerSequenceSettings(stroke?.sequenceSettings)
+    };
+  }
+  const extras = getExtraLayerSequenceSlots(stroke);
+  return normalizeLayerSequenceSlot(extras[safeSlotIndex - 1]);
+}
+
+function getLayerSequenceEffect(stroke, slotIndex = 0) {
+  if (Number(slotIndex) > 0) {
+    return getLayerSequenceSlot(stroke, slotIndex).effect;
+  }
+  return normalizeLayerSequenceValue(
+    stroke?.sequenceEffect || stroke?.sequenceEffects,
+    LAYER_SEQUENCE_EFFECT_OPTIONS
+  );
+}
+
+function getLayerSequenceTimingStyle(stroke, slotIndex = 0) {
+  if (Number(slotIndex) > 0) {
+    return getLayerSequenceSlot(stroke, slotIndex).timingStyle;
+  }
+  return normalizeLayerSequenceValue(
+    stroke?.sequenceTimingStyle || stroke?.sequenceTimingStyles,
+    LAYER_SEQUENCE_TIMING_OPTIONS
+  );
+}
+
+function isLayerSequenceEnabled(stroke) {
+  return stroke ? stroke.sequenceEnabled !== false && stroke.sequenceEnabled === true : false;
+}
+
+function setLayerSequenceValue(stroke, group, value, slotIndex = 0) {
+  if (!stroke) {
+    return;
+  }
+  const options = group === "timing"
+    ? LAYER_SEQUENCE_TIMING_OPTIONS
+    : LAYER_SEQUENCE_EFFECT_OPTIONS;
+  const normalized = normalizeLayerSequenceValue(value, options);
+  const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
+  if (safeSlotIndex > 0) {
+    const extras = getExtraLayerSequenceSlots(stroke);
+    const slot = normalizeLayerSequenceSlot(extras[safeSlotIndex - 1]);
+    if (group === "timing") {
+      slot.timingStyle = normalized;
+    } else {
+      slot.effect = normalized;
+    }
+    extras[safeSlotIndex - 1] = slot;
+    setExtraLayerSequenceSlots(stroke, extras);
+  } else if (group === "timing") {
+    stroke.sequenceTimingStyle = normalized;
+    delete stroke.sequenceTimingStyles;
+  } else {
+    stroke.sequenceEffect = normalized;
+    delete stroke.sequenceEffects;
+  }
+}
+
+function getLayerSequenceSettings(stroke, slotIndex = 0) {
+  if (Number(slotIndex) > 0) {
+    return getLayerSequenceSlot(stroke, slotIndex).settings;
+  }
+  return normalizeLayerSequenceSettings({
+    ...LAYER_SEQUENCE_DEFAULT_SETTINGS,
+    ...(stroke && typeof stroke.sequenceSettings === "object" && stroke.sequenceSettings
+      ? stroke.sequenceSettings
+      : {})
+  });
+}
+
+function normalizeLayerSequenceSettings(settings) {
+  const normalized = {
+    ...LAYER_SEQUENCE_DEFAULT_SETTINGS,
+    ...(settings && typeof settings === "object" ? settings : {})
+  };
+  normalized.showHideFade = Boolean(normalized.showHideFade);
+  normalized.imageCycleRandom = Boolean(normalized.imageCycleRandom);
+  normalized.moveInstant = Boolean(normalized.moveInstant);
+  normalized.showHideFadeLength = clamp(Math.round(Number(normalized.showHideFadeLength) || 300), 0, 3000);
+  normalized.moveMode = LAYER_SEQUENCE_MOVE_MODE_OPTIONS.some((option) => option.value === normalized.moveMode)
+    ? normalized.moveMode
+    : "left";
+  normalized.moveStrength = Number.isFinite(Number(normalized.moveStrength))
+    ? clamp(Math.round(Number(normalized.moveStrength)), 0, 1000)
+    : 80;
+  normalized.moveSpeed = normalizeSequenceSpeedSliderValue(normalized.moveSpeed, 4000, 50, 45);
+  normalized.colorCycleColor = normalizeHexColor(normalized.colorCycleColor, "#ff00ff");
+  normalized.colorCycleAmount = Number.isFinite(Number(normalized.colorCycleAmount))
+    ? clamp(Math.round(Number(normalized.colorCycleAmount)), 0, 100)
+    : 70;
+  normalized.colorCycleInstant = Boolean(normalized.colorCycleInstant);
+  normalized.colorCycleSpeed = normalizeSequenceSpeedSliderValue(normalized.colorCycleSpeed, 5000, 50, 45);
+  normalized.rotateSpeed = normalizeSequenceSpeedSliderValue(normalized.rotateSpeed, 6000, 100, 45);
+  normalized.scaleSpeed = normalizeSequenceSpeedSliderValue(normalized.scaleSpeed, 6000, 100, 45);
+  normalized.scaleAmount = clamp(Math.round(Number(normalized.scaleAmount) || 50), 0, 300);
+  normalized.pulseSpeed = normalizeSequenceSpeedSliderValue(normalized.pulseSpeed, 700, 15, 35);
+  normalized.pulseRate = normalizeSequenceSpeedSliderValue(normalized.pulseRate, 5000, 100, 35);
+  normalized.waveSpeed = normalizeSequenceSpeedSliderValue(normalized.waveSpeed, 2000, 20, 45);
+  normalized.waveReverse = Boolean(normalized.waveReverse);
+  normalized.stepLength = clamp(Math.round(Number(normalized.stepLength) || 350), 50, 4000);
+  normalized.stepAmount = clamp(Math.round(Number(normalized.stepAmount) || 1), 1, 200);
+  normalized.randomSpeed = normalizeSequenceSpeedSliderValue(normalized.randomSpeed, 4000, 50, 45);
+  return normalized;
+}
+
+function setLayerSequenceSetting(stroke, key, rawValue, slotIndex = 0) {
+  if (!stroke || !(key in LAYER_SEQUENCE_DEFAULT_SETTINGS)) {
+    return;
+  }
+  const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
+  const nextSettings = getLayerSequenceSettings(stroke, safeSlotIndex);
+  if (typeof LAYER_SEQUENCE_DEFAULT_SETTINGS[key] === "boolean") {
+    nextSettings[key] = Boolean(rawValue);
+  } else if (typeof LAYER_SEQUENCE_DEFAULT_SETTINGS[key] === "string") {
+    nextSettings[key] = String(rawValue || "");
+  } else {
+    nextSettings[key] = Number(rawValue);
+  }
+  if (safeSlotIndex > 0) {
+    const extras = getExtraLayerSequenceSlots(stroke);
+    const slot = normalizeLayerSequenceSlot(extras[safeSlotIndex - 1]);
+    slot.settings = normalizeLayerSequenceSettings(nextSettings);
+    extras[safeSlotIndex - 1] = slot;
+    setExtraLayerSequenceSlots(stroke, extras);
+  } else {
+    stroke.sequenceSettings = normalizeLayerSequenceSettings(nextSettings);
+  }
+}
+
+function createLayerSequenceSelect(stroke, group, options, slotIndex = 0) {
+  const selectedValue = group === "timing"
+    ? getLayerSequenceTimingStyle(stroke, slotIndex)
+    : getLayerSequenceEffect(stroke, slotIndex);
+  const select = document.createElement("select");
+  select.className = "edit-layer-sequence-select";
+  select.dataset.sequenceGroup = group;
+  select.dataset.sequenceSlotIndex = String(slotIndex);
+  select.setAttribute("aria-label", group === "timing" ? "Sequence style" : "Sequence effect");
+
+  for (const option of options) {
+    const optionNode = document.createElement("option");
+    optionNode.value = option.value;
+    optionNode.textContent = option.label;
+    optionNode.selected = option.value === selectedValue;
+    select.appendChild(optionNode);
+  }
+
+  return select;
+}
+
+function createLayerSequenceToggleControl(stroke, key, label, slotIndex = 0) {
+  const settings = getLayerSequenceSettings(stroke, slotIndex);
+  const field = document.createElement("label");
+  field.className = "edit-layer-sequence-setting edit-layer-sequence-toggle";
+
+  const text = document.createElement("span");
+  text.textContent = label;
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className = "edit-layer-sequence-setting-input";
+  input.dataset.sequenceSetting = key;
+  input.dataset.sequenceSettingType = "boolean";
+  input.dataset.sequenceSlotIndex = String(slotIndex);
+  input.checked = Boolean(settings[key]);
+  const switchControl = document.createElement("span");
+  switchControl.className = "ios-switch edit-layer-sequence-switch";
+  const switchSlider = document.createElement("span");
+  switchSlider.className = "ios-switch-slider";
+  switchSlider.setAttribute("aria-hidden", "true");
+  switchControl.appendChild(input);
+  switchControl.appendChild(switchSlider);
+
+  field.appendChild(text);
+  field.appendChild(switchControl);
+  return field;
+}
+
+function createLayerSequenceRangeControl(stroke, key, label, min, max, step, suffix = "", slotIndex = 0) {
+  const settings = getLayerSequenceSettings(stroke, slotIndex);
+  const field = document.createElement("label");
+  field.className = "edit-layer-sequence-setting edit-layer-sequence-range";
+
+  const labelText = document.createElement("span");
+  labelText.className = "edit-layer-sequence-setting-label";
+  labelText.textContent = label;
+
+  const value = document.createElement("span");
+  value.className = "edit-layer-sequence-setting-value";
+  value.textContent = `${settings[key]}${suffix}`;
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.className = "edit-layer-sequence-setting-input";
+  input.dataset.sequenceSetting = key;
+  input.dataset.sequenceSettingType = "number";
+  input.dataset.sequenceSlotIndex = String(slotIndex);
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(settings[key]);
+
+  field.appendChild(labelText);
+  field.appendChild(value);
+  field.appendChild(input);
+  return field;
+}
+
+function createLayerSequenceColorControl(stroke, key, label, slotIndex = 0) {
+  const settings = getLayerSequenceSettings(stroke, slotIndex);
+  const field = document.createElement("label");
+  field.className = "edit-layer-sequence-setting edit-layer-sequence-color";
+
+  const labelText = document.createElement("span");
+  labelText.className = "edit-layer-sequence-setting-label";
+  labelText.textContent = label;
+
+  const input = document.createElement("input");
+  input.type = "color";
+  input.className = "edit-layer-sequence-setting-input";
+  input.dataset.sequenceSetting = key;
+  input.dataset.sequenceSettingType = "string";
+  input.dataset.sequenceSlotIndex = String(slotIndex);
+  input.value = normalizeHexColor(settings[key], "#ff00ff");
+
+  field.appendChild(labelText);
+  field.appendChild(input);
+  return field;
+}
+
+function createLayerSequenceOptionControl(stroke, key, label, options, slotIndex = 0) {
+  const settings = getLayerSequenceSettings(stroke, slotIndex);
+  const field = document.createElement("label");
+  field.className = "edit-layer-sequence-setting edit-layer-sequence-option";
+
+  const labelText = document.createElement("span");
+  labelText.className = "edit-layer-sequence-setting-label";
+  labelText.textContent = label;
+
+  const select = document.createElement("select");
+  select.className =
+    "edit-layer-sequence-setting-input edit-layer-sequence-select edit-layer-sequence-setting-select";
+  select.dataset.sequenceSetting = key;
+  select.dataset.sequenceSettingType = "string";
+  select.dataset.sequenceSlotIndex = String(slotIndex);
+
+  for (const option of options) {
+    const optionNode = document.createElement("option");
+    optionNode.value = option.value;
+    optionNode.textContent = option.label;
+    optionNode.selected = option.value === settings[key];
+    select.appendChild(optionNode);
+  }
+
+  field.appendChild(labelText);
+  field.appendChild(select);
+  return field;
+}
+
+function createLayerSequenceSettings(stroke, slotIndex = 0) {
+  const effect = getLayerSequenceEffect(stroke, slotIndex);
+  const timingStyle = getLayerSequenceTimingStyle(stroke, slotIndex);
+  const settings = getLayerSequenceSettings(stroke, slotIndex);
+  const panel = document.createElement("div");
+  panel.className = "edit-layer-sequence-settings";
+  panel.dataset.strokeId = String(stroke.id);
+  panel.dataset.sequenceSlotIndex = String(slotIndex);
+
+  if (effect === "show-hide") {
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "showHideFade", "fade?", slotIndex));
+    if (settings.showHideFade) {
+      panel.appendChild(
+        createLayerSequenceRangeControl(stroke, "showHideFadeLength", "fade length", 0, 3000, 50, "ms", slotIndex)
+      );
+    }
+  } else if (effect === "move") {
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "moveInstant", "instant?", slotIndex));
+    panel.appendChild(
+      createLayerSequenceOptionControl(stroke, "moveMode", "mode", LAYER_SEQUENCE_MOVE_MODE_OPTIONS, slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "moveStrength", "movement strength", 0, 1000, 5, "px", slotIndex)
+    );
+    const moveSpeedControl = createLayerSequenceRangeControl(
+      stroke,
+      "moveSpeed",
+      "movement speed",
+      1,
+      100,
+      1,
+      "",
+      slotIndex
+    );
+    if (settings.moveInstant && settings.moveMode !== "circle") {
+      moveSpeedControl.classList.add("is-disabled");
+      const moveSpeedInput = moveSpeedControl.querySelector("input");
+      if (moveSpeedInput) {
+        moveSpeedInput.disabled = true;
+      }
+    }
+    panel.appendChild(moveSpeedControl);
+  } else if (effect === "rotate") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "rotateSpeed", "rotate speed", 1, 100, 1, "", slotIndex)
+    );
+  } else if (effect === "scale") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "scaleSpeed", "scale speed", 1, 100, 1, "", slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "scaleAmount", "scale amount", 0, 300, 5, "%", slotIndex)
+    );
+  } else if (effect === "image-cycle") {
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "imageCycleRandom", "random?", slotIndex));
+  } else if (effect === "color-cycle") {
+    panel.appendChild(createLayerSequenceColorControl(stroke, "colorCycleColor", "color", slotIndex));
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "colorCycleAmount", "hue shift amount", 0, 100, 1, "%", slotIndex)
+    );
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "colorCycleInstant", "instant?", slotIndex));
+    const colorSpeedControl = createLayerSequenceRangeControl(
+      stroke,
+      "colorCycleSpeed",
+      "speed",
+      1,
+      100,
+      1,
+      "",
+      slotIndex
+    );
+    if (settings.colorCycleInstant) {
+      colorSpeedControl.classList.add("is-disabled");
+      const colorSpeedInput = colorSpeedControl.querySelector("input");
+      if (colorSpeedInput) {
+        colorSpeedInput.disabled = true;
+      }
+    }
+    panel.appendChild(colorSpeedControl);
+  }
+
+  if (timingStyle === "pulse") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "pulseSpeed", "pulse speed", 1, 100, 1, "", slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "pulseRate", "pulse rate", 1, 100, 1, "", slotIndex)
+    );
+  } else if (timingStyle === "wave") {
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "waveReverse", "reverse?", slotIndex));
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "waveSpeed", "bounce speed", 1, 100, 1, "", slotIndex)
+    );
+  } else if (timingStyle === "step") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "stepLength", "step length", 50, 4000, 50, "ms", slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "stepAmount", "step amount", 1, 200, 1, "", slotIndex)
+    );
+  } else if (timingStyle === "random") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "randomSpeed", "randomization speed", 1, 100, 1, "", slotIndex)
+    );
+  }
+
+  return panel;
+}
+
+function createLayerSequenceAddRemoveRow(stroke, slotIndex, slotCount) {
+  const canAdd = slotIndex === slotCount - 1 && slotCount < MAX_LAYER_SEQUENCE_EFFECTS;
+  const canRemove = slotIndex > 0;
+  if (!canAdd && !canRemove) {
+    return null;
+  }
+
+  const row = document.createElement("div");
+  row.className = "edit-layer-sequence-add-row";
+  row.dataset.strokeId = String(stroke.id);
+  row.dataset.sequenceSlotIndex = String(slotIndex);
+  row.classList.toggle("has-add", canAdd);
+  row.classList.toggle("has-remove", canRemove);
+
+  if (canAdd) {
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "edit-layer-sequence-add-button";
+    addButton.dataset.layerAction = "sequence-add-effect";
+    addButton.textContent = "+";
+    addButton.title = "Add layer effect";
+    addButton.setAttribute("aria-label", addButton.title);
+    row.appendChild(addButton);
+  }
+
+  if (canRemove) {
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "edit-layer-sequence-remove-button";
+    removeButton.dataset.layerAction = "sequence-remove-effect";
+    removeButton.dataset.sequenceSlotIndex = String(slotIndex);
+    removeButton.title = "Remove layer effect";
+    removeButton.setAttribute("aria-label", removeButton.title);
+    const icon = document.createElement("img");
+    icon.src = "bomb.png";
+    icon.alt = "";
+    icon.setAttribute("aria-hidden", "true");
+    removeButton.appendChild(icon);
+    row.appendChild(removeButton);
+  }
+
+  return row;
+}
+
 function serializeStrokeList(strokes) {
   return strokes.map((stroke) => ({
     id: Number.isFinite(Number(stroke.id)) ? Number(stroke.id) : null,
+    layerType: normalizeStrokeLayerType(stroke.layerType),
+    brushCategoryName: typeof stroke.brushCategoryName === "string"
+      ? stroke.brushCategoryName
+      : "",
+    animationPaused: Boolean(stroke.animationPaused),
+    sequenceOpen: Boolean(stroke.sequenceOpen),
+    sequenceEnabled: isLayerSequenceEnabled(stroke),
+    sequenceEffect: getLayerSequenceEffect(stroke),
+    sequenceTimingStyle: getLayerSequenceTimingStyle(stroke),
+    sequenceSettings: normalizeLayerSequenceSettings(stroke.sequenceSettings),
+    sequenceEffectSlots: getExtraLayerSequenceSlots(stroke),
     stamps: stroke.elements.map((element) => ({
       // Persist only layout/render metadata and brush linkage for compact reloads.
       brushId: Number(element.dataset.brushId) || null,
@@ -3022,7 +5756,9 @@ function serializeStrokeList(strokes) {
       width: parseFloat(element.style.width) || 0,
       height: parseFloat(element.style.height) || 0,
       rotation: Number(element.dataset.rotation) || 0,
-      opacity: Number.isFinite(Number(element.style.opacity))
+      opacity: Number.isFinite(Number(element.dataset.sequenceBaseOpacity))
+        ? clamp(Number(element.dataset.sequenceBaseOpacity), 0, 1)
+        : Number.isFinite(Number(element.style.opacity))
         ? clamp(Number(element.style.opacity), 0, 1)
         : 1,
       imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated",
@@ -3080,6 +5816,11 @@ function buildSessionSnapshot() {
     soloBrushId: Number.isFinite(Number(state.soloBrushId))
       ? Number(state.soloBrushId)
       : null,
+    selectedBrushIds: state.selectedBrushIds instanceof Set
+      ? Array.from(state.selectedBrushIds)
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id))
+      : [],
     activeStockBrushFolderId: typeof state.activeStockBrushFolderId === "string"
       ? state.activeStockBrushFolderId
       : null,
@@ -3098,15 +5839,35 @@ function buildSessionSnapshot() {
       tintColor: normalizeHexColor(tintColorInput.value),
       tintAmount: parseNumericInputValue(tintAmountSlider, 0),
       renderLinear: renderModeToggle.checked,
+      brushPreviewEnabled: state.brushPreviewEnabled !== false,
       cursorTrailEnabled: cursorTrailToggle.checked,
       cursorTrailCount: parseNumericInputValue(cursorTrailCountSlider, 24),
       drawMode: state.drawMode,
-      spraySpread: parseNumericInputValue(spraySpreadSlider, 64),
+      spraySpread: parseNumericInputValue(spraySpreadSlider, DEFAULT_SPRAY_SPREAD),
       sidebarCollapsed: state.sidebarCollapsed,
-      sidebarTab: state.sidebarTab,
+      sidebarTab: state.sidebarTab === "export" ? "draw" : state.sidebarTab,
       brushGalleryCollapsed: state.brushGalleryCollapsed,
+      brushGallerySort: normalizeBrushGallerySort(state.brushGallerySort),
       canvasBackgroundColor: normalizeHexColor(state.canvasBackgroundColor, "#ffffff"),
       exportBackgroundEnabled: state.exportBackgroundEnabled !== false,
+      exportSeeBeyondEnabled: state.exportSeeBeyondEnabled !== false,
+      exportBgImageUrl: typeof state.exportBgImageUrl === "string" &&
+        state.exportBgImageUrl.startsWith("data:image/")
+        ? state.exportBgImageUrl
+        : "",
+      exportBgImageOpacity: clamp(Number(state.exportBgImageOpacity) || 0, 0, 100),
+      exportBgImageMode: state.exportBgImageMode === "tile" ? "tile" : "stretch",
+      exportBgImageTileSize: normalizeExportBgTileSize(state.exportBgImageTileSize),
+      exportBgImageNaturalWidth: Math.max(0, Number(state.exportBgImageNaturalWidth) || 0),
+      exportBgImageNaturalHeight: Math.max(0, Number(state.exportBgImageNaturalHeight) || 0),
+      lastExportSetup: normalizeExportSetupSnapshot(state.lastExportSetup),
+      exportAnimationAuto: state.exportAnimationAuto !== false,
+      exportAnimationSeconds: Number(state.exportAnimationSeconds) || 1,
+      exportAnimationFrameCount: String(state.exportAnimationFrameCount || ""),
+      exportVideoAuto: state.exportVideoAuto !== false,
+      exportVideoSeconds: Number(state.exportVideoSeconds) || 3,
+      showGifCountIndicator: state.showGifCountIndicator !== false,
+      showGifPauseButton: state.showGifPauseButton !== false,
       collapsedSliderGroups: getCollapsedSliderGroupSnapshot()
     },
     brushes: state.brushes.map((brush) => ({
@@ -3118,6 +5879,13 @@ function buildSessionSnapshot() {
       originalUrl: brush.originalUrl || brush.url,
       originalWidth: brush.originalWidth || brush.width,
       originalHeight: brush.originalHeight || brush.height,
+      frameCount: normalizeBrushFrameCount(brush.frameCount),
+      frameRange: brush.frameRange && Number.isFinite(Number(brush.frameRange.end))
+        ? {
+            start: Math.max(0, Math.floor(Number(brush.frameRange.start) || 0)),
+            end: Math.max(1, Math.floor(Number(brush.frameRange.end) || 1))
+          }
+        : null,
       cropRect: brush.cropRect && Number.isFinite(Number(brush.cropRect.width))
         ? {
             x: Number(brush.cropRect.x) || 0,
@@ -3127,12 +5895,295 @@ function buildSessionSnapshot() {
           }
         : null,
       enabled: brush.enabled,
-      weightMode: brush.weightMode
+      weightMode: normalizeBrushWeightMode(brush.weightMode)
     })),
     strokeBrushes: collectStrokeBrushSources(),
     strokes: serializeStrokeList(state.strokes),
     redoStrokes: serializeStrokeList(getRedoDrawStrokes())
   };
+}
+
+function getSnapshotStampCount(snapshot) {
+  const strokes = Array.isArray(snapshot?.strokes) ? snapshot.strokes : [];
+  return strokes.reduce((total, stroke) => {
+    const stamps = Array.isArray(stroke?.stamps) ? stroke.stamps.length : 0;
+    return total + stamps;
+  }, 0);
+}
+
+function fitBoundsToAspect(bounds, aspectRatio) {
+  const normalized = normalizeExportSelectionBounds(bounds);
+  const width = Math.max(EXPORT_MIN_SIZE, normalized.right - normalized.left);
+  const height = Math.max(EXPORT_MIN_SIZE, normalized.bottom - normalized.top);
+  const centerX = (normalized.left + normalized.right) / 2;
+  const centerY = (normalized.top + normalized.bottom) / 2;
+  let nextWidth = width;
+  let nextHeight = height;
+
+  if (width / height > aspectRatio) {
+    nextHeight = width / aspectRatio;
+  } else {
+    nextWidth = height * aspectRatio;
+  }
+
+  return normalizeExportSelectionBounds({
+    left: centerX - nextWidth / 2,
+    right: centerX + nextWidth / 2,
+    top: centerY - nextHeight / 2,
+    bottom: centerY + nextHeight / 2
+  });
+}
+
+async function createSavedCompositionThumbnail() {
+  const outputWidth = 240;
+  const outputHeight = 150;
+  restoreAllCulledStampSources();
+  const bounds = fitBoundsToAspect(computeInitialExportSelectionBounds(), outputWidth / outputHeight);
+  const entries = await collectExportStampEntries(bounds);
+  const canvas = document.createElement("canvas");
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) {
+    return "";
+  }
+  await drawExportFrameAsync(
+    ctx,
+    bounds,
+    outputWidth,
+    outputHeight,
+    entries,
+    null,
+    0,
+    {
+      includeBackground: true,
+      backgroundColor: state.canvasBackgroundColor
+    }
+  );
+  return canvas.toDataURL("image/png");
+}
+
+function formatSavedCompositionDate(timestamp) {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(new Date(timestamp));
+  } catch (error) {
+    return "saved scene";
+  }
+}
+
+function renderSavedCompositionsGallery() {
+  if (!savedCompositionsGallery) {
+    return;
+  }
+
+  savedCompositionsGallery.innerHTML = "";
+  if (!state.savedCompositions.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-panel-label";
+    empty.textContent = state.savedCompositionsLoaded ? "no saved compositions" : "loading saved compositions";
+    savedCompositionsGallery.appendChild(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const entry of state.savedCompositions) {
+    const card = document.createElement("div");
+    card.className = "saved-composition-card";
+    card.dataset.savedCompositionId = entry.id;
+
+    const loadButton = document.createElement("button");
+    loadButton.type = "button";
+    loadButton.className = "saved-composition-load-button";
+    loadButton.title = "Load saved composition";
+
+    const preview = document.createElement("div");
+    preview.className = "saved-composition-preview";
+    if (entry.thumbnailUrl) {
+      const image = document.createElement("img");
+      image.src = entry.thumbnailUrl;
+      image.alt = "";
+      image.draggable = false;
+      preview.appendChild(image);
+    }
+
+    const title = document.createElement("span");
+    title.className = "saved-composition-title";
+    title.textContent = formatSavedCompositionDate(entry.savedAt);
+
+    const meta = document.createElement("span");
+    meta.className = "saved-composition-meta";
+    meta.textContent =
+      `${entry.stampCount.toLocaleString()} image${entry.stampCount === 1 ? "" : "s"} · ${entry.stockCategory}`;
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "saved-composition-delete-button";
+    deleteButton.dataset.savedCompositionDeleteId = entry.id;
+    deleteButton.title = "Delete saved composition";
+    deleteButton.setAttribute("aria-label", "Delete saved composition");
+    const deleteIcon = document.createElement("img");
+    deleteIcon.src = "bomb.png";
+    deleteIcon.alt = "";
+    deleteIcon.draggable = false;
+    deleteButton.appendChild(deleteIcon);
+
+    loadButton.appendChild(preview);
+    loadButton.appendChild(title);
+    loadButton.appendChild(meta);
+    card.appendChild(loadButton);
+    card.appendChild(deleteButton);
+    fragment.appendChild(card);
+  }
+  savedCompositionsGallery.appendChild(fragment);
+}
+
+async function loadSavedCompositions() {
+  state.savedCompositionsLoaded = false;
+  renderSavedCompositionsGallery();
+  state.savedCompositions = await getSavedCompositionIndex();
+  state.savedCompositionsLoaded = true;
+  renderSavedCompositionsGallery();
+}
+
+function setSavedCompositionsStatus(message) {
+  if (savedCompositionsStatus) {
+    savedCompositionsStatus.textContent = message || "";
+  }
+}
+
+async function saveCurrentComposition() {
+  if (!saveCompositionButton) {
+    return;
+  }
+
+  saveCompositionButton.disabled = true;
+  setSavedCompositionsStatus("saving...");
+  try {
+    const snapshot = buildSessionSnapshot();
+    const snapshotJson = JSON.stringify(snapshot);
+    const savedAt = Date.now();
+    const id = `${savedAt}-${Math.random().toString(36).slice(2, 8)}`;
+    const currentIndex = state.savedCompositionsLoaded
+      ? state.savedCompositions
+      : await getSavedCompositionIndex();
+    let thumbnailUrl = "";
+    try {
+      thumbnailUrl = await createSavedCompositionThumbnail();
+    } catch (error) {
+      thumbnailUrl = "";
+    }
+    const entry = {
+      id,
+      savedAt,
+      stampCount: getSnapshotStampCount(snapshot),
+      brushCount: Array.isArray(snapshot.brushes) ? snapshot.brushes.length : 0,
+      thumbnailUrl,
+      stockCategory:
+        typeof snapshot.activeStockBrushFolderId === "string" && snapshot.activeStockBrushFolderId
+          ? snapshot.activeStockBrushFolderId
+          : "custom"
+    };
+    const nextIndex = [entry, ...currentIndex].sort(
+      (left, right) => Number(right.savedAt) - Number(left.savedAt)
+    );
+    await writeSnapshotToIndexedDb(`${SAVED_COMPOSITION_KEY_PREFIX}${id}`, snapshotJson);
+    await writeSavedCompositionIndex(nextIndex);
+    state.savedCompositions = nextIndex;
+    state.savedCompositionsLoaded = true;
+    renderSavedCompositionsGallery();
+    setSavedCompositionsStatus("saved");
+  } catch (error) {
+    setSavedCompositionsStatus("could not save");
+  } finally {
+    saveCompositionButton.disabled = false;
+  }
+}
+
+async function loadSavedComposition(id) {
+  if (!id) {
+    return;
+  }
+
+  setSavedCompositionsStatus("loading...");
+  try {
+    const snapshotJson = await readSnapshotFromIndexedDb(`${SAVED_COMPOSITION_KEY_PREFIX}${id}`);
+    if (!snapshotJson) {
+      setSavedCompositionsStatus("missing saved scene");
+      return;
+    }
+    if (state.saveTimerId !== null) {
+      window.clearTimeout(state.saveTimerId);
+      state.saveTimerId = null;
+    }
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, snapshotJson);
+      removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    } catch (error) {
+      removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
+      setSessionStorageItemSafe(
+        SESSION_STORAGE_POINTER_KEY,
+        `${SESSION_IDB_PREFIX}${SAVED_COMPOSITION_KEY_PREFIX}${id}`
+      );
+    }
+    const restored = await restoreSessionState();
+    if (!restored) {
+      setSavedCompositionsStatus("could not load");
+      return;
+    }
+    await saveSessionStateNow();
+    setSavedCompositionsStatus("loaded");
+  } catch (error) {
+    setSavedCompositionsStatus("could not load");
+  }
+}
+
+function openSavedDeleteConfirmModal(id) {
+  if (!savedDeleteConfirmModal || !id) {
+    return;
+  }
+  state.pendingSavedCompositionDeleteId = id;
+  savedDeleteConfirmModal.classList.add("is-open");
+  savedDeleteConfirmModal.setAttribute("aria-hidden", "false");
+  if (savedDeleteConfirmNoButton) {
+    savedDeleteConfirmNoButton.focus();
+  }
+}
+
+function closeSavedDeleteConfirmModal() {
+  if (!savedDeleteConfirmModal) {
+    return;
+  }
+  state.pendingSavedCompositionDeleteId = null;
+  savedDeleteConfirmModal.classList.remove("is-open");
+  savedDeleteConfirmModal.setAttribute("aria-hidden", "true");
+}
+
+async function confirmDeleteSavedComposition() {
+  const id = state.pendingSavedCompositionDeleteId;
+  if (!id) {
+    closeSavedDeleteConfirmModal();
+    return;
+  }
+
+  setSavedCompositionsStatus("deleting...");
+  try {
+    const nextIndex = state.savedCompositions.filter((entry) => entry.id !== id);
+    await deleteSnapshotFromIndexedDb(`${SAVED_COMPOSITION_KEY_PREFIX}${id}`);
+    await writeSavedCompositionIndex(nextIndex);
+    state.savedCompositions = nextIndex;
+    state.savedCompositionsLoaded = true;
+    renderSavedCompositionsGallery();
+    setSavedCompositionsStatus("deleted");
+  } catch (error) {
+    setSavedCompositionsStatus("could not delete");
+  } finally {
+    closeSavedDeleteConfirmModal();
+  }
 }
 
 async function saveSessionStateNow() {
@@ -3179,6 +6230,7 @@ function createStampElement(stampData, brush, fallbackTintSettings = null) {
 
   stamp.className = "stamp";
   stamp.src = brush.url;
+  markGifPlaybackStart(stamp, brush.url);
   stamp.alt = "";
   stamp.draggable = false;
   stamp.loading = "lazy";
@@ -3194,6 +6246,8 @@ function createStampElement(stampData, brush, fallbackTintSettings = null) {
   const rotation = Number(stampData.rotation) || 0;
   stamp.dataset.rotation = String(rotation);
   stamp.style.opacity = String(Number.isFinite(opacity) ? clamp(opacity, 0, 1) : 1);
+  stamp.dataset.sequenceBaseOpacity = stamp.style.opacity;
+  stamp.dataset.sequenceBaseSrc = brush.url;
   stamp.style.imageRendering = stampData.imageRendering === "auto" ? "auto" : "pixelated";
   stamp.style.transform = `rotate(${rotation}deg)`;
   const hasSerializedTint =
@@ -3227,7 +6281,31 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
   for (const strokeData of list) {
     const snapshotStrokeId = Number(strokeData?.id);
     const strokeId = Number.isFinite(snapshotStrokeId) ? snapshotStrokeId : state.nextStrokeId;
-    const stroke = { id: strokeId, elements: [] };
+    const stroke = {
+      id: strokeId,
+      layerType: normalizeStrokeLayerType(strokeData?.layerType),
+	      brushCategoryName:
+	        typeof strokeData?.brushCategoryName === "string" && strokeData.brushCategoryName.trim()
+	          ? strokeData.brushCategoryName.trim()
+	          : "custom",
+	      animationPaused: Boolean(strokeData?.animationPaused),
+	      sequenceOpen: Boolean(strokeData?.sequenceOpen),
+	      sequenceEnabled:
+	        typeof strokeData?.sequenceEnabled === "boolean"
+	          ? strokeData.sequenceEnabled
+	          : Boolean(strokeData?.sequenceOpen),
+	      sequenceEffect: normalizeLayerSequenceValue(
+	        strokeData?.sequenceEffect || strokeData?.sequenceEffects,
+	        LAYER_SEQUENCE_EFFECT_OPTIONS
+	      ),
+	      sequenceTimingStyle: normalizeLayerSequenceValue(
+	        strokeData?.sequenceTimingStyle || strokeData?.sequenceTimingStyles,
+	        LAYER_SEQUENCE_TIMING_OPTIONS
+	      ),
+	      sequenceSettings: normalizeLayerSequenceSettings(strokeData?.sequenceSettings),
+	      sequenceEffectSlots: normalizeExtraLayerSequenceSlots(strokeData?.sequenceEffectSlots),
+	      elements: []
+	    };
     if (strokeId >= state.nextStrokeId) {
       state.nextStrokeId = strokeId + 1;
     }
@@ -3301,6 +6379,15 @@ async function restoreSessionState() {
           : brush.url,
         originalWidth: Math.max(1, Number(brush.originalWidth) || Number(brush.width) || 1),
         originalHeight: Math.max(1, Number(brush.originalHeight) || Number(brush.height) || 1),
+        frameCount:
+          normalizeBrushFrameCount(brush.frameCount) ||
+          (getBrushSourceIsGif(brush) ? null : 1),
+        frameRange: brush.frameRange && Number.isFinite(Number(brush.frameRange.end))
+          ? {
+              start: Math.max(0, Math.floor(Number(brush.frameRange.start) || 0)),
+              end: Math.max(1, Math.floor(Number(brush.frameRange.end) || 1))
+            }
+          : null,
         cropRect:
           brush.cropRect &&
           Number.isFinite(Number(brush.cropRect.width)) &&
@@ -3313,20 +6400,38 @@ async function restoreSessionState() {
               }
             : null,
         enabled: brush.enabled !== false,
-        weightMode: brush.weightMode === "low" || brush.weightMode === "high" ? brush.weightMode : "normal"
+        weightMode: normalizeBrushWeightMode(brush.weightMode)
       }));
+    clearBrushFrameCountJobs();
 
     const snapshotSoloBrushId = Number(snapshot.soloBrushId);
     state.soloBrushId = Number.isFinite(snapshotSoloBrushId) ? snapshotSoloBrushId : null;
+    const restoredSelectedBrushIds = Array.isArray(snapshot.selectedBrushIds)
+      ? snapshot.selectedBrushIds
+      : [];
+    const existingBrushIds = new Set(state.brushes.map((brush) => brush.id));
+    state.selectedBrushIds = new Set(
+      restoredSelectedBrushIds
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && existingBrushIds.has(id))
+    );
+    if (state.selectedBrushIds.size) {
+      state.soloBrushId = null;
+      for (const brush of state.brushes) {
+        if (state.selectedBrushIds.has(brush.id)) {
+          brush.enabled = true;
+        }
+      }
+    }
     const snapshotStockFolderId =
       typeof snapshot.activeStockBrushFolderId === "string"
         ? snapshot.activeStockBrushFolderId
         : "";
-    state.activeStockBrushFolderId = STOCK_BRUSH_FOLDERS.some(
-      (folder) => folder.id === snapshotStockFolderId
-    )
-      ? snapshotStockFolderId
-      : null;
+	    state.activeStockBrushFolderId = STOCK_BRUSH_FOLDERS.some(
+	      (folder) => folder.id === snapshotStockFolderId
+	    ) || snapshotStockFolderId === "all" || snapshotStockFolderId === "favorites"
+	      ? snapshotStockFolderId
+	      : null;
     const soloBrush = getSoloBrush();
     if (soloBrush) {
       soloBrush.enabled = true;
@@ -3341,6 +6446,9 @@ async function restoreSessionState() {
     state.nextBrushId = maxBrushId + 1;
 
     world.innerHTML = "";
+    if (exportBgImageLayer) {
+      world.appendChild(exportBgImageLayer);
+    }
     clearStampSpatialIndex();
     state.stampCount = 0;
     state.urlRefCounts.clear();
@@ -3387,6 +6495,11 @@ async function restoreSessionState() {
     for (const stroke of state.strokes) {
       state.strokeById.set(stroke.id, stroke);
     }
+    for (const stroke of state.strokes) {
+      if (stroke.animationPaused) {
+        applyStrokeAnimationPaused(stroke);
+      }
+    }
     state.history = state.strokes.map((stroke) => ({ type: "draw", stroke }));
     state.redoHistory = restoredRedoStrokes.map((stroke) => ({ type: "draw", stroke }));
 
@@ -3399,14 +6512,48 @@ async function restoreSessionState() {
     tintColorInput.value = normalizeHexColor(controls.tintColor, "#ffffff");
     setInputNumericValue(tintAmountSlider, controls.tintAmount);
     renderModeToggle.checked = Boolean(controls.renderLinear);
+    state.brushPreviewEnabled = controls.brushPreviewEnabled !== false;
     cursorTrailToggle.checked = Boolean(controls.cursorTrailEnabled);
     setInputNumericValue(cursorTrailCountSlider, controls.cursorTrailCount);
     state.drawMode = DRAW_MODES.includes(controls.drawMode) ? controls.drawMode : "pencil";
-    setInputNumericValue(spraySpreadSlider, controls.spraySpread);
+    setInputNumericValue(spraySpreadSlider, controls.spraySpread ?? DEFAULT_SPRAY_SPREAD);
     state.sidebarCollapsed = Boolean(controls.sidebarCollapsed);
-    state.sidebarTab = controls.sidebarTab === "settings" ? "settings" : "main";
+    state.sidebarTab = normalizeSidebarTab(controls.sidebarTab) === "export"
+      ? "draw"
+      : normalizeSidebarTab(controls.sidebarTab);
+    state.exportMode = false;
+    state.exportSelectionBounds = null;
+    state.exportDrag = null;
+    state.exportTask = null;
     state.brushGalleryCollapsed = Boolean(controls.brushGalleryCollapsed);
+    state.brushGallerySort = normalizeBrushGallerySort(controls.brushGallerySort);
     state.exportBackgroundEnabled = controls.exportBackgroundEnabled !== false;
+    state.exportSeeBeyondEnabled = controls.exportSeeBeyondEnabled !== false;
+    revokeExportBackgroundImageUrl();
+    state.exportBgImageUrl = typeof controls.exportBgImageUrl === "string" &&
+      controls.exportBgImageUrl.startsWith("data:image/")
+      ? controls.exportBgImageUrl
+      : "";
+    state.exportBgImageOpacity = clamp(Number(controls.exportBgImageOpacity) || 100, 0, 100);
+    state.exportBgImageMode = controls.exportBgImageMode === "tile" ? "tile" : "stretch";
+    state.exportBgImageTileSize = normalizeExportBgTileSize(controls.exportBgImageTileSize);
+    state.exportBgImageNaturalWidth = Math.max(0, Number(controls.exportBgImageNaturalWidth) || 0);
+    state.exportBgImageNaturalHeight = Math.max(0, Number(controls.exportBgImageNaturalHeight) || 0);
+    state.lastExportSetup = normalizeExportSetupSnapshot(controls.lastExportSetup);
+    state.exportAnimationAuto = controls.exportAnimationAuto !== false;
+    state.exportAnimationSeconds = EXPORT_MANUAL_SECONDS_PRESETS.includes(Number(controls.exportAnimationSeconds))
+      ? Number(controls.exportAnimationSeconds)
+      : 3;
+    const restoredFrameCount = String(controls.exportAnimationFrameCount || "").trim();
+    state.exportAnimationFrameCount = restoredFrameCount
+      ? String(clamp(Math.floor(Number(restoredFrameCount)) || 1, 1, EXPORT_MAX_FRAME_COUNT))
+      : "";
+    state.exportVideoAuto = controls.exportVideoAuto !== false;
+    state.exportVideoSeconds = Number.isFinite(Number(controls.exportVideoSeconds))
+      ? clamp(Number(controls.exportVideoSeconds), 0, EXPORT_VIDEO_MAX_SECONDS)
+      : 3;
+    state.showGifCountIndicator = controls.showGifCountIndicator !== false;
+    state.showGifPauseButton = controls.showGifPauseButton !== false;
     state.canvasBackgroundColor = normalizeHexColor(controls.canvasBackgroundColor, "#ffffff");
     applyCollapsedSliderGroupSnapshot(controls.collapsedSliderGroups);
 
@@ -3454,15 +6601,22 @@ function updateUndoState() {
   const hasHistory = state.history.length > 0;
   const hasRedo = state.redoHistory.length > 0;
   const hasStamps = getVisibleStampCount() > 0;
-  const controlsLocked = state.exportMode;
+  const isBusy = Boolean(state.placementTask || state.exportTask);
+  const controlsLocked = state.exportMode || isBusy;
 
   undoButton.disabled = controlsLocked || !hasHistory;
   redoButton.disabled = controlsLocked || !hasRedo;
   clearButton.disabled = controlsLocked || !hasStamps;
-  exportButton.disabled = state.exportMode ? false : !hasStamps;
-  if (!state.exportMode) {
-    exportCancelButton.disabled = true;
+  exportModeButton.disabled = isBusy || !hasStamps;
+  exportButton.disabled = !state.exportMode || Boolean(state.exportTask);
+  exportCancelButton.disabled = !state.exportTask;
+  if (exportVideoButton) {
+    exportVideoButton.disabled = !state.exportMode || Boolean(state.exportTask);
   }
+  if (exportVideoCancelButton) {
+    exportVideoCancelButton.disabled = !state.exportTask;
+  }
+  updateGifCountIndicator();
 }
 
 function countEnabledBrushes() {
@@ -3492,9 +6646,16 @@ function updateBrushStatus(customMessage) {
 
   const enabledCount = countEnabledBrushes();
   const soloBrush = getSoloBrush();
+  const selectedBrushes = getSelectedBrushes();
   if (soloBrush) {
     brushStatus.textContent =
       `Loaded ${state.brushes.length} brush image(s). Solo: ${soloBrush.name}.`;
+    return;
+  }
+
+  if (selectedBrushes.length) {
+    brushStatus.textContent =
+      `Loaded ${state.brushes.length} brush image(s). Selected: ${selectedBrushes.length}.`;
     return;
   }
 
@@ -3519,6 +6680,22 @@ function getStockBrushFiles(folder) {
 
 function getStockBrushFolderById(folderId) {
   return STOCK_BRUSH_FOLDERS.find((folder) => folder && folder.id === folderId) || null;
+}
+
+function getActiveBrushCategoryName() {
+  if (state.activeStockBrushFolderId === "all") {
+    return "all";
+  }
+  if (state.activeStockBrushFolderId === "favorites") {
+    return "favorites";
+  }
+
+  const folder = getStockBrushFolderById(state.activeStockBrushFolderId);
+  if (folder && typeof folder.name === "string" && folder.name.trim()) {
+    return folder.name.trim();
+  }
+
+  return "custom";
 }
 
 function getOrderedStockBrushFolders() {
@@ -3575,6 +6752,13 @@ function renderStockBrushButtons() {
   const showBrushData = !state.brushGalleryCollapsed;
   stockBrushButtons.hidden = !showBrushData || folders.length === 0;
   stockBrushButtons.innerHTML = "";
+  if (loadAllStockBrushesButton) {
+    loadAllStockBrushesButton.hidden = !showBrushData || folders.length === 0;
+    loadAllStockBrushesButton.disabled = Boolean(state.stockBrushLoadingFolderId) || folders.length === 0;
+    loadAllStockBrushesButton.classList.toggle("is-active", state.activeStockBrushFolderId === "all");
+    loadAllStockBrushesButton.classList.toggle("is-loading", state.stockBrushLoadingFolderId === "all");
+  }
+  updateFavoriteBrushButtons();
   if (!showBrushData || !folders.length) {
     return;
   }
@@ -3613,6 +6797,28 @@ function renderStockBrushButtons() {
   stockBrushButtons.appendChild(fragment);
 }
 
+function getSortedBrushGalleryBrushes() {
+  const sortMode = normalizeBrushGallerySort(state.brushGallerySort);
+  const brushes = state.brushes.slice();
+  const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+
+  if (sortMode === "area-asc" || sortMode === "area-desc") {
+    brushes.sort((a, b) => {
+      const areaA = Math.max(1, Number(a.width) || 1) * Math.max(1, Number(a.height) || 1);
+      const areaB = Math.max(1, Number(b.width) || 1) * Math.max(1, Number(b.height) || 1);
+      const delta = sortMode === "area-asc" ? areaA - areaB : areaB - areaA;
+      return delta || byName(a, b);
+    });
+    return brushes;
+  }
+
+  brushes.sort(byName);
+  return brushes;
+}
+
 function createBrushActionButton(action, label, isActive, title) {
   const button = document.createElement("button");
   button.type = "button";
@@ -3631,12 +6837,19 @@ function createBrushActionButton(action, label, isActive, title) {
 function renderBrushGallery() {
   updateBrushDataToggleUI();
   brushGallery.innerHTML = "";
+  const showBrushFileMeta = state.sidebarTab === "brushes";
+  if (brushSortSelect) {
+    brushSortSelect.value = normalizeBrushGallerySort(state.brushGallerySort);
+  }
 
   const showBrushData = !state.brushGalleryCollapsed;
   dropZone.hidden = !showBrushData;
   dropZone.style.display = showBrushData ? "" : "none";
   dropZonePrompt.hidden = !showBrushData;
   unloadBrushDataButton.hidden = !showBrushData;
+  if (brushSortControls) {
+    brushSortControls.hidden = !showBrushData;
+  }
   if (!showBrushData) {
     dropZone.classList.remove("has-gallery");
     dropZoneHeader.classList.add("no-unload");
@@ -3658,16 +6871,21 @@ function renderBrushGallery() {
 
   const fragment = document.createDocumentFragment();
   const soloBrush = getSoloBrush();
-  for (const brush of state.brushes) {
+  const selectedBrushes = getSelectedBrushes();
+  const selectedBrushIds = new Set(selectedBrushes.map((brush) => brush.id));
+  for (const brush of getSortedBrushGalleryBrushes()) {
     const card = document.createElement("div");
     card.className = "brush-item";
     const isSolo = soloBrush && soloBrush.id === brush.id;
+    const isSelected = selectedBrushIds.has(brush.id);
     if (!brush.enabled) {
       card.classList.add("is-disabled");
     }
     if (isSolo) {
       card.classList.add("is-solo");
-    } else if (soloBrush) {
+    } else if (isSelected) {
+      card.classList.add("is-selected");
+    } else if (soloBrush || selectedBrushIds.size) {
       card.classList.add("is-solo-muted");
     }
     card.dataset.brushId = String(brush.id);
@@ -3679,12 +6897,30 @@ function renderBrushGallery() {
     preview.draggable = false;
     preview.loading = "lazy";
     preview.decoding = "async";
-    applyGifPauseStateToImage(preview);
+    applyBrushGalleryPreviewAnimationState(preview, brush);
     applyBrushTintStyle(preview, !brush.enabled, NO_TINT_SETTINGS);
+
+    const drawingFavoriteButton = document.createElement("button");
+    drawingFavoriteButton.type = "button";
+    drawingFavoriteButton.className = "brush-favorite-overlay-button";
+    drawingFavoriteButton.dataset.action = "favorite";
+    drawingFavoriteButton.textContent = isBrushFavorite(brush) ? "★" : "☆";
+    drawingFavoriteButton.title = isBrushFavorite(brush) ? "Remove from favorites" : "Add to favorites";
+    drawingFavoriteButton.setAttribute("aria-label", drawingFavoriteButton.title);
+    drawingFavoriteButton.setAttribute("aria-pressed", isBrushFavorite(brush) ? "true" : "false");
+    drawingFavoriteButton.classList.toggle("is-active", isBrushFavorite(brush));
 
     const name = document.createElement("p");
     name.className = "brush-name";
     name.textContent = brush.name;
+
+    let meta = null;
+    if (showBrushFileMeta) {
+      ensureBrushFrameCount(brush);
+      meta = document.createElement("p");
+      meta.className = "brush-meta";
+      meta.textContent = getBrushMetaText(brush);
+    }
 
     const actionRow = document.createElement("div");
     actionRow.className = "brush-actions";
@@ -3702,36 +6938,1385 @@ function renderBrushGallery() {
       enabledButton.title = "Solo brush active";
       enabledButton.setAttribute("aria-label", "Solo brush active");
     }
-    const lowButton = createBrushActionButton(
-      "weight-low",
-      "-",
-      brush.weightMode === "low",
-      "Lower occurrence probability"
-    );
-    const highButton = createBrushActionButton(
-      "weight-high",
-      "+",
-      brush.weightMode === "high",
-      "Increase occurrence probability"
-    );
     const cropButton = createBrushActionButton(
       "crop",
-      "▣",
+      "",
       false,
-      "Open crop editor"
+      "Open source editor"
+    );
+    const favoriteButton = createBrushActionButton(
+      "favorite",
+      isBrushFavorite(brush) ? "★" : "☆",
+      isBrushFavorite(brush),
+      isBrushFavorite(brush) ? "Remove from favorites" : "Add to favorites"
     );
 
-    actionRow.appendChild(lowButton);
     actionRow.appendChild(enabledButton);
-    actionRow.appendChild(highButton);
     actionRow.appendChild(cropButton);
+    actionRow.appendChild(favoriteButton);
     card.appendChild(preview);
+    card.appendChild(drawingFavoriteButton);
     card.appendChild(name);
+    if (meta) {
+      card.appendChild(meta);
+    }
     card.appendChild(actionRow);
     fragment.appendChild(card);
   }
 
   brushGallery.appendChild(fragment);
+}
+
+function getStrokeLayerName(stroke, index) {
+  const stampCount = Array.isArray(stroke?.elements) ? stroke.elements.length : 0;
+  const categoryName = typeof stroke?.brushCategoryName === "string" && stroke.brushCategoryName.trim()
+    ? stroke.brushCategoryName.trim()
+    : "custom";
+  const layerType = normalizeStrokeLayerType(stroke?.layerType);
+  const typeLabel = layerType;
+  return `${categoryName} ${typeLabel} ${index + 1} (${stampCount})`;
+}
+
+function selectEditLayer(strokeId) {
+  const numericId = Number(strokeId);
+  state.selectedEditLayerId = Number.isFinite(numericId) ? numericId : null;
+  renderEditLayers();
+}
+
+function applyStrokeVisibility(stroke) {
+  if (!stroke || !Array.isArray(stroke.elements)) {
+    return;
+  }
+
+  const hidden = Boolean(stroke.hidden);
+  resetStrokeSequenceRuntime(stroke);
+  const viewportBounds = getViewportWorldBounds();
+  for (const element of stroke.elements) {
+    resetStampSequenceStyle(element);
+    element.classList.toggle("is-layer-hidden", hidden);
+    if (hidden) {
+      unregisterStampSpatialCells(element);
+    } else if (element.parentElement === world) {
+      registerStampSpatialCells(element);
+      updateStampViewportVisibility(element, viewportBounds);
+    }
+  }
+  updateUndoState();
+  scheduleStampVisibilityRefresh();
+}
+
+function applyStrokeAnimationPaused(stroke) {
+  if (!stroke || !Array.isArray(stroke.elements)) {
+    return;
+  }
+
+  const elements = stroke.elements.filter((element) => element instanceof HTMLImageElement);
+  window.requestAnimationFrame(() => {
+    for (const element of elements) {
+      if (stroke.animationPaused) {
+        freezeGifImage(element);
+      } else if (!state.gifAnimationsPaused) {
+        resumeGifImage(element);
+      }
+    }
+    scheduleStampVisibilityRefresh();
+  });
+}
+
+function applyGlobalGifPauseState(paused) {
+  const shouldPause = Boolean(paused);
+  const images = Array.from(document.querySelectorAll("img"));
+  if (shouldPause) {
+    for (const image of images) {
+      freezeGifImage(image);
+    }
+    scheduleStampVisibilityRefresh();
+    return;
+  }
+
+  let index = 0;
+
+  function processBatch() {
+    const batchEnd = Math.min(images.length, index + 80);
+    for (; index < batchEnd; index += 1) {
+      const image = images[index];
+      if (shouldPause) {
+        freezeGifImage(image);
+      } else if (!isImageLayerPaused(image)) {
+        resumeGifImage(image);
+      }
+    }
+
+    if (index < images.length) {
+      window.requestAnimationFrame(processBatch);
+      return;
+    }
+
+    scheduleStampVisibilityRefresh();
+  }
+
+  window.requestAnimationFrame(processBatch);
+}
+
+function getSequenceEffectDuration(effect, settings) {
+  if (effect === "move") {
+    return getMoveDurationMs(settings);
+  }
+  if (effect === "rotate") {
+    return getRotateDurationMs(settings);
+  }
+  if (effect === "scale") {
+    return getScaleDurationMs(settings);
+  }
+  if (effect === "color-cycle") {
+    return settings.colorCycleInstant ? 1 : getColorCycleDurationMs(settings);
+  }
+  if (effect === "show-hide") {
+    return Math.max(100, settings.showHideFadeLength * 2 || 500);
+  }
+  return 500;
+}
+
+function mapSequenceSlider(value, lowValue, highValue) {
+  const percent = (clamp(Number(value) || 1, 1, 100) - 1) / 99;
+  return lowValue + (highValue - lowValue) * percent;
+}
+
+function normalizeSequenceSpeedSliderValue(value, slowValue, fastValue, fallback = 50) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+  if (numericValue >= 1 && numericValue <= 100) {
+    return Math.round(numericValue);
+  }
+  const percent = (clamp(numericValue, fastValue, slowValue) - slowValue) / (fastValue - slowValue);
+  return clamp(Math.round(1 + percent * 99), 1, 100);
+}
+
+function getRotateDurationMs(settings) {
+  return mapSequenceSlider(settings.rotateSpeed, 6000, 100);
+}
+
+function getScaleDurationMs(settings) {
+  return mapSequenceSlider(settings.scaleSpeed, 6000, 100);
+}
+
+function getMoveDurationMs(settings) {
+  return mapSequenceSlider(settings.moveSpeed, 4000, 50);
+}
+
+function getColorCycleDurationMs(settings) {
+  return mapSequenceSlider(settings.colorCycleSpeed, 5000, 50);
+}
+
+function getPulseSpacingMs(settings) {
+  return mapSequenceSlider(settings.pulseSpeed, 700, 15);
+}
+
+function getPulseIntervalMs(settings) {
+  return mapSequenceSlider(settings.pulseRate, 5000, 100);
+}
+
+function getWaveSpacingMs(settings) {
+  return mapSequenceSlider(settings.waveSpeed, 2000, 20);
+}
+
+function getRandomIntervalMs(settings) {
+  return mapSequenceSlider(settings.randomSpeed, 4000, 50);
+}
+
+function resetStrokeSequenceRuntime(stroke) {
+  if (!stroke) {
+    return;
+  }
+  stroke.sequenceRuntime = null;
+  stroke.sequenceSlotRuntimes = null;
+  delete stroke.sequencePauseStartTime;
+}
+
+function refreshStrokeSequenceEffect(stroke) {
+  if (!stroke) {
+    return;
+  }
+  resetStrokeSequenceRuntime(stroke);
+  for (const stamp of stroke.elements || []) {
+    resetStampSequenceStyle(stamp, true);
+  }
+}
+
+function sequenceHash(seed, index) {
+  let value = (Math.imul(seed + 1, 1103515245) + Math.imul(index + 17, 12345)) >>> 0;
+  value ^= value >>> 16;
+  value = Math.imul(value, 2246822507) >>> 0;
+  value ^= value >>> 13;
+  return (value >>> 0) / 4294967295;
+}
+
+function sequenceKeyNumber(key) {
+  const text = String(key || "");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (Math.imul(hash, 31) + text.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function getSequenceRuntimeBaseTime(runtime, now) {
+  const baseTime = Number(runtime?.baseTime);
+  return Number.isFinite(baseTime) ? baseTime : now;
+}
+
+function getLayerSequenceTrigger(stroke, index, total, style, settings, now, effectDuration, runtimeHost = stroke) {
+  const safeTotal = Math.max(1, total);
+  if (style === "pulse") {
+    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "pulse") {
+      runtimeHost.sequenceRuntime = {
+        style: "pulse",
+        pulseBaseTime: now,
+        triggeredPulseByIndex: [],
+        lastTriggeredIndexByPulse: new Map(),
+        frameTime: 0,
+        triggeredPulseIdsThisFrame: new Set()
+      };
+    }
+    const runtime = runtimeHost.sequenceRuntime;
+    if (!Array.isArray(runtime.triggeredPulseByIndex)) {
+      runtime.triggeredPulseByIndex = [];
+    }
+    if (!(runtime.lastTriggeredIndexByPulse instanceof Map)) {
+      runtime.lastTriggeredIndexByPulse = new Map();
+    }
+    if (runtime.frameTime !== now) {
+      runtime.frameTime = now;
+      runtime.triggeredPulseIdsThisFrame = new Set();
+    }
+    const spacing = getPulseSpacingMs(settings);
+    const interval = Math.max(16, getPulseIntervalMs(settings));
+    const maxDuePulseId = Math.floor((now - runtime.pulseBaseTime - index * spacing) / interval);
+    const lastPulseForIndex = Number.isFinite(Number(runtime.triggeredPulseByIndex[index]))
+      ? Number(runtime.triggeredPulseByIndex[index])
+      : -1;
+    const pulseId = lastPulseForIndex + 1;
+    const previousIndex = index <= 0
+      ? index - 1
+      : Number(runtime.lastTriggeredIndexByPulse.get(pulseId));
+
+    if (
+      maxDuePulseId < pulseId ||
+      previousIndex < index - 1 ||
+      runtime.triggeredPulseIdsThisFrame.has(pulseId)
+    ) {
+      return { active: false, key: "", startTime: 0, endTime: 0 };
+    }
+
+    runtime.triggeredPulseByIndex[index] = pulseId;
+    runtime.lastTriggeredIndexByPulse.set(pulseId, index);
+    runtime.triggeredPulseIdsThisFrame.add(pulseId);
+
+    const stalePulseThreshold = pulseId - Math.max(12, safeTotal * 2);
+    for (const [storedPulseId] of runtime.lastTriggeredIndexByPulse) {
+      if (storedPulseId < stalePulseThreshold) {
+        runtime.lastTriggeredIndexByPulse.delete(storedPulseId);
+      }
+    }
+
+    return {
+      active: true,
+      key: `${style}:${pulseId}:${index}`,
+      startTime: now,
+      endTime: now + Math.max(16, effectDuration)
+    };
+  }
+
+  if (runtimeHost.sequenceRuntime && runtimeHost.sequenceRuntime.style !== style) {
+    resetStrokeSequenceRuntime(runtimeHost);
+  }
+
+  if (style === "all") {
+    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "all") {
+      runtimeHost.sequenceRuntime = {
+        style: "all",
+        baseTime: now
+      };
+    }
+    const runtime = runtimeHost.sequenceRuntime;
+    const interval = Math.max(100, effectDuration);
+    const baseTime = getSequenceRuntimeBaseTime(runtime, now);
+    const elapsed = Math.max(0, now - baseTime);
+    const tick = Math.floor(elapsed / interval);
+    const startTime = baseTime + tick * interval;
+    return {
+      active: true,
+      key: `${style}:${tick}`,
+      startTime,
+      endTime: startTime + interval
+    };
+  }
+
+  if (style === "wave") {
+    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "wave") {
+      const initialIndex = settings.waveReverse ? safeTotal - 1 : 0;
+      runtimeHost.sequenceRuntime = {
+        style: "wave",
+        bounceId: 0,
+        initialIndex,
+        nextIndex: initialIndex,
+        direction: settings.waveReverse ? -1 : 1,
+        repeatEndpointIndex: null,
+        hasLeftInitialEndpoint: false,
+        nextTriggerTime: now,
+        frameTime: 0,
+        triggeredThisFrame: false
+      };
+    }
+    const runtime = runtimeHost.sequenceRuntime;
+    if (runtime.frameTime !== now) {
+      runtime.frameTime = now;
+      runtime.triggeredThisFrame = false;
+    }
+    const spacing = getWaveSpacingMs(settings);
+    if (runtime.triggeredThisFrame || now < runtime.nextTriggerTime || index !== runtime.nextIndex) {
+      return { active: false, key: "", startTime: 0, endTime: 0 };
+    }
+
+    const triggerIndex = runtime.nextIndex;
+    const bounceId = runtime.bounceId;
+    runtime.triggeredThisFrame = true;
+    runtime.bounceId += 1;
+    if (safeTotal <= 1) {
+      runtime.nextIndex = 0;
+      runtime.direction = settings.waveReverse ? -1 : 1;
+      runtime.repeatEndpointIndex = 0;
+      runtime.hasLeftInitialEndpoint = true;
+    } else {
+      const isEndpoint = triggerIndex <= 0 || triggerIndex >= safeTotal - 1;
+      const isInitialEndpoint =
+        triggerIndex === runtime.initialIndex && runtime.hasLeftInitialEndpoint !== true;
+      if (runtime.repeatEndpointIndex === triggerIndex) {
+        runtime.repeatEndpointIndex = null;
+        if (triggerIndex <= 0) {
+          runtime.direction = 1;
+          runtime.nextIndex = 1;
+        } else {
+          runtime.direction = -1;
+          runtime.nextIndex = safeTotal - 2;
+        }
+      } else if (isEndpoint && !isInitialEndpoint) {
+        runtime.repeatEndpointIndex = triggerIndex;
+        runtime.nextIndex = triggerIndex;
+      } else {
+        runtime.hasLeftInitialEndpoint =
+          runtime.hasLeftInitialEndpoint || triggerIndex !== runtime.initialIndex;
+        let nextIndex = triggerIndex + runtime.direction;
+        if (nextIndex >= safeTotal) {
+          runtime.direction = -1;
+          nextIndex = safeTotal - 1;
+        } else if (nextIndex < 0) {
+          runtime.direction = 1;
+          nextIndex = 0;
+        }
+        runtime.nextIndex = clamp(nextIndex, 0, safeTotal - 1);
+      }
+    }
+    runtime.nextTriggerTime = now + spacing;
+    return {
+      active: true,
+      key: `${style}:${bounceId}:${triggerIndex}`,
+      startTime: now,
+      endTime: now + Math.max(16, effectDuration)
+    };
+  }
+
+  if (style === "step") {
+    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "step") {
+      runtimeHost.sequenceRuntime = {
+        style: "step",
+        baseTime: now
+      };
+    }
+    const runtime = runtimeHost.sequenceRuntime;
+    const stepLength = Math.max(50, settings.stepLength);
+    const stepAmount = Math.max(1, Math.round(settings.stepAmount));
+    const baseTime = getSequenceRuntimeBaseTime(runtime, now);
+    const elapsed = Math.max(0, now - baseTime);
+    const tick = Math.floor(elapsed / stepLength);
+    const start = (tick * stepAmount) % safeTotal;
+    const offset = (index - start + safeTotal) % safeTotal;
+    const active = offset < Math.min(stepAmount, safeTotal);
+    const startTime = baseTime + tick * stepLength;
+    return {
+      active,
+      key: `${style}:${tick}`,
+      startTime,
+      endTime: startTime + stepLength
+    };
+  }
+
+  if (style === "random") {
+    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "random") {
+      runtimeHost.sequenceRuntime = {
+        style: "random",
+        baseTime: now
+      };
+    }
+    const runtime = runtimeHost.sequenceRuntime;
+    const speed = getRandomIntervalMs(settings);
+    const baseTime = getSequenceRuntimeBaseTime(runtime, now);
+    const elapsed = Math.max(0, now - baseTime);
+    const tick = Math.floor(elapsed / speed);
+    const active = sequenceHash(tick, index) > 0.68;
+    const startTime = baseTime + tick * speed;
+    return {
+      active,
+      key: `${style}:${tick}`,
+      startTime,
+      endTime: startTime + speed
+    };
+  }
+
+  return { active: false, key: "", startTime: 0, endTime: 0 };
+}
+
+function getSequenceBrushPool() {
+  const soloBrush = getSoloBrush();
+  if (soloBrush) {
+    return [soloBrush];
+  }
+  const selectedBrushes = getSelectedBrushes();
+  const candidates = selectedBrushes.length
+    ? selectedBrushes
+    : state.brushes.filter((brush) => brush.enabled);
+  return candidates.filter((brush) => brush && brush.url);
+}
+
+function ensureStampSequenceBase(stamp) {
+  if (!stamp.dataset.sequenceBaseOpacity) {
+    stamp.dataset.sequenceBaseOpacity = String(
+      Number.isFinite(Number(stamp.style.opacity)) ? clamp(Number(stamp.style.opacity), 0, 1) : 1
+    );
+  }
+  if (!stamp.dataset.sequenceBaseSrc) {
+    stamp.dataset.sequenceBaseSrc = stamp.dataset.brushUrl || stamp.getAttribute("src") || "";
+  }
+}
+
+function getStampBaseTintSettings(stamp) {
+  return normalizeTintSettings({
+    color: stamp?.dataset?.tintColor || "#ffffff",
+    amountPercent: Number(stamp?.dataset?.tintAmount) || 0
+  });
+}
+
+function setStampSequenceImage(stamp, src) {
+  if (!src || stamp.getAttribute("src") === src) {
+    return;
+  }
+  stamp.src = src;
+  markGifPlaybackStart(stamp, src);
+  if (!state.sequenceExportActive) {
+    applyGifPauseStateToImage(stamp);
+  }
+}
+
+function resetStampSequenceStyle(stamp, force = false) {
+  if (!stamp || (!force && stamp.dataset.sequenceActive !== "1")) {
+    return;
+  }
+  ensureStampSequenceBase(stamp);
+  const baseRotation = Number(stamp.dataset.rotation) || 0;
+  stamp.style.transform = `rotate(${baseRotation}deg)`;
+  stamp.style.opacity = String(clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1));
+  applyBrushTintStyle(stamp, false, getStampBaseTintSettings(stamp));
+  setStampSequenceImage(stamp, stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || "");
+  deleteSequenceRuntimeDataset(stamp);
+}
+
+function triggerImageCycleSequence(stamp, trigger, settings, pool, index) {
+  if (!pool.length) {
+    return;
+  }
+  const currentSrc = stamp.getAttribute("src") || stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || "";
+  let poolIndex = pool.findIndex((brush) => brush.url === currentSrc);
+  if (poolIndex < 0) {
+    poolIndex = 0;
+  }
+  const nextIndex = settings.imageCycleRandom
+    ? Math.floor(sequenceHash(String(trigger.key).length + index, poolIndex) * pool.length) % pool.length
+    : (poolIndex + 1) % pool.length;
+  const safeNextIndex = pool.length > 1 && pool[nextIndex]?.url === currentSrc
+    ? (nextIndex + 1) % pool.length
+    : nextIndex;
+  setStampSequenceImage(stamp, pool[safeNextIndex]?.url || currentSrc);
+}
+
+function getCurrentSequenceScale(stamp, settings, now) {
+  const startTime = Number(stamp.dataset.sequenceScaleStart);
+  const duration = Number.isFinite(Number(stamp.dataset.sequenceScaleDuration))
+    ? Math.max(1, Number(stamp.dataset.sequenceScaleDuration))
+    : getScaleDurationMs(settings);
+  const from = Number(stamp.dataset.sequenceScaleFrom);
+  const to = Number(stamp.dataset.sequenceScaleTo);
+  if (Number.isFinite(startTime) && Number.isFinite(from) && Number.isFinite(to)) {
+    const progress = clamp((now - startTime) / duration, 0, 1);
+    const eased = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+    const scale = from + (to - from) * eased;
+    if (progress >= 1) {
+      stamp.dataset.sequenceScaleFrom = String(to);
+      stamp.dataset.sequenceScaleTo = String(to);
+      delete stamp.dataset.sequenceScaleStart;
+      delete stamp.dataset.sequenceScaleDuration;
+    }
+    return scale;
+  }
+  return Number(stamp.dataset.sequenceScaleTarget) || 1;
+}
+
+function getCurrentSequenceMove(stamp, settings, now) {
+  if (settings.moveMode === "circle") {
+    const strength = Math.max(0, Number(settings.moveStrength) || 0);
+    const startTime = Number.isFinite(Number(stamp.dataset.sequenceMoveStart))
+      ? Number(stamp.dataset.sequenceMoveStart)
+      : now;
+    const duration = getMoveDurationMs(settings);
+    const phase = ((now - startTime) / Math.max(1, duration)) * Math.PI * 2;
+    const offset = Number(stamp.dataset.sequenceMoveCircleStep) || 0;
+    return {
+      x: Math.cos(phase + offset) * strength,
+      y: Math.sin(phase + offset) * strength
+    };
+  }
+
+  const startTime = Number(stamp.dataset.sequenceMoveStart);
+  const duration = Number.isFinite(Number(stamp.dataset.sequenceMoveDuration))
+    ? Math.max(1, Number(stamp.dataset.sequenceMoveDuration))
+    : getMoveDurationMs(settings);
+  const fromX = Number(stamp.dataset.sequenceMoveFromX);
+  const fromY = Number(stamp.dataset.sequenceMoveFromY);
+  const toX = Number(stamp.dataset.sequenceMoveToX);
+  const toY = Number(stamp.dataset.sequenceMoveToY);
+  if (
+    Number.isFinite(startTime) &&
+    Number.isFinite(fromX) &&
+    Number.isFinite(fromY) &&
+    Number.isFinite(toX) &&
+    Number.isFinite(toY)
+  ) {
+    const progress = clamp((now - startTime) / duration, 0, 1);
+    const eased = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+    const move = {
+      x: fromX + (toX - fromX) * eased,
+      y: fromY + (toY - fromY) * eased
+    };
+    if (progress >= 1) {
+      stamp.dataset.sequenceMoveFromX = String(toX);
+      stamp.dataset.sequenceMoveFromY = String(toY);
+      stamp.dataset.sequenceMoveToX = String(toX);
+      stamp.dataset.sequenceMoveToY = String(toY);
+      delete stamp.dataset.sequenceMoveStart;
+      delete stamp.dataset.sequenceMoveDuration;
+    }
+    return move;
+  }
+  return {
+    x: Number(stamp.dataset.sequenceMoveToX) || 0,
+    y: Number(stamp.dataset.sequenceMoveToY) || 0
+  };
+}
+
+function getSequenceMoveTarget(stamp, trigger, settings, index) {
+  const strength = Math.max(0, Number(settings.moveStrength) || 0);
+  const mode = settings.moveMode || "left";
+  if (mode === "left" || mode === "right" || mode === "up" || mode === "down") {
+    const expanded = stamp.dataset.sequenceMoveExpanded !== "1";
+    const multiplier = expanded ? 1 : 0;
+    return {
+      x: mode === "left" ? -strength * multiplier : mode === "right" ? strength * multiplier : 0,
+      y: mode === "up" ? -strength * multiplier : mode === "down" ? strength * multiplier : 0,
+      expanded
+    };
+  }
+  if (mode === "swing") {
+    const currentStep = Number(stamp.dataset.sequenceMoveCircleStep) || 0;
+    const nextStep = currentStep + 1;
+    const angle = nextStep * (Math.PI / 4) + index * 0.11;
+    return {
+      x: Math.cos(angle) * strength,
+      y: Math.sin(angle) * strength,
+      circleStep: nextStep
+    };
+  }
+
+  const seed = sequenceKeyNumber(trigger?.key) + index * 97;
+  const angle = sequenceHash(seed, index) * Math.PI * 2;
+  const radius = Math.sqrt(sequenceHash(seed + 13, index + 3)) * strength;
+  return {
+    x: Math.cos(angle) * radius,
+    y: Math.sin(angle) * radius
+  };
+}
+
+function getCurrentSequenceOpacity(stamp, settings, now) {
+  const baseOpacity = clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1);
+  const target = Number(stamp.dataset.sequenceVisibilityTo);
+  const startTime = Number(stamp.dataset.sequenceVisibilityStart);
+  const from = Number(stamp.dataset.sequenceVisibilityFrom);
+  const to = Number(stamp.dataset.sequenceVisibilityTo);
+  if (!Number.isFinite(startTime) || !Number.isFinite(from) || !Number.isFinite(to)) {
+    return Number.isFinite(target) ? target : baseOpacity;
+  }
+  const duration = Number.isFinite(Number(stamp.dataset.sequenceVisibilityDuration))
+    ? Math.max(1, Number(stamp.dataset.sequenceVisibilityDuration))
+    : Math.max(1, settings.showHideFade ? settings.showHideFadeLength : 1);
+  const progress = clamp((now - startTime) / duration, 0, 1);
+  const eased = progress < 0.5
+    ? 2 * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  if (progress >= 1) {
+    delete stamp.dataset.sequenceVisibilityStart;
+    delete stamp.dataset.sequenceVisibilityFrom;
+    delete stamp.dataset.sequenceVisibilityDuration;
+    stamp.dataset.sequenceVisibilityTo = String(to);
+    return to;
+  }
+  return from + (to - from) * eased;
+}
+
+function getCurrentSequenceColorAmount(stamp, settings, now) {
+  const target = Number(stamp.dataset.sequenceColorTo);
+  const startTime = Number(stamp.dataset.sequenceColorStart);
+  const from = Number(stamp.dataset.sequenceColorFrom);
+  const to = Number(stamp.dataset.sequenceColorTo);
+  if (!Number.isFinite(startTime) || !Number.isFinite(from) || !Number.isFinite(to)) {
+    return Number.isFinite(target) ? clamp(target, 0, 100) : 0;
+  }
+  const duration = Number.isFinite(Number(stamp.dataset.sequenceColorDuration))
+    ? Math.max(1, Number(stamp.dataset.sequenceColorDuration))
+    : getColorCycleDurationMs(settings);
+  const progress = clamp((now - startTime) / duration, 0, 1);
+  const eased = progress < 0.5
+    ? 2 * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  if (progress >= 1) {
+    stamp.dataset.sequenceColorFrom = String(to);
+    stamp.dataset.sequenceColorTo = String(to);
+    stamp.dataset.sequenceColorTarget = String(to);
+    delete stamp.dataset.sequenceColorStart;
+    delete stamp.dataset.sequenceColorDuration;
+    return clamp(to, 0, 100);
+  }
+  return clamp(from + (to - from) * eased, 0, 100);
+}
+
+function applySequenceColorStyle(stamp, settings, amountPercent) {
+  const amount = clamp(Number(amountPercent) || 0, 0, 100);
+  if (amount <= 0) {
+    applyBrushTintStyle(stamp, false, getStampBaseTintSettings(stamp));
+    return;
+  }
+  applyBrushTintStyle(
+    stamp,
+    false,
+    createLayeredTintSettings(getStampBaseTintSettings(stamp), {
+      color: settings.colorCycleColor,
+      amountPercent: amount
+    })
+  );
+}
+
+function getCurrentSequenceRotation(stamp, settings, now) {
+  const startTime = Number(stamp.dataset.sequenceRotateStart);
+  const from = Number(stamp.dataset.sequenceRotateFrom);
+  const to = Number(stamp.dataset.sequenceRotateTo);
+  if (!Number.isFinite(startTime) || !Number.isFinite(from) || !Number.isFinite(to)) {
+    return 0;
+  }
+  const duration = Number.isFinite(Number(stamp.dataset.sequenceRotateDuration))
+    ? Math.max(1, Number(stamp.dataset.sequenceRotateDuration))
+    : getRotateDurationMs(settings);
+  const progress = clamp((now - startTime) / duration, 0, 1);
+  const eased = progress < 0.5
+    ? 2 * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  if (progress >= 1) {
+    delete stamp.dataset.sequenceRotateStart;
+    delete stamp.dataset.sequenceRotateFrom;
+    delete stamp.dataset.sequenceRotateTo;
+    delete stamp.dataset.sequenceRotateDuration;
+    return 0;
+  }
+  return from + (to - from) * eased;
+}
+
+function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, index, now) {
+  if (!trigger.active || !trigger.key || stamp.dataset.sequenceTriggerKey === trigger.key) {
+    return;
+  }
+  stamp.dataset.sequenceTriggerKey = trigger.key;
+  const rawTriggerStartTime = Number.isFinite(Number(trigger.startTime))
+    ? Number(trigger.startTime)
+    : now;
+  const triggerStartTime = Math.min(now, rawTriggerStartTime - SEQUENCE_TRIGGER_PRIME_MS);
+
+  if (effect === "show-hide") {
+    const baseOpacity = clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1);
+    const isHidden = stamp.dataset.sequenceHidden === "1";
+    const nextHidden = !isHidden;
+    const currentOpacity = getCurrentSequenceOpacity(stamp, settings, now);
+    const targetOpacity = nextHidden ? 0 : baseOpacity;
+    stamp.dataset.sequenceHidden = nextHidden ? "1" : "0";
+    stamp.dataset.sequenceVisibilityStart = String(triggerStartTime);
+    stamp.dataset.sequenceVisibilityFrom = String(settings.showHideFade ? currentOpacity : targetOpacity);
+    stamp.dataset.sequenceVisibilityTo = String(targetOpacity);
+    stamp.dataset.sequenceVisibilityDuration = String(settings.showHideFade ? Math.max(1, settings.showHideFadeLength) : 1);
+  } else if (effect === "move") {
+    const currentMove = getCurrentSequenceMove(stamp, settings, now);
+    const targetMove = getSequenceMoveTarget(stamp, trigger, settings, index);
+    if (settings.moveMode === "circle") {
+      if (!Number.isFinite(Number(stamp.dataset.sequenceMoveStart))) {
+        stamp.dataset.sequenceMoveStart = String(triggerStartTime);
+        stamp.dataset.sequenceMoveCircleStep = String(index * 0.37);
+      }
+    } else {
+      const isInstant = settings.moveInstant && settings.moveMode !== "circle";
+      stamp.dataset.sequenceMoveStart = String(triggerStartTime);
+      stamp.dataset.sequenceMoveFromX = String(isInstant ? targetMove.x : currentMove.x);
+      stamp.dataset.sequenceMoveFromY = String(isInstant ? targetMove.y : currentMove.y);
+      stamp.dataset.sequenceMoveToX = String(targetMove.x);
+      stamp.dataset.sequenceMoveToY = String(targetMove.y);
+      stamp.dataset.sequenceMoveDuration = String(isInstant ? 1 : getMoveDurationMs(settings));
+      if (Object.prototype.hasOwnProperty.call(targetMove, "expanded")) {
+        stamp.dataset.sequenceMoveExpanded = targetMove.expanded ? "1" : "0";
+      }
+      if (Object.prototype.hasOwnProperty.call(targetMove, "circleStep")) {
+        stamp.dataset.sequenceMoveCircleStep = String(targetMove.circleStep);
+      }
+    }
+  } else if (effect === "rotate") {
+    const currentRotation = getCurrentSequenceRotation(stamp, settings, now);
+    stamp.dataset.sequenceRotateStart = String(triggerStartTime);
+    stamp.dataset.sequenceRotateFrom = String(currentRotation);
+    stamp.dataset.sequenceRotateTo = String(currentRotation + 360);
+    stamp.dataset.sequenceRotateDuration = String(getRotateDurationMs(settings));
+  } else if (effect === "scale") {
+    const targetScale = stamp.dataset.sequenceScaleExpanded === "1"
+      ? 1
+      : 1 + Math.max(0, settings.scaleAmount) / 100;
+    const currentScale = getCurrentSequenceScale(stamp, settings, now);
+    const isInterruptingToDefault = targetScale === 1 && Math.abs(currentScale - targetScale) > 0.001;
+    stamp.dataset.sequenceScaleStart = String(triggerStartTime);
+    stamp.dataset.sequenceScaleFrom = String(currentScale);
+    stamp.dataset.sequenceScaleTo = String(targetScale);
+    stamp.dataset.sequenceScaleDuration = String(
+      Math.max(getScaleDurationMs(settings), isInterruptingToDefault ? SEQUENCE_INTERRUPT_TWEEN_MS : 1)
+    );
+    stamp.dataset.sequenceScaleTarget = String(targetScale);
+    stamp.dataset.sequenceScaleExpanded = targetScale === 1 ? "0" : "1";
+  } else if (effect === "color-cycle") {
+    const currentAmount = getCurrentSequenceColorAmount(stamp, settings, now);
+    const nextShifted = stamp.dataset.sequenceColorShifted !== "1";
+    const targetAmount = nextShifted ? settings.colorCycleAmount : 0;
+    const isInstant = settings.colorCycleInstant;
+    stamp.dataset.sequenceColorStart = String(triggerStartTime);
+    stamp.dataset.sequenceColorFrom = String(isInstant ? targetAmount : currentAmount);
+    stamp.dataset.sequenceColorTo = String(targetAmount);
+    stamp.dataset.sequenceColorTarget = String(targetAmount);
+    stamp.dataset.sequenceColorDuration = String(isInstant ? 1 : getColorCycleDurationMs(settings));
+    stamp.dataset.sequenceColorShifted = nextShifted ? "1" : "0";
+  } else if (effect === "image-cycle") {
+    triggerImageCycleSequence(stamp, trigger, settings, pool, index);
+  }
+}
+
+function runLayerSequences(now = performance.now()) {
+  const imageCyclePool = getSequenceBrushPool();
+  for (const stroke of state.strokes) {
+    if (!stroke || !Array.isArray(stroke.elements)) {
+      continue;
+    }
+    if (isStrokeSequencePaused(stroke)) {
+      if (!Number.isFinite(Number(stroke.sequencePauseStartTime))) {
+        stroke.sequencePauseStartTime = now;
+      }
+      continue;
+    }
+    if (Number.isFinite(Number(stroke.sequencePauseStartTime))) {
+      const pausedDuration = Math.max(0, now - Number(stroke.sequencePauseStartTime));
+      if (Array.isArray(stroke.sequenceSlotRuntimes)) {
+        for (const runtime of stroke.sequenceSlotRuntimes) {
+          if (!runtime || typeof runtime !== "object") {
+            continue;
+          }
+          if (Number.isFinite(Number(runtime.pulseBaseTime))) {
+            runtime.pulseBaseTime += pausedDuration;
+          }
+          if (Number.isFinite(Number(runtime.baseTime))) {
+            runtime.baseTime += pausedDuration;
+          }
+          if (Number.isFinite(Number(runtime.nextTriggerTime))) {
+            runtime.nextTriggerTime += pausedDuration;
+          }
+        }
+      }
+      for (const stamp of stroke.elements) {
+        for (const key of Object.keys(stamp?.dataset || {})) {
+          if (
+            key.endsWith("Start") ||
+            key.endsWith("StartTime") ||
+            key.endsWith("MoveStart") ||
+            key.endsWith("RotateStart") ||
+            key.endsWith("ScaleStart") ||
+            key.endsWith("ColorStart") ||
+            key.endsWith("VisibilityStart")
+          ) {
+            const value = Number(stamp.dataset[key]);
+            if (Number.isFinite(value)) {
+              stamp.dataset[key] = String(value + pausedDuration);
+            }
+          }
+        }
+      }
+      delete stroke.sequencePauseStartTime;
+    }
+    const slots = getLayerSequenceSlots(stroke).filter((slot) =>
+      isImplementedLayerSequenceEffect(slot.effect)
+    );
+    if (!isLayerSequenceEnabled(stroke) || !slots.length) {
+      resetStrokeSequenceRuntime(stroke);
+      for (const stamp of stroke.elements) {
+        resetStampSequenceStyle(stamp);
+      }
+      continue;
+    }
+    if (stroke.hidden) {
+      resetStrokeSequenceRuntime(stroke);
+      for (const stamp of stroke.elements) {
+        resetStampSequenceStyle(stamp);
+      }
+      continue;
+    }
+
+    const total = stroke.elements.length;
+    const visuals = stroke.elements.map((stamp) => {
+      ensureStampSequenceBase(stamp);
+      stamp.dataset.sequenceActive = "1";
+      return {
+        opacity: clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1),
+        moveX: 0,
+        moveY: 0,
+        rotationOffset: 0,
+        scale: 1,
+        tintSettings: getStampBaseTintSettings(stamp),
+        sourceUrl: stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || ""
+      };
+    });
+
+    if (!Array.isArray(stroke.sequenceSlotRuntimes)) {
+      stroke.sequenceSlotRuntimes = [];
+    }
+
+    for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
+      const slot = slots[slotIndex];
+      const effect = slot.effect;
+      const timingStyle = slot.timingStyle;
+      const settings = normalizeLayerSequenceSettings(slot.settings);
+      const effectDuration = getSequenceEffectDuration(effect, settings);
+      const runtimeHost = {
+        sequenceRuntime: cloneSequenceRuntime(stroke.sequenceSlotRuntimes[slotIndex])
+      };
+
+      for (let index = 0; index < total; index += 1) {
+        const stamp = stroke.elements[index];
+        const visual = visuals[index];
+        if (!stamp || stamp.parentElement !== world || !visual) {
+          continue;
+        }
+        loadSequenceSlotScratch(stamp, slotIndex);
+
+        if (effect === "image-cycle") {
+          setStampSequenceImage(stamp, visual.sourceUrl);
+        }
+
+        const trigger = getLayerSequenceTrigger(
+          stroke,
+          index,
+          total,
+          timingStyle,
+          settings,
+          now,
+          effectDuration,
+          runtimeHost
+        );
+        triggerStampSequenceEffect(stamp, effect, trigger, settings, imageCyclePool, index, now);
+
+        if (effect === "show-hide") {
+          const baseOpacity = clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1);
+          const currentOpacity = clamp(getCurrentSequenceOpacity(stamp, settings, now), 0, 1);
+          const opacityFactor = baseOpacity > 0 ? currentOpacity / baseOpacity : currentOpacity;
+          visual.opacity *= clamp(opacityFactor, 0, 1);
+        } else if (effect === "move") {
+          const move = getCurrentSequenceMove(stamp, settings, now);
+          visual.moveX += move.x;
+          visual.moveY += move.y;
+        } else if (effect === "rotate") {
+          visual.rotationOffset += getCurrentSequenceRotation(stamp, settings, now);
+        } else if (effect === "scale") {
+          visual.scale *= getCurrentSequenceScale(stamp, settings, now);
+        } else if (effect === "color-cycle") {
+          const amount = getCurrentSequenceColorAmount(stamp, settings, now);
+          if (amount > 0) {
+            visual.tintSettings = createLayeredTintSettings(visual.tintSettings, {
+              color: settings.colorCycleColor,
+              amountPercent: amount
+            });
+          }
+        } else if (effect === "image-cycle") {
+          visual.sourceUrl = stamp.getAttribute("src") || visual.sourceUrl;
+        }
+
+        commitSequenceSlotScratch(stamp, slotIndex);
+      }
+
+      stroke.sequenceSlotRuntimes[slotIndex] = cloneSequenceRuntime(runtimeHost.sequenceRuntime);
+    }
+
+    for (let index = 0; index < total; index += 1) {
+      const stamp = stroke.elements[index];
+      const visual = visuals[index];
+      if (!stamp || stamp.parentElement !== world || !visual) {
+        continue;
+      }
+      const baseRotation = Number(stamp.dataset.rotation) || 0;
+      stamp.style.opacity = String(clamp(visual.opacity, 0, 1));
+      setStampSequenceImage(stamp, visual.sourceUrl);
+      applyBrushTintStyle(stamp, false, visual.tintSettings);
+      stamp.style.transform =
+        `translate(${visual.moveX}px, ${visual.moveY}px) rotate(${baseRotation + visual.rotationOffset}deg) scale(${visual.scale})`;
+    }
+  }
+}
+
+function applyLayerSequences(now = performance.now()) {
+  if (!state.sequenceExportActive) {
+    runLayerSequences(now);
+  }
+  state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
+}
+
+function startLayerSequenceLoop() {
+  if (state.sequenceRafId !== null) {
+    return;
+  }
+  state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
+}
+
+function renderEditLayers() {
+  if (!editLayerList) {
+    return;
+  }
+
+  editLayerList.innerHTML = "";
+  if (!state.strokes.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-panel-label";
+    empty.textContent = "no layers";
+    editLayerList.appendChild(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  const topFirstStrokes = state.strokes.slice().reverse();
+  for (const stroke of topFirstStrokes) {
+    const sourceIndex = state.strokes.indexOf(stroke);
+    const entry = document.createElement("div");
+    entry.className = "edit-layer-entry";
+    entry.classList.toggle("is-sequence-open", Boolean(stroke.sequenceOpen));
+    entry.dataset.strokeId = String(stroke.id);
+
+    const row = document.createElement("div");
+    row.className = "edit-layer-row";
+    row.dataset.strokeId = String(stroke.id);
+    row.classList.toggle("is-selected", Number(state.selectedEditLayerId) === stroke.id);
+    row.classList.toggle("is-hidden", Boolean(stroke.hidden));
+    row.classList.toggle("is-animation-paused", Boolean(stroke.animationPaused));
+    row.setAttribute("role", "button");
+    row.tabIndex = 0;
+
+    const name = document.createElement("span");
+    name.className = "edit-layer-name";
+    name.textContent = getStrokeLayerName(stroke, sourceIndex);
+
+    const sequenceButton = document.createElement("button");
+    sequenceButton.type = "button";
+    sequenceButton.className = "edit-layer-sequence-button";
+    sequenceButton.dataset.layerAction = "sequence";
+    sequenceButton.title = stroke.sequenceOpen ? "Hide sequencing controls" : "Show sequencing controls";
+    sequenceButton.setAttribute("aria-label", sequenceButton.title);
+    sequenceButton.setAttribute("aria-expanded", String(Boolean(stroke.sequenceOpen)));
+    sequenceButton.setAttribute("aria-pressed", String(Boolean(stroke.sequenceOpen)));
+    const sequenceIcon = document.createElement("span");
+    sequenceIcon.className = "edit-layer-sequence-symbol";
+    sequenceIcon.setAttribute("aria-hidden", "true");
+    sequenceButton.appendChild(sequenceIcon);
+
+    const animationButton = document.createElement("button");
+    animationButton.type = "button";
+    animationButton.className = "edit-layer-animation-button";
+    animationButton.dataset.layerAction = "animation";
+    animationButton.title = stroke.animationPaused ? "Resume layer animation" : "Pause layer animation";
+    animationButton.setAttribute("aria-label", animationButton.title);
+    animationButton.setAttribute("aria-pressed", String(Boolean(stroke.animationPaused)));
+    const animationIcon = document.createElement("span");
+    animationIcon.className = "edit-layer-animation-symbol";
+    animationIcon.setAttribute("aria-hidden", "true");
+    animationButton.appendChild(animationIcon);
+
+    const eyeButton = document.createElement("button");
+    eyeButton.type = "button";
+    eyeButton.className = "edit-layer-eye-button";
+    eyeButton.dataset.layerAction = "visibility";
+    eyeButton.textContent = stroke.hidden ? "○" : "👁";
+    eyeButton.title = stroke.hidden ? "Show layer" : "Hide layer";
+    eyeButton.setAttribute("aria-label", eyeButton.title);
+    eyeButton.setAttribute("aria-pressed", String(!stroke.hidden));
+
+    row.appendChild(name);
+    row.appendChild(sequenceButton);
+    row.appendChild(animationButton);
+    row.appendChild(eyeButton);
+
+    entry.appendChild(row);
+    if (stroke.sequenceOpen) {
+      const slotCount = getLayerSequenceSlotCount(stroke);
+      for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
+        const sequenceRow = document.createElement("div");
+        sequenceRow.className = "edit-layer-sequence-row";
+        sequenceRow.dataset.strokeId = String(stroke.id);
+        sequenceRow.dataset.sequenceSlotIndex = String(slotIndex);
+
+        const effectLabel = document.createElement("span");
+        effectLabel.className = "edit-layer-sequence-label";
+        effectLabel.textContent = slotIndex === 0 ? "effect" : `effect ${slotIndex + 1}`;
+        const styleLabel = document.createElement("span");
+        styleLabel.className = "edit-layer-sequence-label";
+        styleLabel.textContent = "style";
+
+        sequenceRow.appendChild(effectLabel);
+        sequenceRow.appendChild(
+          createLayerSequenceSelect(stroke, "effects", LAYER_SEQUENCE_EFFECT_OPTIONS, slotIndex)
+        );
+        sequenceRow.appendChild(styleLabel);
+        sequenceRow.appendChild(
+          createLayerSequenceSelect(stroke, "timing", LAYER_SEQUENCE_TIMING_OPTIONS, slotIndex)
+        );
+        if (slotIndex === 0) {
+          const enabledButton = document.createElement("button");
+          enabledButton.type = "button";
+          enabledButton.className = "edit-layer-sequence-enable-button";
+          enabledButton.dataset.layerAction = "sequence-enabled";
+          enabledButton.textContent = "×";
+          enabledButton.title = isLayerSequenceEnabled(stroke) ? "Disable sequence effect" : "Enable sequence effect";
+          enabledButton.setAttribute("aria-label", enabledButton.title);
+          enabledButton.setAttribute("aria-pressed", String(isLayerSequenceEnabled(stroke)));
+          enabledButton.classList.toggle("is-disabled", !isLayerSequenceEnabled(stroke));
+          sequenceRow.appendChild(enabledButton);
+        } else {
+          const spacer = document.createElement("span");
+          spacer.className = "edit-layer-sequence-row-spacer";
+          sequenceRow.appendChild(spacer);
+        }
+        entry.appendChild(sequenceRow);
+        entry.appendChild(createLayerSequenceSettings(stroke, slotIndex));
+        const addRemoveRow = createLayerSequenceAddRemoveRow(stroke, slotIndex, slotCount);
+        if (addRemoveRow) {
+          entry.appendChild(addRemoveRow);
+        }
+      }
+    }
+
+    fragment.appendChild(entry);
+  }
+
+  editLayerList.appendChild(fragment);
+}
+
+function reflowStrokeDomOrder() {
+  for (const stroke of state.strokes) {
+    if (!stroke || !Array.isArray(stroke.elements)) {
+      continue;
+    }
+    for (const element of stroke.elements) {
+      if (element.parentElement === world) {
+        world.appendChild(element);
+      }
+    }
+  }
+  scheduleSessionSave();
+}
+
+function moveStrokeToVisualIndex(stroke, visualIndex) {
+  const currentIndex = state.strokes.indexOf(stroke);
+  if (currentIndex < 0) {
+    return false;
+  }
+
+  state.strokes.splice(currentIndex, 1);
+  const targetStateIndex = Math.max(
+    0,
+    Math.min(state.strokes.length, state.strokes.length - Math.max(0, visualIndex))
+  );
+  state.strokes.splice(targetStateIndex, 0, stroke);
+  reflowStrokeDomOrder();
+  renderEditLayers();
+  return true;
+}
+
+function getEditLayerVisualIndexAt(clientY) {
+  if (!editLayerList) {
+    return -1;
+  }
+
+  const rows = Array.from(editLayerList.querySelectorAll(".edit-layer-row"));
+  if (!rows.length) {
+    return -1;
+  }
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const rect = rows[index].getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) {
+      return index;
+    }
+  }
+  return rows.length - 1;
+}
+
+function setEditLayerDeleteDropzoneState(visible, hovered = false) {
+  if (!editLayerDeleteDropzone) {
+    return;
+  }
+  editLayerDeleteDropzone.hidden = !visible;
+  editLayerDeleteDropzone.classList.toggle("is-hovered", Boolean(visible && hovered));
+  updateEditLayerDeleteDropzonePosition();
+}
+
+function updateEditLayerDeleteDropzonePosition() {
+  if (!editLayerDeleteDropzone || editLayerDeleteDropzone.hidden) {
+    if (editLayerDeleteDropzone) {
+      editLayerDeleteDropzone.classList.remove("is-fixed");
+      editLayerDeleteDropzone.style.removeProperty("left");
+      editLayerDeleteDropzone.style.removeProperty("bottom");
+      editLayerDeleteDropzone.style.removeProperty("width");
+    }
+    return;
+  }
+
+  editLayerDeleteDropzone.classList.remove("is-fixed");
+  editLayerDeleteDropzone.style.removeProperty("left");
+  editLayerDeleteDropzone.style.removeProperty("bottom");
+  editLayerDeleteDropzone.style.removeProperty("width");
+
+  const controlsRect = controlsPanel.getBoundingClientRect();
+  const dropzoneRect = editLayerDeleteDropzone.getBoundingClientRect();
+  const shouldFix = dropzoneRect.bottom > controlsRect.bottom || dropzoneRect.top < controlsRect.top;
+  if (!shouldFix) {
+    return;
+  }
+
+  const horizontalPadding = 12;
+  editLayerDeleteDropzone.classList.add("is-fixed");
+  editLayerDeleteDropzone.style.left = `${Math.round(controlsRect.left + horizontalPadding)}px`;
+  editLayerDeleteDropzone.style.bottom = `${Math.round(window.innerHeight - controlsRect.bottom + horizontalPadding)}px`;
+  editLayerDeleteDropzone.style.width = `${Math.max(80, Math.round(controlsRect.width - horizontalPadding * 2))}px`;
+}
+
+function isPointerOverEditLayerDeleteDropzone(event) {
+  if (!editLayerDeleteDropzone || editLayerDeleteDropzone.hidden) {
+    return false;
+  }
+  const rect = editLayerDeleteDropzone.getBoundingClientRect();
+  return (
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+  );
+}
+
+function startEditLayerRowDrag(row, event) {
+  const stroke = state.strokeById.get(Number(row.dataset.strokeId));
+  if (!stroke) {
+    return;
+  }
+
+  event.preventDefault();
+  selectEditLayer(stroke.id);
+  state.editLayerDrag = {
+    pointerId: event.pointerId,
+    stroke,
+    startY: event.clientY,
+    dragging: false,
+    overDelete: false
+  };
+  setEditLayerDeleteDropzoneState(true, false);
+  row.classList.add("is-dragging");
+}
+
+function updateEditLayerRowDrag(event) {
+  const drag = state.editLayerDrag;
+  if (!drag || drag.pointerId !== event.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+  if (Math.abs(event.clientY - drag.startY) >= 3) {
+    drag.dragging = true;
+  }
+  if (!drag.dragging) {
+    setEditLayerDeleteDropzoneState(true, false);
+    return;
+  }
+
+  updateEditLayerDeleteDropzonePosition();
+  drag.overDelete = isPointerOverEditLayerDeleteDropzone(event);
+  setEditLayerDeleteDropzoneState(true, drag.overDelete);
+  if (drag.overDelete) {
+    return;
+  }
+
+  const visualIndex = getEditLayerVisualIndexAt(event.clientY);
+  if (visualIndex >= 0) {
+    moveStrokeToVisualIndex(drag.stroke, visualIndex);
+  }
+}
+
+function stopEditLayerRowDrag(pointerId, event = null) {
+  const drag = state.editLayerDrag;
+  if (!drag || drag.pointerId !== pointerId) {
+    return;
+  }
+  const shouldDelete =
+    drag.dragging &&
+    (drag.overDelete || (event ? isPointerOverEditLayerDeleteDropzone(event) : false));
+  state.editLayerDrag = null;
+  setEditLayerDeleteDropzoneState(false, false);
+  if (shouldDelete && pushLayerDeleteAction(drag.stroke)) {
+    return;
+  }
+  renderEditLayers();
+}
+
+function getStampLayerStroke(element) {
+  if (!(element instanceof HTMLImageElement) || !element.classList.contains("stamp")) {
+    return null;
+  }
+  const strokeId = Number(element.dataset.strokeId);
+  return Number.isFinite(strokeId) ? state.strokeById.get(strokeId) || null : null;
+}
+
+function setStampWorldPosition(element, left, top) {
+  element.style.left = `${left}px`;
+  element.style.top = `${top}px`;
+  delete element.dataset.worldLeft;
+  delete element.dataset.worldTop;
+  delete element.dataset.worldRight;
+  delete element.dataset.worldBottom;
+}
+
+function startEditLayerMove(event) {
+  if (state.sidebarTab !== "edit") {
+    return false;
+  }
+
+  const target = event.target;
+  const stamp = target instanceof Element ? target.closest(".stamp") : null;
+  const stroke = getStampLayerStroke(stamp);
+  if (!stroke || stroke.hidden) {
+    return false;
+  }
+
+  event.preventDefault();
+  hideBrushCursorPreview();
+  selectEditLayer(stroke.id);
+
+  const startPoint = screenToWorld(event.clientX, event.clientY);
+  const originals = stroke.elements.map((element) => ({
+    element,
+    left: parseFloat(element.style.left) || 0,
+    top: parseFloat(element.style.top) || 0
+  }));
+  const liveAll = stroke.elements.length < EDIT_LAYER_LIVE_MOVE_LIMIT;
+  const liveSet = liveAll
+    ? new Set(stroke.elements)
+    : new Set(stamp ? [stamp] : []);
+
+  for (const element of liveSet) {
+    unregisterStampSpatialCells(element);
+  }
+
+  state.editLayerMove = {
+    pointerId: event.pointerId,
+    stroke,
+    startPoint,
+    originals,
+    liveSet,
+    dx: 0,
+    dy: 0
+  };
+
+  try {
+    viewport.setPointerCapture(event.pointerId);
+  } catch (error) {
+    // Continue without capture if the pointer ended early.
+  }
+  return true;
+}
+
+function updateEditLayerMove(event) {
+  const move = state.editLayerMove;
+  if (!move || move.pointerId !== event.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+  const point = screenToWorld(event.clientX, event.clientY);
+  move.dx = point.x - move.startPoint.x;
+  move.dy = point.y - move.startPoint.y;
+  for (const original of move.originals) {
+    if (!move.liveSet.has(original.element)) {
+      continue;
+    }
+    setStampWorldPosition(original.element, original.left + move.dx, original.top + move.dy);
+  }
+  scheduleStampVisibilityRefresh();
+}
+
+function stopEditLayerMove(pointerId) {
+  const move = state.editLayerMove;
+  if (!move || move.pointerId !== pointerId) {
+    return;
+  }
+
+  if (viewport.hasPointerCapture(pointerId)) {
+    viewport.releasePointerCapture(pointerId);
+  }
+
+  const viewportBounds = getViewportWorldBounds();
+  for (const original of move.originals) {
+    unregisterStampSpatialCells(original.element);
+    setStampWorldPosition(original.element, original.left + move.dx, original.top + move.dy);
+    if (!move.stroke.hidden && original.element.parentElement === world) {
+      registerStampSpatialCells(original.element);
+      updateStampViewportVisibility(original.element, viewportBounds);
+    }
+  }
+
+  state.editLayerMove = null;
+  scheduleStampVisibilityRefresh();
+  scheduleSessionSave();
 }
 
 function onBrushGalleryClick(event) {
@@ -3748,20 +8333,35 @@ function onBrushGalleryClick(event) {
       return;
     }
 
-    if (state.soloBrushId === previewBrush.id) {
+    if (event.ctrlKey || event.metaKey) {
       state.soloBrushId = null;
+      if (!(state.selectedBrushIds instanceof Set)) {
+        state.selectedBrushIds = new Set();
+      }
+      if (state.selectedBrushIds.has(previewBrush.id)) {
+        state.selectedBrushIds.delete(previewBrush.id);
+      } else {
+        state.selectedBrushIds.add(previewBrush.id);
+        previewBrush.enabled = true;
+      }
+    } else if (state.soloBrushId === previewBrush.id) {
+      setSoloBrushId(null);
     } else {
-      state.soloBrushId = previewBrush.id;
+      setSoloBrushId(previewBrush.id);
       previewBrush.enabled = true;
     }
 
     updateBrushStatus();
     renderBrushGallery();
+    state.shortcutPreview.brushId = null;
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
+    updateBrushCursorPreview();
     scheduleSessionSave();
     return;
   }
 
-  const button = event.target.closest(".brush-action-button");
+	  const button = event.target.closest(".brush-action-button, .brush-favorite-overlay-button");
   if (!button) {
     return;
   }
@@ -3783,17 +8383,66 @@ function onBrushGalleryClick(event) {
     if (!brush.enabled && state.soloBrushId === brush.id) {
       state.soloBrushId = null;
     }
+    if (!brush.enabled && state.selectedBrushIds instanceof Set) {
+      state.selectedBrushIds.delete(brush.id);
+    }
   } else if (action === "crop") {
     openBrushCropPopup(brush);
     return;
-  } else if (action === "weight-low") {
-    brush.weightMode = brush.weightMode === "low" ? "normal" : "low";
-  } else if (action === "weight-high") {
-    brush.weightMode = brush.weightMode === "high" ? "normal" : "high";
+  } else if (action === "favorite") {
+    if (!toggleBrushFavorite(brush)) {
+      return;
+    }
+    if (state.activeStockBrushFolderId === "favorites") {
+      brush.enabled = isBrushFavorite(brush);
+      if (!brush.enabled && state.soloBrushId === brush.id) {
+        state.soloBrushId = null;
+      }
+      if (!brush.enabled && state.selectedBrushIds instanceof Set) {
+        state.selectedBrushIds.delete(brush.id);
+      }
+    }
   }
 
   updateBrushStatus();
   renderBrushGallery();
+  state.shortcutPreview.brushId = null;
+  state.brushCursorPreview.brushId = null;
+  resetBrushCursorPreviewSource();
+  updateBrushCursorPreview();
+  scheduleSessionSave();
+}
+
+function onBrushGalleryContextMenu(event) {
+  const preview = event.target.closest(".brush-thumb");
+  if (!preview || controlsPanel.dataset.sidebarMode !== "draw") {
+    return;
+  }
+
+  const item = preview.closest(".brush-item");
+  if (!item) {
+    return;
+  }
+
+  const brush = findBrushById(Number(item.dataset.brushId));
+  if (!brush) {
+    return;
+  }
+
+  event.preventDefault();
+  brush.enabled = !brush.enabled;
+  if (!brush.enabled && state.soloBrushId === brush.id) {
+    state.soloBrushId = null;
+  }
+  if (!brush.enabled && state.selectedBrushIds instanceof Set) {
+    state.selectedBrushIds.delete(brush.id);
+  }
+  state.shortcutPreview.brushId = null;
+  state.brushCursorPreview.brushId = null;
+  resetBrushCursorPreviewSource();
+  updateBrushStatus();
+  renderBrushGallery();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 }
 
@@ -3823,6 +8472,7 @@ function renderCamera() {
       state.shapeDraft.currentY
     );
   }
+  updateBrushCursorPreview();
 }
 
 function isActiveBrushUrl(url) {
@@ -3878,13 +8528,18 @@ function detachStrokeFromWorld(stroke) {
 
 function appendStrokeToWorld(stroke) {
   const viewportBounds = getViewportWorldBounds();
+  const hidden = Boolean(stroke.hidden);
   for (const element of stroke.elements) {
     if (element.parentElement !== world) {
       state.stampCount += 1;
     }
     world.appendChild(element);
-    registerStampSpatialCells(element);
-    updateStampViewportVisibility(element, viewportBounds);
+    element.classList.toggle("is-layer-hidden", hidden);
+    if (!hidden) {
+      registerStampSpatialCells(element);
+      updateStampViewportVisibility(element, viewportBounds);
+    }
+    applyGifPauseStateToImage(element);
     incrementUrlRef(element.dataset.brushUrl);
   }
   scheduleStampVisibilityRefresh();
@@ -3895,6 +8550,7 @@ function pushHistoryAction(action) {
   state.history.push(action);
   updateUndoState();
   updateBrushStatus();
+  renderEditLayers();
   scheduleSessionSave();
 }
 
@@ -3905,6 +8561,7 @@ function pushStroke(stroke) {
 
   state.strokes.push(stroke);
   state.strokeById.set(stroke.id, stroke);
+  updateRememberedExportSetupForAddedStroke(stroke);
   pushHistoryAction({ type: "draw", stroke });
 }
 
@@ -3913,6 +8570,25 @@ function pushEraseAction(removals) {
     return;
   }
   pushHistoryAction({ type: "erase", removals });
+}
+
+function pushLayerDeleteAction(stroke) {
+  if (!stroke) {
+    return false;
+  }
+
+  const strokeIndex = state.strokes.indexOf(stroke);
+  if (strokeIndex < 0) {
+    return false;
+  }
+
+  detachStrokeFromWorld(stroke);
+  removeStrokeFromState(stroke);
+  if (Number(state.selectedEditLayerId) === Number(stroke.id)) {
+    state.selectedEditLayerId = null;
+  }
+  pushHistoryAction({ type: "layer-delete", stroke, strokeIndex });
+  return true;
 }
 
 function undoEraseAction(action) {
@@ -3964,6 +8640,7 @@ function undoEraseAction(action) {
       state.stampCount += 1;
       registerStampSpatialCells(removal.element);
       updateStampViewportVisibility(removal.element);
+      applyGifPauseStateToImage(removal.element);
       incrementUrlRef(removal.element.dataset.brushUrl);
     }
   }
@@ -3998,10 +8675,44 @@ function redoDrawAction(action) {
     notifyStampLimitReached();
     return false;
   }
-  appendStrokeToWorld(stroke);
   if (!state.strokeById.has(stroke.id)) {
     state.strokes.push(stroke);
     state.strokeById.set(stroke.id, stroke);
+  }
+  appendStrokeToWorld(stroke);
+  updateRememberedExportSetupForAddedStroke(stroke);
+  return true;
+}
+
+function undoLayerDeleteAction(action) {
+  const stroke = action.stroke;
+  if (!stroke || state.strokeById.has(stroke.id)) {
+    return true;
+  }
+
+  const preferredIndex =
+    Number.isFinite(Number(action.strokeIndex)) && Number(action.strokeIndex) >= 0
+    ? Number(action.strokeIndex)
+    : state.strokes.length;
+  const insertIndex = Math.max(0, Math.min(preferredIndex, state.strokes.length));
+  state.strokes.splice(insertIndex, 0, stroke);
+  state.strokeById.set(stroke.id, stroke);
+  appendStrokeToWorld(stroke);
+  reflowStrokeDomOrder();
+  selectEditLayer(stroke.id);
+  return true;
+}
+
+function redoLayerDeleteAction(action) {
+  const stroke = action.stroke;
+  if (!stroke || !state.strokeById.has(stroke.id)) {
+    return true;
+  }
+
+  detachStrokeFromWorld(stroke);
+  removeStrokeFromState(stroke);
+  if (Number(state.selectedEditLayerId) === Number(stroke.id)) {
+    state.selectedEditLayerId = null;
   }
   return true;
 }
@@ -4016,6 +8727,8 @@ function undoLastStroke() {
     undoDrawAction(action);
   } else if (action.type === "erase") {
     undoEraseAction(action);
+  } else if (action.type === "layer-delete") {
+    undoLayerDeleteAction(action);
   } else {
     state.history.push(action);
     return;
@@ -4024,6 +8737,7 @@ function undoLastStroke() {
   state.redoHistory.push(action);
   updateUndoState();
   updateBrushStatus();
+  renderEditLayers();
   scheduleSessionSave();
 }
 
@@ -4039,6 +8753,8 @@ function redoLastStroke() {
   } else if (action.type === "erase") {
     redoEraseAction(action);
     applied = true;
+  } else if (action.type === "layer-delete") {
+    applied = redoLayerDeleteAction(action);
   }
 
   if (!applied) {
@@ -4049,6 +8765,7 @@ function redoLastStroke() {
   state.history.push(action);
   updateUndoState();
   updateBrushStatus();
+  renderEditLayers();
   scheduleSessionSave();
 }
 
@@ -4062,23 +8779,20 @@ function clearAllStrokes() {
   if (state.exportMode) {
     exitExportMode();
   }
+  clearRememberedExportSetup();
   state.strokeById.clear();
   state.history = [];
   state.redoHistory = [];
   clearCursorTrail();
   updateUndoState();
   updateBrushStatus();
+  renderEditLayers();
   scheduleSessionSave();
 }
 
 function getBrushWeight(brush) {
-  if (brush.weightMode === "low") {
-    return LOW_WEIGHT_MULTIPLIER;
-  }
-  if (brush.weightMode === "high") {
-    return HIGH_WEIGHT_MULTIPLIER;
-  }
-  return 1;
+  const mode = normalizeBrushWeightMode(brush?.weightMode);
+  return BRUSH_WEIGHT_MULTIPLIERS[mode] || 1;
 }
 
 function pickRandomBrush() {
@@ -4087,7 +8801,10 @@ function pickRandomBrush() {
     return soloBrush;
   }
 
-  const candidates = state.brushes.filter((brush) => brush.enabled);
+  const selectedBrushes = getSelectedBrushes();
+  const candidates = selectedBrushes.length
+    ? selectedBrushes
+    : state.brushes.filter((brush) => brush.enabled);
   if (!candidates.length) {
     return null;
   }
@@ -4167,6 +8884,8 @@ function placeBrush(x, y, stroke) {
   const rotation = parseNumericInputValue(rotationSlider, 0);
   stamp.dataset.rotation = String(rotation);
   stamp.style.opacity = String(clamp(Number(opacitySlider.value) / 100, 0, 1));
+  stamp.dataset.sequenceBaseOpacity = stamp.style.opacity;
+  stamp.dataset.sequenceBaseSrc = brush.url;
   stamp.style.imageRendering = renderModeToggle.checked ? "auto" : "pixelated";
   stamp.style.transform = `rotate(${rotation}deg)`;
   const tintSettings = getCurrentTintSettings();
@@ -4201,8 +8920,16 @@ function placeSpray(x, y, stroke) {
   return placedAny;
 }
 
-function placeLineBrushes(stroke, startX, startY, endX, endY) {
+async function maybeYieldForPlacement(task, placedCount) {
+  throwIfTaskCancelled(task);
+  if (placedCount > 0 && placedCount % PLACEMENT_CANCEL_CHECK_INTERVAL === 0) {
+    await yieldToMainThread(task);
+  }
+}
+
+async function placeLineBrushes(stroke, startX, startY, endX, endY, task = null) {
   let placedAny = placeBrush(startX, startY, stroke);
+  await maybeYieldForPlacement(task, stroke.elements.length);
   const spacing = getSpacingValue();
   const dx = endX - startX;
   const dy = endY - startY;
@@ -4217,12 +8944,14 @@ function placeLineBrushes(stroke, startX, startY, endX, endY) {
   let traveled = spacing;
   let placedAfterStart = 0;
   while (traveled <= distance && placedAfterStart < capacity) {
+    throwIfTaskCancelled(task);
     if (!placeBrush(startX + stepX * traveled, startY + stepY * traveled, stroke)) {
       break;
     }
     placedAny = true;
     placedAfterStart += 1;
     traveled += spacing;
+    await maybeYieldForPlacement(task, stroke.elements.length);
   }
 
   return placedAny;
@@ -4259,7 +8988,7 @@ function getGridAxisPositions(min, max, spacing) {
   return positions;
 }
 
-function placeRectBrushes(stroke, startX, startY, endX, endY) {
+async function placeRectBrushes(stroke, startX, startY, endX, endY, task = null) {
   const bounds = getRectBoundsFromPoints(startX, startY, endX, endY);
   const spacing = getSpacingValue();
   const xPositions = getGridAxisPositions(bounds.left, bounds.right, spacing);
@@ -4273,6 +9002,7 @@ function placeRectBrushes(stroke, startX, startY, endX, endY) {
 
   for (const y of yPositions) {
     for (const x of xPositions) {
+      throwIfTaskCancelled(task);
       if (stroke.elements.length >= capacity) {
         return placedAny;
       }
@@ -4280,13 +9010,14 @@ function placeRectBrushes(stroke, startX, startY, endX, endY) {
         return placedAny;
       }
       placedAny = true;
+      await maybeYieldForPlacement(task, stroke.elements.length);
     }
   }
 
   return placedAny;
 }
 
-function placeCircleBrushes(stroke, startX, startY, endX, endY) {
+async function placeCircleBrushes(stroke, startX, startY, endX, endY, task = null) {
   const bounds = getCircleBoundsFromPoints(startX, startY, endX, endY);
   const spacing = getSpacingValue();
   const xPositions = getGridAxisPositions(bounds.left, bounds.right, spacing);
@@ -4304,6 +9035,7 @@ function placeCircleBrushes(stroke, startX, startY, endX, endY) {
 
   for (const y of yPositions) {
     for (const x of xPositions) {
+      throwIfTaskCancelled(task);
       const dx = x - centerX;
       const dy = y - centerY;
       if (dx * dx + dy * dy > radiusSq) {
@@ -4316,9 +9048,11 @@ function placeCircleBrushes(stroke, startX, startY, endX, endY) {
         return placedAny;
       }
       placedAny = true;
+      await maybeYieldForPlacement(task, stroke.elements.length);
     }
   }
 
+  throwIfTaskCancelled(task);
   if (!placedAny) {
     placedAny = placeBrush(centerX, centerY, stroke);
   }
@@ -4365,20 +9099,52 @@ function updateShapePreview(mode, startX, startY, endX, endY) {
   }
 }
 
-function commitShapeStroke(mode, startX, startY, endX, endY) {
-  const stroke = { id: state.nextStrokeId, elements: [] };
-  state.nextStrokeId += 1;
-
-  if (mode === "line") {
-    placeLineBrushes(stroke, startX, startY, endX, endY);
-  } else if (mode === "box") {
-    placeRectBrushes(stroke, startX, startY, endX, endY);
-  } else if (mode === "circle") {
-    placeCircleBrushes(stroke, startX, startY, endX, endY);
+async function commitShapeStroke(mode, startX, startY, endX, endY) {
+  if (state.placementTask) {
+    return false;
   }
 
-  pushStroke(stroke);
-  return stroke.elements.length > 0;
+  const task = createCancellableTask("placement");
+  const stroke = {
+    id: state.nextStrokeId,
+    layerType: normalizeStrokeLayerType(mode),
+    brushCategoryName: getActiveBrushCategoryName(),
+    elements: []
+  };
+  state.nextStrokeId += 1;
+  state.placementTask = task;
+  updateBrushStatus("Placing brush batch... Press Esc to cancel.");
+  updateBrushCursorPreview();
+  updateUndoState();
+
+  try {
+    if (mode === "line") {
+      await placeLineBrushes(stroke, startX, startY, endX, endY, task);
+    } else if (mode === "box") {
+      await placeRectBrushes(stroke, startX, startY, endX, endY, task);
+    } else if (mode === "circle") {
+      await placeCircleBrushes(stroke, startX, startY, endX, endY, task);
+    }
+
+    throwIfTaskCancelled(task);
+    pushStroke(stroke);
+    return stroke.elements.length > 0;
+  } catch (error) {
+    detachStrokeFromWorld(stroke);
+    if (isCancellationError(error)) {
+      updateBrushStatus("Placement cancelled.");
+      return false;
+    }
+    updateBrushStatus("Could not finish brush placement.");
+    throw error;
+  } finally {
+    if (state.placementTask === task) {
+      state.placementTask = null;
+    }
+    updateUndoState();
+    updateBrushCursorPreview();
+    scheduleStampVisibilityRefresh();
+  }
 }
 
 function placeAlongPath(drawing, x, y) {
@@ -4439,43 +9205,127 @@ function rectsIntersect(a, b) {
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 }
 
-function collectExportStampEntries(selectionBounds) {
+function getExportSequenceVisualState(element, now = performance.now()) {
+  const stroke = getStampLayerStroke(element);
+  const baseOpacity = clamp(Number(element.dataset.sequenceBaseOpacity) || Number(element.style.opacity) || 1, 0, 1);
+  const currentSource = element.getAttribute("src") || element.currentSrc || "";
+  const baseSource = element.dataset.brushUrl || currentSource;
+  const visual = {
+    opacity: baseOpacity,
+    move: { x: 0, y: 0 },
+    rotationOffset: 0,
+    scale: 1,
+    tintSettings: getStampBaseTintSettings(element),
+    sourceUrl: baseSource
+  };
+  if (!stroke || !isLayerSequenceEnabled(stroke)) {
+    return visual;
+  }
+  const slots = getLayerSequenceSlots(stroke).filter((slot) =>
+    isImplementedLayerSequenceEffect(slot.effect)
+  );
+  for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
+    const slot = slots[slotIndex];
+    const effect = slot.effect;
+    const settings = normalizeLayerSequenceSettings(slot.settings);
+    loadSequenceSlotScratch(element, slotIndex);
+    if (effect === "show-hide") {
+      const currentOpacity = clamp(getCurrentSequenceOpacity(element, settings, now), 0, 1);
+      const opacityFactor = baseOpacity > 0 ? currentOpacity / baseOpacity : currentOpacity;
+      visual.opacity *= clamp(opacityFactor, 0, 1);
+    } else if (effect === "move") {
+      const move = getCurrentSequenceMove(element, settings, now);
+      visual.move.x += move.x;
+      visual.move.y += move.y;
+    } else if (effect === "rotate") {
+      visual.rotationOffset += getCurrentSequenceRotation(element, settings, now);
+    } else if (effect === "scale") {
+      visual.scale *= getCurrentSequenceScale(element, settings, now);
+    } else if (effect === "color-cycle") {
+      const colorCycleAmount = getCurrentSequenceColorAmount(element, settings, now);
+      if (colorCycleAmount > 0) {
+        visual.tintSettings = createLayeredTintSettings(visual.tintSettings, {
+          color: settings.colorCycleColor,
+          amountPercent: colorCycleAmount
+        });
+      }
+    } else if (effect === "image-cycle" && currentSource && currentSource !== TRANSPARENT_STAMP_SRC) {
+      visual.sourceUrl = currentSource;
+    }
+    commitSequenceSlotScratch(element, slotIndex);
+  }
+  return visual;
+}
+
+function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
+  const left = parseFloat(element.style.left) || 0;
+  const top = parseFloat(element.style.top) || 0;
+  const width = Math.max(0, parseFloat(element.style.width) || 0);
+  const height = Math.max(0, parseFloat(element.style.height) || 0);
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  const sequenceState = element.dataset.sequenceActive === "1"
+    ? getExportSequenceVisualState(element, Number.isFinite(Number(sequenceNow)) ? Number(sequenceNow) : performance.now())
+    : null;
+  const visualScale = Math.max(0.001, Number(sequenceState?.scale) || 1);
+  const visualWidth = width * visualScale;
+  const visualHeight = height * visualScale;
+  const rotation = (Number(element.dataset.rotation) || 0) + (Number(sequenceState?.rotationOffset) || 0);
+  const moveX = Number(sequenceState?.move?.x) || 0;
+  const moveY = Number(sequenceState?.move?.y) || 0;
+  const bounds = getStampWorldBoundsFromLayout(left + moveX, top + moveY, visualWidth, visualHeight, rotation);
+  if (!rectsIntersect(bounds, selectionBounds)) {
+    return null;
+  }
+
+  return {
+    element,
+    sourceUrl: sequenceState?.sourceUrl || element.dataset.brushUrl || element.currentSrc || element.getAttribute("src") || "",
+    centerX: left + width / 2 + moveX,
+    centerY: top + height / 2 + moveY,
+    width: visualWidth,
+    height: visualHeight,
+    rotation,
+    opacity: sequenceState ? sequenceState.opacity : clamp(Number(element.style.opacity) || 1, 0, 1),
+    tintSettings: sequenceState?.tintSettings || getStampBaseTintSettings(element),
+    imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated"
+  };
+}
+
+async function collectExportStampEntries(selectionBounds, task = null, progress = null) {
   const entries = [];
   const stamps = getVisibleStampElements();
+  const total = Math.max(1, stamps.length);
 
-  for (const element of stamps) {
-    const left = parseFloat(element.style.left) || 0;
-    const top = parseFloat(element.style.top) || 0;
-    const width = Math.max(0, parseFloat(element.style.width) || 0);
-    const height = Math.max(0, parseFloat(element.style.height) || 0);
-    if (width <= 0 || height <= 0) {
-      continue;
+  for (let index = 0; index < stamps.length; index += 1) {
+    throwIfTaskCancelled(task);
+    const entry = createExportStampEntry(stamps[index], selectionBounds);
+    if (entry) {
+      entries.push(entry);
     }
-
-    const rotation = Number(element.dataset.rotation) || 0;
-    const bounds = getStampWorldBoundsFromLayout(left, top, width, height, rotation);
-    if (!rectsIntersect(bounds, selectionBounds)) {
-      continue;
+    if (progress && (index === stamps.length - 1 || index % EXPORT_CANCEL_CHECK_INTERVAL === 0)) {
+      progress((index + 1) / total);
     }
-
-    entries.push({
-      element,
-      sourceUrl:
-        element.dataset.brushUrl ||
-        element.currentSrc ||
-        element.getAttribute("src") ||
-        "",
-      centerX: left + width / 2,
-      centerY: top + height / 2,
-      width,
-      height,
-      rotation,
-      opacity: clamp(Number(element.style.opacity) || 1, 0, 1),
-      imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated"
-    });
+    if (index > 0 && index % EXPORT_CANCEL_CHECK_INTERVAL === 0) {
+      await yieldToMainThread(task);
+    }
   }
 
   return entries;
+}
+
+function refreshExportSequenceEntries(entries, selectionBounds, sequenceNow) {
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  for (const entry of entries) {
+    const nextEntry = createExportStampEntry(entry.element, selectionBounds, sequenceNow);
+    if (nextEntry) {
+      Object.assign(entry, nextEntry);
+    }
+  }
 }
 
 function resolveGifFrameSource(animation, timeMs) {
@@ -4589,7 +9439,23 @@ async function decodeGifAnimation(url) {
   return { frames, durations, totalDuration };
 }
 
-async function buildGifAnimationMap(entries) {
+function getSequenceExportSourceUrls() {
+  const urls = [];
+  const hasImageCycleSequence = state.strokes.some(
+    (stroke) => isLayerSequenceEnabled(stroke) && !stroke.hidden && getLayerSequenceEffect(stroke) === "image-cycle"
+  );
+  if (!hasImageCycleSequence) {
+    return urls;
+  }
+  for (const brush of getSequenceBrushPool()) {
+    if (brush?.url) {
+      urls.push(brush.url);
+    }
+  }
+  return urls;
+}
+
+async function buildGifAnimationMap(entries, task = null, progress = null, extraUrls = []) {
   const urls = new Set();
   for (const entry of entries) {
     if (!entry || !isGifUrl(entry.sourceUrl)) {
@@ -4597,28 +9463,253 @@ async function buildGifAnimationMap(entries) {
     }
     urls.add(entry.sourceUrl);
   }
+  for (const url of extraUrls) {
+    if (isGifUrl(url)) {
+      urls.add(url);
+    }
+  }
 
   const map = new Map();
-  for (const url of urls) {
+  const urlList = Array.from(urls);
+  const total = Math.max(1, urlList.length);
+  for (let index = 0; index < urlList.length; index += 1) {
+    const url = urlList[index];
+    throwIfTaskCancelled(task);
     try {
       const animation = await decodeGifAnimation(url);
+      throwIfTaskCancelled(task);
       map.set(url, animation);
     } catch (error) {
+      if (isCancellationError(error)) {
+        throw error;
+      }
       // Skip undecodable GIFs and keep static rendering for those entries.
     }
+    if (progress) {
+      progress((index + 1) / total);
+    }
+    await yieldToMainThread(task);
   }
 
   return map;
 }
 
-function drawExportFrame(
+function getLongestGifAnimationDuration(gifAnimationMap) {
+  let longest = 0;
+  for (const animation of gifAnimationMap.values()) {
+    longest = Math.max(longest, Math.round(Number(animation?.totalDuration) || 0));
+  }
+  return longest;
+}
+
+function getNativeGifFrameDelaysForCount(gifAnimationMap, frameCountOverride) {
+  const targetFrameCount = Math.floor(Number(frameCountOverride));
+  if (!Number.isFinite(targetFrameCount) || targetFrameCount <= 0) {
+    return null;
+  }
+
+  let matchedDurations = null;
+  let matchedTotalDuration = 0;
+  for (const animation of gifAnimationMap.values()) {
+    const frames = Array.isArray(animation?.frames) ? animation.frames : [];
+    const durations = Array.isArray(animation?.durations) ? animation.durations : [];
+    if (frames.length !== targetFrameCount || durations.length !== targetFrameCount) {
+      continue;
+    }
+
+    const normalizedDurations = durations.map((duration) =>
+      Math.max(20, Math.round(Number(duration) || EXPORT_GIF_FRAME_DELAY_MS))
+    );
+    const totalDuration = normalizedDurations.reduce((sum, duration) => sum + duration, 0);
+    if (!matchedDurations || totalDuration > matchedTotalDuration) {
+      matchedDurations = normalizedDurations;
+      matchedTotalDuration = totalDuration;
+    }
+  }
+
+  return matchedDurations;
+}
+
+function createExportFrameDelays(durationMs, frameCountOverride = null) {
+  if (Number.isFinite(Number(frameCountOverride)) && Number(frameCountOverride) > 0) {
+    return Array.from(
+      { length: clamp(Math.floor(Number(frameCountOverride)), 1, EXPORT_MAX_FRAME_COUNT) },
+      () => EXPORT_GIF_FRAME_DELAY_MS
+    );
+  }
+
+  const duration = Math.max(EXPORT_GIF_FRAME_DELAY_MS, Math.round(Number(durationMs) || EXPORT_GIF_DURATION_MS));
+  const frameCount = clamp(Math.ceil(duration / EXPORT_GIF_FRAME_DELAY_MS), 1, EXPORT_MAX_FRAME_COUNT);
+  if (frameCount === 1) {
+    return [duration];
+  }
+
+  const delays = Array.from({ length: frameCount }, () => EXPORT_GIF_FRAME_DELAY_MS);
+  const finalDelay = duration - EXPORT_GIF_FRAME_DELAY_MS * (frameCount - 1);
+  if (finalDelay >= 20) {
+    delays[delays.length - 1] = finalDelay;
+  } else {
+    delays[delays.length - 2] += finalDelay;
+    delays.pop();
+  }
+  return delays;
+}
+
+function getExportGifFrameDelays(gifAnimationMap, options = {}) {
+  const frameCountOverride = Number(options.frameCountOverride);
+  if (Number.isFinite(frameCountOverride) && frameCountOverride > 0) {
+    const nativeFrameDelays = getNativeGifFrameDelaysForCount(gifAnimationMap, frameCountOverride);
+    if (nativeFrameDelays) {
+      return nativeFrameDelays;
+    }
+    return createExportFrameDelays(0, frameCountOverride);
+  }
+
+  if (options.animationAuto !== false) {
+    const longestDuration = getLongestGifAnimationDuration(gifAnimationMap);
+    return createExportFrameDelays(longestDuration || EXPORT_GIF_DURATION_MS);
+  }
+
+  const manualSeconds = EXPORT_MANUAL_SECONDS_PRESETS.includes(Number(options.animationSeconds))
+    ? Number(options.animationSeconds)
+    : 1;
+  return createExportFrameDelays(manualSeconds * 1000);
+}
+
+function getExportVideoDurationMs(gifAnimationMap, options = {}) {
+  if (options.videoAuto !== false) {
+    return Math.max(100, getLongestGifAnimationDuration(gifAnimationMap) || EXPORT_GIF_DURATION_MS);
+  }
+  return Math.max(
+    100,
+    Math.round(clamp(Number(options.videoSeconds) || 0, 0, EXPORT_VIDEO_MAX_SECONDS) * 1000)
+  );
+}
+
+function getVideoScaledResolution(resolution) {
+  const width = Math.max(1, Math.round(Number(resolution?.width) || 1));
+  const height = Math.max(1, Math.round(Number(resolution?.height) || 1));
+  const multiplier = Math.min(
+    1,
+    EXPORT_VIDEO_MAX_DIMENSION / width,
+    EXPORT_VIDEO_MAX_DIMENSION / height
+  );
+  return {
+    width: Math.max(1, Math.round(width * multiplier)),
+    height: Math.max(1, Math.round(height * multiplier))
+  };
+}
+
+function getSupportedVideoMimeType() {
+  if (typeof MediaRecorder !== "function" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+  return [
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4;codecs=h264",
+    "video/mp4",
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm"
+  ].find((type) => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+function getVideoExtensionForMimeType(mimeType) {
+  return String(mimeType || "").startsWith("video/mp4") ? "mp4" : "webm";
+}
+
+function loadExportBackgroundImageElement(url) {
+  if (!url) {
+    return Promise.resolve(null);
+  }
+  if (!exportBackgroundImageCache.has(url)) {
+    exportBackgroundImageCache.set(
+      url,
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Could not load export background image."));
+        image.src = url;
+      }).catch((error) => {
+        exportBackgroundImageCache.delete(url);
+        throw error;
+      })
+    );
+  }
+  return exportBackgroundImageCache.get(url);
+}
+
+async function getExportBackgroundImageOptions() {
+  const imageUrl = typeof state.exportBgImageUrl === "string" ? state.exportBgImageUrl : "";
+  if (!imageUrl || state.exportBackgroundEnabled === false) {
+    return {};
+  }
+
+  try {
+    const image = await loadExportBackgroundImageElement(imageUrl);
+    if (!image) {
+      return {};
+    }
+    return {
+      backgroundImageElement: image,
+      backgroundImageOpacity: clamp(Number(state.exportBgImageOpacity) || 0, 0, 100) / 100,
+      backgroundImageMode: state.exportBgImageMode === "tile" ? "tile" : "stretch",
+      backgroundImageTileSize: normalizeExportBgTileSize(state.exportBgImageTileSize)
+    };
+  } catch (error) {
+    return {};
+  }
+}
+
+function drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeight, options = {}) {
+  const image = options.backgroundImageElement;
+  if (!(image instanceof HTMLImageElement) || !image.complete) {
+    return;
+  }
+
+  const opacity = clamp(Number(options.backgroundImageOpacity), 0, 1);
+  if (opacity <= 0) {
+    return;
+  }
+
+  const naturalWidth = Math.max(1, image.naturalWidth || image.width || 1);
+  const naturalHeight = Math.max(1, image.naturalHeight || image.height || 1);
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.imageSmoothingEnabled = true;
+  if (options.backgroundImageMode === "tile") {
+    const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
+    const scaleX = outputWidth / selectionWidth;
+    const tileWidth = Math.max(1, normalizeExportBgTileSize(options.backgroundImageTileSize) * scaleX);
+    const tileHeight = Math.max(1, tileWidth * (naturalHeight / naturalWidth));
+    const startX = -(outputWidth % tileWidth) / 2;
+    const startY = -(outputHeight % tileHeight) / 2;
+    for (let y = startY; y < outputHeight; y += tileHeight) {
+      for (let x = startX; x < outputWidth; x += tileWidth) {
+        ctx.drawImage(image, x, y, tileWidth, tileHeight);
+      }
+    }
+  } else {
+    const scale = Math.max(outputWidth / naturalWidth, outputHeight / naturalHeight);
+    const drawWidth = naturalWidth * scale;
+    const drawHeight = naturalHeight * scale;
+    ctx.drawImage(
+      image,
+      (outputWidth - drawWidth) / 2,
+      (outputHeight - drawHeight) / 2,
+      drawWidth,
+      drawHeight
+    );
+  }
+  ctx.restore();
+}
+
+function prepareExportFrame(
   ctx,
   selectionBounds,
   outputWidth,
   outputHeight,
-  entries,
-  gifAnimationMap = null,
-  timeMs = 0,
   options = {}
 ) {
   const includeBackground = options.includeBackground !== false;
@@ -4637,28 +9728,124 @@ function drawExportFrame(
     ctx.fillRect(0, 0, outputWidth, outputHeight);
     ctx.restore();
   }
-  for (const entry of entries) {
-    let frameSource = entry.element;
-    if (gifAnimationMap && isGifUrl(entry.sourceUrl)) {
-      const animation = gifAnimationMap.get(entry.sourceUrl);
-      const animatedSource = resolveGifFrameSource(animation, timeMs);
-      if (animatedSource) {
-        frameSource = animatedSource;
-      }
-    }
+  drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeight, options);
 
-    const drawWidth = entry.width * scaleX;
-    const drawHeight = entry.height * scaleY;
-    const drawCenterX = (entry.centerX - selectionBounds.left) * scaleX;
-    const drawCenterY = (entry.centerY - selectionBounds.top) * scaleY;
+  return { scaleX, scaleY };
+}
 
-    ctx.save();
-    ctx.globalAlpha = entry.opacity;
-    ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
-    ctx.translate(drawCenterX, drawCenterY);
-    ctx.rotate((entry.rotation * Math.PI) / 180);
+function drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, imageRendering, tintSettings) {
+  const tintLayers = getTintLayerList(tintSettings);
+  if (!tintLayers.length) {
     ctx.drawImage(frameSource, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-    ctx.restore();
+    return;
+  }
+
+  const scratchWidth = Math.max(1, Math.ceil(drawWidth));
+  const scratchHeight = Math.max(1, Math.ceil(drawHeight));
+  if (!exportTintScratchCanvas) {
+    exportTintScratchCanvas = document.createElement("canvas");
+  }
+  if (exportTintScratchCanvas.width !== scratchWidth) {
+    exportTintScratchCanvas.width = scratchWidth;
+  }
+  if (exportTintScratchCanvas.height !== scratchHeight) {
+    exportTintScratchCanvas.height = scratchHeight;
+  }
+
+  const scratchCtx = exportTintScratchCanvas.getContext("2d", { alpha: true });
+  if (!scratchCtx) {
+    ctx.drawImage(frameSource, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    return;
+  }
+
+  scratchCtx.clearRect(0, 0, scratchWidth, scratchHeight);
+  scratchCtx.globalAlpha = 1;
+  scratchCtx.globalCompositeOperation = "source-over";
+  scratchCtx.imageSmoothingEnabled = imageRendering === "auto";
+  scratchCtx.drawImage(frameSource, 0, 0, scratchWidth, scratchHeight);
+  for (const tintLayer of tintLayers) {
+    scratchCtx.globalCompositeOperation = "source-atop";
+    scratchCtx.globalAlpha = tintLayer.amountPercent / 100;
+    scratchCtx.fillStyle = tintLayer.color;
+    scratchCtx.fillRect(0, 0, scratchWidth, scratchHeight);
+  }
+  scratchCtx.globalAlpha = 1;
+  scratchCtx.globalCompositeOperation = "source-over";
+
+  ctx.drawImage(exportTintScratchCanvas, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+}
+
+function drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAnimationMap = null, timeMs = 0) {
+  let frameSource = entry.element;
+  if (gifAnimationMap && isGifUrl(entry.sourceUrl)) {
+    const animation = gifAnimationMap.get(entry.sourceUrl);
+    const animatedSource = resolveGifFrameSource(animation, timeMs);
+    if (animatedSource) {
+      frameSource = animatedSource;
+    }
+  }
+
+  const drawWidth = entry.width * scaleX;
+  const drawHeight = entry.height * scaleY;
+  const drawCenterX = (entry.centerX - selectionBounds.left) * scaleX;
+  const drawCenterY = (entry.centerY - selectionBounds.top) * scaleY;
+
+  ctx.save();
+  ctx.globalAlpha = entry.opacity;
+  ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
+  ctx.translate(drawCenterX, drawCenterY);
+  ctx.rotate((entry.rotation * Math.PI) / 180);
+  drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, entry.imageRendering, entry.tintSettings);
+  ctx.restore();
+}
+
+function drawExportFrame(
+  ctx,
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  gifAnimationMap = null,
+  timeMs = 0,
+  options = {}
+) {
+  if (Number.isFinite(Number(options.sequenceTimeMs))) {
+    runLayerSequences(Number(options.sequenceTimeMs));
+    refreshExportSequenceEntries(entries, selectionBounds, Number(options.sequenceTimeMs));
+  }
+  const { scaleX, scaleY } = prepareExportFrame(ctx, selectionBounds, outputWidth, outputHeight, options);
+  for (const entry of entries) {
+    drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAnimationMap, timeMs);
+  }
+}
+
+async function drawExportFrameAsync(
+  ctx,
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  gifAnimationMap = null,
+  timeMs = 0,
+  options = {},
+  task = null,
+  progress = null
+) {
+  if (Number.isFinite(Number(options.sequenceTimeMs))) {
+    runLayerSequences(Number(options.sequenceTimeMs));
+    refreshExportSequenceEntries(entries, selectionBounds, Number(options.sequenceTimeMs));
+  }
+  const { scaleX, scaleY } = prepareExportFrame(ctx, selectionBounds, outputWidth, outputHeight, options);
+  const total = Math.max(1, entries.length);
+  for (let index = 0; index < entries.length; index += 1) {
+    throwIfTaskCancelled(task);
+    drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entries[index], gifAnimationMap, timeMs);
+    if (progress && (index === entries.length - 1 || index % EXPORT_CANCEL_CHECK_INTERVAL === 0)) {
+      progress((index + 1) / total);
+    }
+    if (index > 0 && index % EXPORT_CANCEL_CHECK_INTERVAL === 0) {
+      await yieldToMainThread(task);
+    }
   }
 }
 
@@ -4674,7 +9861,7 @@ function canvasToPngBlob(canvas) {
   });
 }
 
-function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}) {
+async function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
   const canvas = document.createElement("canvas");
   canvas.width = outputWidth;
   canvas.height = outputHeight;
@@ -4682,12 +9869,30 @@ function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries
   if (!ctx) {
     throw new Error("Could not create export canvas.");
   }
-  drawExportFrame(ctx, selectionBounds, outputWidth, outputHeight, entries, null, 0, options);
+  await drawExportFrameAsync(
+    ctx,
+    selectionBounds,
+    outputWidth,
+    outputHeight,
+    entries,
+    null,
+    0,
+    { ...options, sequenceTimeMs: options.sequenceExportActive ? 0 : null },
+    task,
+    (ratio) => updateExportProgress(
+      task,
+      EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
+      "Drawing"
+    )
+  );
+  throwIfTaskCancelled(task);
+  updateExportProgress(task, EXPORT_PROGRESS_PNG_ENCODE_HOLD, "Encoding");
   return canvasToPngBlob(canvas);
 }
 
-async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}) {
+async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
   await loadGifLibrary();
+  throwIfTaskCancelled(task);
   if (typeof window.GIF !== "function") {
     throw new Error("GIF encoder is unavailable.");
   }
@@ -4699,7 +9904,6 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     includeBackground,
     matteColor: includeBackground ? "" : GIF_TRANSPARENT_MATTE
   };
-  const frameCount = Math.max(1, Math.round(EXPORT_GIF_DURATION_MS / EXPORT_GIF_FRAME_DELAY_MS));
   const frameCanvas = document.createElement("canvas");
   frameCanvas.width = outputWidth;
   frameCanvas.height = outputHeight;
@@ -4713,7 +9917,18 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     frameCtx.fillRect(0, 0, outputWidth, outputHeight);
     frameCtx.globalCompositeOperation = "source-over";
   }
-  const gifAnimationMap = await buildGifAnimationMap(entries);
+  const gifAnimationMap = await buildGifAnimationMap(
+    entries,
+    task,
+    (ratio) => updateExportProgress(
+      task,
+      EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DECODE_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
+      "Decoding"
+    ),
+    getSequenceExportSourceUrls()
+  );
+  throwIfTaskCancelled(task);
+  const frameDelays = getExportGifFrameDelays(gifAnimationMap, options);
 
   const gif = new window.GIF({
     workers: 2,
@@ -4727,10 +9942,16 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     workerScript: GIF_JS_WORKER_URL,
     ...(includeBackground ? {} : { transparent: GIF_TRANSPARENT_MATTE_HEX })
   });
+  if (task) {
+    task.gif = gif;
+  }
 
-  for (let index = 0; index < frameCount; index += 1) {
-    const elapsedMs = index * EXPORT_GIF_FRAME_DELAY_MS;
-    drawExportFrame(
+  let elapsedMs = 0;
+  for (let index = 0; index < frameDelays.length; index += 1) {
+    throwIfTaskCancelled(task);
+    const frameStartRatio = index / Math.max(1, frameDelays.length);
+    const frameEndRatio = (index + 1) / Math.max(1, frameDelays.length);
+    await drawExportFrameAsync(
       frameCtx,
       selectionBounds,
       outputWidth,
@@ -4738,20 +9959,211 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
       entries,
       gifAnimationMap,
       elapsedMs,
-      frameOptions
+      { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? elapsedMs : null },
+      task,
+      (entryRatio) => updateExportProgress(
+        task,
+        EXPORT_PROGRESS_DECODE_END +
+          (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_DECODE_END) *
+            (frameStartRatio + (frameEndRatio - frameStartRatio) * entryRatio),
+        "Drawing"
+      )
     );
     gif.addFrame(frameCanvas, {
       copy: true,
-      delay: EXPORT_GIF_FRAME_DELAY_MS,
-      dispose: includeBackground ? 2 : 1
+      delay: frameDelays[index],
+      dispose: 2
     });
+    elapsedMs += frameDelays[index];
   }
 
   return new Promise((resolve, reject) => {
-    gif.on("finished", (blob) => resolve(blob));
-    gif.on("abort", () => reject(new Error("GIF export was aborted.")));
+    const clearGifTask = () => {
+      if (task && task.gif === gif) {
+        task.gif = null;
+      }
+    };
+    gif.on("progress", (ratio) => {
+      updateExportProgress(
+        task,
+        EXPORT_PROGRESS_DRAW_END + (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DRAW_END) * ratio,
+        "Encoding"
+      );
+    });
+    gif.on("finished", (blob) => {
+      clearGifTask();
+      if (task && task.cancelled) {
+        reject(createCancellationError());
+        return;
+      }
+      resolve(blob);
+    });
+    gif.on("abort", () => {
+      clearGifTask();
+      reject(createCancellationError());
+    });
+    throwIfTaskCancelled(task);
     gif.render();
   });
+}
+
+async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
+  const mimeType = getSupportedVideoMimeType();
+  if (!mimeType) {
+    throw new Error("Video encoding is unavailable in this browser.");
+  }
+
+  const recordCanvas = document.createElement("canvas");
+  recordCanvas.width = outputWidth;
+  recordCanvas.height = outputHeight;
+  const recordCtx = recordCanvas.getContext("2d", { alpha: options.includeBackground === false });
+  const renderCanvas = document.createElement("canvas");
+  renderCanvas.width = outputWidth;
+  renderCanvas.height = outputHeight;
+  const renderCtx = renderCanvas.getContext("2d", { alpha: options.includeBackground === false });
+  if (!recordCtx || !renderCtx || typeof recordCanvas.captureStream !== "function") {
+    throw new Error("Could not create video export canvas.");
+  }
+
+  let stream = recordCanvas.captureStream(0);
+  let [track] = stream.getVideoTracks();
+  let manualFrameCapture = Boolean(track && typeof track.requestFrame === "function");
+  if (!manualFrameCapture) {
+    for (const mediaTrack of stream.getTracks()) {
+      mediaTrack.stop();
+    }
+    stream = recordCanvas.captureStream(EXPORT_VIDEO_FPS);
+    [track] = stream.getVideoTracks();
+    manualFrameCapture = Boolean(track && typeof track.requestFrame === "function");
+  }
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, {
+    mimeType,
+    videoBitsPerSecond: Math.max(2500000, Math.min(12000000, outputWidth * outputHeight * 8))
+  });
+  task.mediaRecorder = recorder;
+
+  const recordedBlobPromise = new Promise((resolve, reject) => {
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+    recorder.onerror = () => reject(recorder.error || new Error("Video export failed."));
+    recorder.onstop = () => {
+      if (task && task.cancelled) {
+        reject(createCancellationError());
+        return;
+      }
+      resolve(new Blob(chunks, { type: mimeType }));
+    };
+  });
+
+  const gifAnimationMap = await buildGifAnimationMap(
+    entries,
+    task,
+    (ratio) => updateExportProgress(
+      task,
+      EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DECODE_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
+      "Decoding"
+    ),
+    getSequenceExportSourceUrls()
+  );
+  throwIfTaskCancelled(task);
+
+  const durationMs = getExportVideoDurationMs(gifAnimationMap, options);
+  const frameIntervalMs = 1000 / EXPORT_VIDEO_FPS;
+  const frameOptions = {
+    ...options,
+    includeBackground: options.includeBackground !== false
+  };
+
+  if (!manualFrameCapture) {
+    await drawExportFrameAsync(
+      renderCtx,
+      selectionBounds,
+      outputWidth,
+      outputHeight,
+      entries,
+      gifAnimationMap,
+      0,
+      { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? 0 : null },
+      task
+    );
+    recordCtx.clearRect(0, 0, outputWidth, outputHeight);
+    recordCtx.drawImage(renderCanvas, 0, 0);
+  }
+
+  recorder.start();
+  await yieldToMainThread(task);
+  try {
+    const recordingStartTime = performance.now();
+    let frameIndex = 0;
+    while (true) {
+      throwIfTaskCancelled(task);
+      const elapsedMs = Math.max(0, performance.now() - recordingStartTime);
+      if (frameIndex > 0 && elapsedMs >= durationMs) {
+        break;
+      }
+      const frameTimeMs = Math.min(durationMs, elapsedMs);
+      const frameStartRatio = clamp(frameTimeMs / Math.max(1, durationMs), 0, 1);
+      await drawExportFrameAsync(
+        renderCtx,
+        selectionBounds,
+        outputWidth,
+        outputHeight,
+        entries,
+        gifAnimationMap,
+        frameTimeMs,
+        { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? frameTimeMs : null },
+        task,
+        (entryRatio) => {
+          const nextFrameRatio = clamp(
+            (performance.now() - recordingStartTime) / Math.max(1, durationMs),
+            frameStartRatio,
+            1
+          );
+          updateExportProgress(
+            task,
+            EXPORT_PROGRESS_DECODE_END +
+              (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DECODE_END) *
+                (frameStartRatio + (nextFrameRatio - frameStartRatio) * entryRatio),
+            "Rendering"
+          );
+        }
+      );
+      recordCtx.clearRect(0, 0, outputWidth, outputHeight);
+      recordCtx.drawImage(renderCanvas, 0, 0);
+      if (manualFrameCapture && track && typeof track.requestFrame === "function") {
+        track.requestFrame();
+      }
+      frameIndex += 1;
+      if (performance.now() - recordingStartTime >= durationMs) {
+        break;
+      }
+      const nextFrameTargetTime = recordingStartTime + frameIndex * frameIntervalMs;
+      await waitForExportFrameDelay(Math.max(0, nextFrameTargetTime - performance.now()), task);
+    }
+    updateExportProgress(task, EXPORT_PROGRESS_ENCODE_END, "Encoding");
+    throwIfTaskCancelled(task);
+    recorder.stop();
+    return await recordedBlobPromise;
+  } finally {
+    if (recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch (error) {
+        // Recorder may already be stopping after cancellation.
+      }
+      recordedBlobPromise.catch(() => {});
+    }
+    for (const mediaTrack of stream.getTracks()) {
+      mediaTrack.stop();
+    }
+    if (task && task.mediaRecorder === recorder) {
+      task.mediaRecorder = null;
+    }
+  }
 }
 
 function downloadBlob(blob, filename) {
@@ -4766,40 +10178,181 @@ function downloadBlob(blob, filename) {
 }
 
 async function confirmExport() {
-  if (!state.exportMode || !state.exportSelectionBounds) {
+  if (!state.exportMode || !state.exportSelectionBounds || state.exportTask) {
     return;
   }
 
+  const task = createCancellableTask("export");
+  task.button = exportButton;
   const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
   const resolution = getExportScaledResolution(normalized);
+  state.exportTask = task;
+  updateExportModeUI();
   restoreAllCulledStampSources();
-  const entries = collectExportStampEntries(normalized);
-  const hasGif = hasGifStampOnCanvas();
+  updateBrushCursorPreview();
   const timestamp = Date.now();
   const exportOptions = {
     includeBackground: Boolean(state.exportBackgroundEnabled),
-    backgroundColor: state.canvasBackgroundColor
+    backgroundColor: state.canvasBackgroundColor,
+    animationAuto: state.exportAnimationAuto !== false,
+    animationSeconds: state.exportAnimationSeconds,
+    frameCountOverride: state.exportAnimationAuto === false ? getExportFrameCountOverride() : null,
+    sequenceExportActive: hasActiveSequenceEffectOnCanvas()
   };
+  const sequenceSnapshot = exportOptions.sequenceExportActive ? createSequenceExportSnapshot() : null;
 
   exportButton.disabled = true;
-  exportCancelButton.disabled = true;
+  exportCancelButton.disabled = false;
   exportButton.classList.add("is-loading");
-  exportButton.textContent = "Exporting";
+  updateExportProgress(task, 0, "Exporting");
+  updateBrushStatus("Exporting... Press Esc to cancel.");
   try {
+    Object.assign(exportOptions, await getExportBackgroundImageOptions());
+    throwIfTaskCancelled(task);
+    if (sequenceSnapshot) {
+      state.sequenceExportActive = true;
+      resetSequencesForExport();
+    }
+    const entries = await collectExportStampEntries(
+      normalized,
+      task,
+      (ratio) => updateExportProgress(task, EXPORT_PROGRESS_COLLECT_END * ratio, "Collecting")
+    );
+    throwIfTaskCancelled(task);
+    const hasGif = hasGifStampOnCanvas() || exportOptions.sequenceExportActive;
     const blob = hasGif
-      ? await renderExportGifBlob(normalized, resolution.width, resolution.height, entries, exportOptions)
-      : await renderExportPngBlob(normalized, resolution.width, resolution.height, entries, exportOptions);
+      ? await renderExportGifBlob(normalized, resolution.width, resolution.height, entries, exportOptions, task)
+      : await renderExportPngBlob(normalized, resolution.width, resolution.height, entries, exportOptions, task);
+    throwIfTaskCancelled(task);
     const extension = hasGif ? "gif" : "png";
 
     const filename = `image-draw-export-${timestamp}.${extension}`;
+    updateExportProgress(task, 100, "Done");
     downloadBlob(blob, filename);
+    state.exportTask = null;
     exitExportMode();
+    setSidebarTab("draw");
+    updateBrushStatus();
   } catch (error) {
-    exportButton.textContent = "Confirm Export";
+    if (isCancellationError(error)) {
+      updateBrushStatus("Export cancelled.");
+    } else {
+      updateBrushStatus("Could not complete export.");
+    }
+    resetExportProgress();
+    exportButton.setAttribute("aria-label", "Render GIF");
+    exportButton.title = "Render GIF";
     exportButton.disabled = false;
-    exportCancelButton.disabled = false;
+    exportCancelButton.disabled = true;
   } finally {
+    if (sequenceSnapshot) {
+      restoreSequenceExportSnapshot(sequenceSnapshot);
+      state.sequenceExportActive = false;
+    }
+    if (state.exportTask === task) {
+      state.exportTask = null;
+    }
     exportButton.classList.remove("is-loading");
+    resetExportProgress(exportButton, "Render GIF");
+    updateUndoState();
+    updateExportModeUI();
+    scheduleStampVisibilityRefresh();
+  }
+}
+
+async function confirmVideoExport() {
+  if (!state.exportMode || !state.exportSelectionBounds || state.exportTask || !exportVideoButton) {
+    return;
+  }
+
+  const mimeType = getSupportedVideoMimeType();
+  if (!mimeType) {
+    updateBrushStatus("Video export is not supported in this browser.");
+    return;
+  }
+
+  const task = createCancellableTask("video-export");
+  task.button = exportVideoButton;
+  const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
+  const resolution = getVideoScaledResolution(getExportScaledResolution(normalized));
+  state.exportTask = task;
+  updateExportModeUI();
+  restoreAllCulledStampSources();
+  updateBrushCursorPreview();
+  const timestamp = Date.now();
+  const exportOptions = {
+    includeBackground: Boolean(state.exportBackgroundEnabled),
+    backgroundColor: state.canvasBackgroundColor,
+    videoAuto: state.exportVideoAuto !== false,
+    videoSeconds: state.exportVideoSeconds,
+    sequenceExportActive: hasActiveSequenceEffectOnCanvas()
+  };
+  const sequenceSnapshot = exportOptions.sequenceExportActive ? createSequenceExportSnapshot() : null;
+
+  exportVideoButton.disabled = true;
+  if (exportVideoCancelButton) {
+    exportVideoCancelButton.disabled = false;
+  }
+  exportVideoButton.classList.add("is-loading");
+  updateExportProgress(task, 0, "Exporting");
+  updateBrushStatus("Exporting video... Press Esc to cancel.");
+  try {
+    Object.assign(exportOptions, await getExportBackgroundImageOptions());
+    throwIfTaskCancelled(task);
+    if (sequenceSnapshot) {
+      state.sequenceExportActive = true;
+      resetSequencesForExport();
+    }
+    const entries = await collectExportStampEntries(
+      normalized,
+      task,
+      (ratio) => updateExportProgress(task, EXPORT_PROGRESS_COLLECT_END * ratio, "Collecting")
+    );
+    throwIfTaskCancelled(task);
+    const blob = await renderExportVideoBlob(
+      normalized,
+      resolution.width,
+      resolution.height,
+      entries,
+      exportOptions,
+      task
+    );
+    throwIfTaskCancelled(task);
+    const extension = getVideoExtensionForMimeType(mimeType);
+    const filename = `image-draw-export-${timestamp}.${extension}`;
+    updateExportProgress(task, 100, "Done");
+    downloadBlob(blob, filename);
+    state.exportTask = null;
+    exitExportMode();
+    setSidebarTab("draw");
+    if (extension === "mp4") {
+      updateBrushStatus();
+    } else {
+      updateBrushStatus("Video exported as WebM; MP4 is not supported in this browser.");
+    }
+  } catch (error) {
+    if (isCancellationError(error)) {
+      updateBrushStatus("Video export cancelled.");
+    } else {
+      updateBrushStatus("Could not complete video export.");
+    }
+    resetExportProgress(exportVideoButton, "Render Video");
+    exportVideoButton.setAttribute("aria-label", "Render Video");
+    exportVideoButton.title = "Render Video";
+    exportVideoButton.disabled = false;
+    if (exportVideoCancelButton) {
+      exportVideoCancelButton.disabled = true;
+    }
+  } finally {
+    if (sequenceSnapshot) {
+      restoreSequenceExportSnapshot(sequenceSnapshot);
+      state.sequenceExportActive = false;
+    }
+    if (state.exportTask === task) {
+      state.exportTask = null;
+    }
+    exportVideoButton.classList.remove("is-loading");
+    resetExportProgress(exportVideoButton, "Render Video");
     updateUndoState();
     updateExportModeUI();
     scheduleStampVisibilityRefresh();
@@ -4866,32 +10419,13 @@ async function loadStockBrushFolder(folderId) {
     closeBrushCropModal();
   }
 
+  state.favoriteReturnState = null;
   state.stockBrushLoadingFolderId = folder.id;
   renderStockBrushButtons();
   updateBrushStatus(`Loading ${folder.name} stock brushes...`);
 
   try {
-    const loadedBrushData = await mapWithConcurrency(files, 18, async (filePath) => {
-      try {
-        const url = encodeStockBrushPath(filePath);
-        const dimensions = await getImageDimensions(url);
-        return {
-          url,
-          name: getStockBrushFileName(filePath),
-          width: dimensions.width,
-          height: dimensions.height,
-          originalUrl: url,
-          originalWidth: dimensions.width,
-          originalHeight: dimensions.height,
-          cropRect: null,
-          enabled: true,
-          weightMode: "normal"
-        };
-      } catch (error) {
-        return null;
-      }
-    });
-    const loaded = loadedBrushData.filter(Boolean);
+    const loaded = await loadStockBrushFileData(files);
     if (!loaded.length) {
       updateBrushStatus(`Could not load ${folder.name} stock brushes.`);
       return;
@@ -4906,16 +10440,197 @@ async function loadStockBrushFolder(folderId) {
       state.nextBrushId += 1;
       return brush;
     });
+    clearBrushFrameCountJobs();
     state.soloBrushId = null;
+    clearSelectedBrushes();
     state.activeStockBrushFolderId = folder.id;
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
     for (const oldUrl of previousBrushUrls) {
       maybeReleaseObjectUrl(oldUrl);
+    }
+    if (state.eraseMode) {
+      setEraseMode(false);
     }
 
     brushInput.value = "";
     updateBrushStatus();
     renderBrushGallery();
     updateEraseCursorGeometry();
+    updateBrushCursorPreview();
+    scheduleSessionSave();
+  } finally {
+    state.stockBrushLoadingFolderId = null;
+    renderStockBrushButtons();
+  }
+}
+
+async function loadStockBrushFileData(files) {
+  const uniqueFiles = Array.from(new Set(files));
+  return loadBrushSourceData(uniqueFiles.map((filePath) => encodeStockBrushPath(filePath)));
+}
+
+function getBrushSourceFileName(sourceUrl) {
+  const cleanUrl = String(sourceUrl || "").split(/[?#]/)[0];
+  if (cleanUrl.startsWith("data:")) {
+    return "favorite brush";
+  }
+  const parts = cleanUrl.split("/");
+  const encodedName = parts[parts.length - 1] || "brush";
+  try {
+    return decodeURIComponent(encodedName);
+  } catch (error) {
+    return encodedName;
+  }
+}
+
+async function loadBrushSourceData(sources) {
+  const uniqueSources = Array.from(
+    new Set(sources.map(normalizeFavoriteBrushSource).filter(Boolean))
+  );
+  const loadedBrushData = await mapWithConcurrency(uniqueSources, 18, async (sourceUrl) => {
+    try {
+      const dimensions = await getImageDimensions(sourceUrl);
+      return {
+        url: sourceUrl,
+        name: getBrushSourceFileName(sourceUrl),
+        width: dimensions.width,
+        height: dimensions.height,
+        originalUrl: sourceUrl,
+        originalWidth: dimensions.width,
+        originalHeight: dimensions.height,
+        frameCount: isGifUrl(sourceUrl) ? null : 1,
+        frameRange: null,
+        cropRect: null,
+        enabled: true,
+        weightMode: "normal"
+      };
+    } catch (error) {
+      return null;
+    }
+  });
+  return loadedBrushData.filter(Boolean);
+}
+
+async function loadFavoriteBrushes() {
+  if (state.stockBrushLoadingFolderId) {
+    return;
+  }
+
+  if (state.activeStockBrushFolderId === "favorites" && state.favoriteReturnState) {
+    restoreFavoriteReturnState();
+    return;
+  }
+
+  const sources = state.favoriteBrushSources instanceof Set
+    ? Array.from(state.favoriteBrushSources).filter(Boolean)
+    : [];
+  if (!sources.length) {
+    updateBrushStatus("No favorite brush data saved.");
+    updateFavoriteBrushButtons();
+    return;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  state.stockBrushLoadingFolderId = "favorites";
+  renderStockBrushButtons();
+  updateBrushStatus("Loading favorite brushes...");
+
+  try {
+    const loaded = await loadBrushSourceData(sources);
+    if (!loaded.length) {
+      updateBrushStatus("Could not load favorite brushes.");
+      return;
+    }
+
+    state.favoriteReturnState = captureFavoriteReturnState();
+    state.brushes = loaded.map((brushData) => {
+      const brush = {
+        id: state.nextBrushId,
+        ...brushData
+      };
+      state.nextBrushId += 1;
+      return brush;
+    });
+    clearBrushFrameCountJobs();
+    state.soloBrushId = null;
+    clearSelectedBrushes();
+    state.activeStockBrushFolderId = "favorites";
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
+    if (state.eraseMode) {
+      setEraseMode(false);
+    }
+
+    brushInput.value = "";
+    updateBrushStatus();
+    renderBrushGallery();
+    updateEraseCursorGeometry();
+    updateBrushCursorPreview();
+    scheduleSessionSave();
+  } finally {
+    state.stockBrushLoadingFolderId = null;
+    renderStockBrushButtons();
+  }
+}
+
+async function loadAllStockBrushFolders() {
+  if (state.stockBrushLoadingFolderId) {
+    return;
+  }
+
+  const folders = getOrderedStockBrushFolders().filter((folder) => getStockBrushFiles(folder).length);
+  const files = folders.flatMap((folder) => getStockBrushFiles(folder));
+  if (!files.length) {
+    return;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  state.favoriteReturnState = null;
+  state.stockBrushLoadingFolderId = "all";
+  renderStockBrushButtons();
+  updateBrushStatus("Loading all stock brushes...");
+
+  try {
+    const loaded = await loadStockBrushFileData(files);
+    if (!loaded.length) {
+      updateBrushStatus("Could not load all stock brushes.");
+      return;
+    }
+
+    const previousBrushUrls = state.brushes.map((brush) => brush.url);
+    state.brushes = loaded.map((brushData) => {
+      const brush = {
+        id: state.nextBrushId,
+        ...brushData
+      };
+      state.nextBrushId += 1;
+      return brush;
+    });
+    clearBrushFrameCountJobs();
+    state.soloBrushId = null;
+    clearSelectedBrushes();
+    state.activeStockBrushFolderId = "all";
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
+    for (const oldUrl of previousBrushUrls) {
+      maybeReleaseObjectUrl(oldUrl);
+    }
+    if (state.eraseMode) {
+      setEraseMode(false);
+    }
+
+    brushInput.value = "";
+    updateBrushStatus();
+    renderBrushGallery();
+    updateEraseCursorGeometry();
+    updateBrushCursorPreview();
     scheduleSessionSave();
   } finally {
     state.stockBrushLoadingFolderId = null;
@@ -4926,6 +10641,12 @@ async function loadStockBrushFolder(folderId) {
 function unloadBrushDataSelection() {
   if (!state.brushes.length) {
     state.activeStockBrushFolderId = null;
+    state.favoriteReturnState = null;
+    state.soloBrushId = null;
+    clearSelectedBrushes();
+    if (state.eraseMode) {
+      setEraseMode(false);
+    }
     updateBrushStatus();
     renderBrushGallery();
     renderStockBrushButtons();
@@ -4936,12 +10657,20 @@ function unloadBrushDataSelection() {
     closeBrushCropModal();
   }
 
+  state.favoriteReturnState = null;
   const previousBrushUrls = state.brushes.map((brush) => brush.url);
   state.brushes = [];
+  clearBrushFrameCountJobs();
   state.soloBrushId = null;
+  clearSelectedBrushes();
   state.activeStockBrushFolderId = null;
+  state.brushCursorPreview.brushId = null;
+  resetBrushCursorPreviewSource();
   for (const oldUrl of previousBrushUrls) {
     maybeReleaseObjectUrl(oldUrl);
+  }
+  if (state.eraseMode) {
+    setEraseMode(false);
   }
 
   brushInput.value = "";
@@ -4949,6 +10678,7 @@ function unloadBrushDataSelection() {
   renderBrushGallery();
   renderStockBrushButtons();
   updateEraseCursorGeometry();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 }
 
@@ -4963,6 +10693,7 @@ async function loadBrushFiles(files) {
     closeBrushCropModal();
   }
 
+  state.favoriteReturnState = null;
   const previousBrushUrls = state.brushes.map((brush) => brush.url);
 
   const loaded = [];
@@ -4982,6 +10713,8 @@ async function loadBrushFiles(files) {
         originalUrl: dataUrl,
         originalWidth: dimensions.width,
         originalHeight: dimensions.height,
+        frameCount: isGifUrl(dataUrl) || /\.gif$/i.test(file.name) ? null : 1,
+        frameRange: null,
         cropRect: null,
         enabled: true,
         weightMode: "normal"
@@ -4993,21 +10726,30 @@ async function loadBrushFiles(files) {
   }
 
   state.brushes = loaded;
+  clearBrushFrameCountJobs();
   state.soloBrushId = null;
+  clearSelectedBrushes();
   state.activeStockBrushFolderId = null;
+  state.brushCursorPreview.brushId = null;
+  resetBrushCursorPreviewSource();
   for (const oldUrl of previousBrushUrls) {
     maybeReleaseObjectUrl(oldUrl);
+  }
+  if (state.eraseMode) {
+    setEraseMode(false);
   }
 
   if (state.brushes.length) {
     updateBrushStatus();
     renderBrushGallery();
     renderStockBrushButtons();
+    updateBrushCursorPreview();
     scheduleSessionSave();
   } else {
     updateBrushStatus("Could not load image data from selection.");
     renderBrushGallery();
     renderStockBrushButtons();
+    updateBrushCursorPreview();
     scheduleSessionSave();
   }
 }
@@ -5165,7 +10907,12 @@ function startDrawing(event) {
   }
 
   const point = screenToWorld(event.clientX, event.clientY);
-  const stroke = { id: state.nextStrokeId, elements: [] };
+  const stroke = {
+    id: state.nextStrokeId,
+    layerType: state.drawMode === "spray" ? "spray" : "stroke",
+    brushCategoryName: getActiveBrushCategoryName(),
+    elements: []
+  };
   state.nextStrokeId += 1;
 
   const placed = state.drawMode === "spray"
@@ -5268,7 +11015,7 @@ function updateShapeDrawing(event) {
   }
 }
 
-function stopShapeDrawing(pointerId) {
+async function stopShapeDrawing(pointerId) {
   const draft = state.shapeDraft;
   if (!draft || draft.pointerId !== pointerId) {
     return;
@@ -5287,13 +11034,19 @@ function stopShapeDrawing(pointerId) {
     return;
   }
 
-  commitShapeStroke(draft.mode, draft.anchorX, draft.anchorY, draft.currentX, draft.currentY);
+  const { mode, anchorX, anchorY, currentX, currentY } = draft;
   state.shapeDraft = null;
   hideShapePreview();
+  try {
+    await commitShapeStroke(mode, anchorX, anchorY, currentX, currentY);
+  } catch (error) {
+    // commitShapeStroke has already restored UI state and reported the failure.
+  }
 }
 
 function startPanning(event, captureElement = viewport) {
   resetCursorTrailAnchor();
+  hideBrushCursorPreview();
   state.panning = {
     pointerId: event.pointerId,
     button: event.button,
@@ -5327,7 +11080,7 @@ function stopPanning(pointerId) {
 }
 
 function onPointerDown(event) {
-  if (state.exportMode) {
+  if (state.exportMode || state.placementTask) {
     return;
   }
 
@@ -5336,6 +11089,7 @@ function onPointerDown(event) {
   state.lastPointerClientY = event.clientY;
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
+  updateBrushCursorPreview();
 
   if (event.pointerType === "touch") {
     state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -5348,6 +11102,7 @@ function onPointerDown(event) {
 
   if (event.button === 1 || event.button === 2) {
     event.preventDefault();
+    hideBrushCursorPreview();
     startPanning(event);
     updateEraseCursorVisibility();
     return;
@@ -5358,21 +11113,39 @@ function onPointerDown(event) {
   }
 
   event.preventDefault();
+  if (startEditLayerMove(event)) {
+    return;
+  }
+
+  if (isLeftDragPanModeActive()) {
+    hideBrushCursorPreview();
+    startPanning(event);
+    updateEraseCursorVisibility();
+    return;
+  }
+
+  if (!isDrawingModeActive()) {
+    return;
+  }
+
   if (state.eraseMode) {
+    hideBrushCursorPreview();
     startErasing(event);
     return;
   }
 
   if (isShapeDrawMode(state.drawMode)) {
+    hideBrushCursorPreview();
     startShapeDrawing(event);
     return;
   }
 
+  hideBrushCursorPreview();
   startDrawing(event);
 }
 
 function onPointerMove(event) {
-  if (state.exportMode) {
+  if (state.exportMode || state.placementTask) {
     return;
   }
 
@@ -5381,6 +11154,12 @@ function onPointerMove(event) {
   state.lastPointerClientY = event.clientY;
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
+  updateBrushCursorPreview();
+
+  if (state.editLayerMove && state.editLayerMove.pointerId === event.pointerId) {
+    updateEditLayerMove(event);
+    return;
+  }
 
   if (event.pointerType === "touch") {
     state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -5440,10 +11219,12 @@ function onPointerUp(event) {
   }
 
   stopPanning(event.pointerId);
+  stopEditLayerMove(event.pointerId);
   stopErasing(event.pointerId);
   stopShapeDrawing(event.pointerId);
   stopDrawing(event.pointerId);
   updateEraseCursorVisibility();
+  updateBrushCursorPreview();
 }
 
 function onWheel(event) {
@@ -5469,6 +11250,7 @@ function onWheel(event) {
     updateRotationIndicator();
     updateActiveStrokeTailRotation();
     showShortcutPreviewAt(event.clientX, event.clientY);
+    updateBrushCursorPreview();
     scheduleSessionSave();
     return;
   }
@@ -5486,6 +11268,7 @@ function onWheel(event) {
     updateSliderText();
     updateEraseCursorGeometry();
     showShortcutPreviewAt(event.clientX, event.clientY);
+    updateBrushCursorPreview();
     scheduleSessionSave();
     return;
   }
@@ -5543,10 +11326,17 @@ function setEraseMode(nextValue) {
     updateEraseCursorPosition(state.lastPointerClientX, state.lastPointerClientY);
   }
   updateEraseModeUI();
+  updateBrushCursorPreview();
 }
 
 function onExportSelectionPointerDown(event) {
   if (!state.exportMode) {
+    return;
+  }
+
+  if (state.exportTask) {
+    event.preventDefault();
+    event.stopPropagation();
     return;
   }
 
@@ -5592,6 +11382,11 @@ function onExportOverlayPointerDown(event) {
     return;
   }
 
+  if (state.exportTask) {
+    event.preventDefault();
+    return;
+  }
+
   if (event.button !== 1 && event.button !== 2) {
     return;
   }
@@ -5602,6 +11397,11 @@ function onExportOverlayPointerDown(event) {
 
 function onExportOverlayPointerMove(event) {
   if (!state.exportMode) {
+    return;
+  }
+
+  if (state.exportTask) {
+    event.preventDefault();
     return;
   }
 
@@ -5622,7 +11422,10 @@ function onExportOverlayPointerMove(event) {
   }
 
   event.preventDefault();
-  updateExportSelectionDrag(event.pointerId, event.clientX, event.clientY);
+  updateExportSelectionDrag(event.pointerId, event.clientX, event.clientY, {
+    shiftKey: event.shiftKey,
+    altKey: event.altKey
+  });
 }
 
 function onExportOverlayPointerUp(event) {
@@ -5635,7 +11438,7 @@ function onExportOverlayPointerUp(event) {
 
 function onExportScaleButtonClick(event) {
   const button = event.target.closest(".export-scale-button");
-  if (!button || !state.exportMode) {
+  if (!button || !state.exportMode || state.exportTask) {
     return;
   }
   event.preventDefault();
@@ -5643,7 +11446,7 @@ function onExportScaleButtonClick(event) {
 }
 
 function onExportResolutionInput(axis, input) {
-  if (!input || String(input.value).trim() === "") {
+  if (!input || state.exportTask || String(input.value).trim() === "") {
     return;
   }
   setExportResolutionFromInput(axis, input.value);
@@ -5663,6 +11466,217 @@ unloadBrushDataButton.addEventListener("click", (event) => {
   unloadBrushDataSelection();
 });
 brushGallery.addEventListener("click", onBrushGalleryClick);
+brushGallery.addEventListener("contextmenu", onBrushGalleryContextMenu);
+if (editLayerList) {
+  editLayerList.addEventListener("click", (event) => {
+    const row = event.target.closest(".edit-layer-row");
+    const sequenceRow = event.target.closest(".edit-layer-sequence-row");
+    const sequenceSettings = event.target.closest(".edit-layer-sequence-settings");
+    const sequenceAddRow = event.target.closest(".edit-layer-sequence-add-row");
+    const strokeId = Number(
+      row?.dataset.strokeId ||
+        sequenceRow?.dataset.strokeId ||
+        sequenceSettings?.dataset.strokeId ||
+        sequenceAddRow?.dataset.strokeId
+    );
+    const stroke = state.strokeById.get(strokeId);
+    if (!stroke) {
+      return;
+    }
+
+    const animationButton = event.target.closest(".edit-layer-animation-button");
+    if (animationButton) {
+      event.preventDefault();
+      stroke.animationPaused = !stroke.animationPaused;
+      applyStrokeAnimationPaused(stroke);
+      selectEditLayer(stroke.id);
+      renderEditLayers();
+      scheduleSessionSave();
+      return;
+    }
+
+    const sequenceButton = event.target.closest(".edit-layer-sequence-button");
+    if (sequenceButton) {
+      event.preventDefault();
+      const willOpen = !stroke.sequenceOpen;
+      stroke.sequenceOpen = willOpen;
+      if (willOpen && typeof stroke.sequenceEnabled !== "boolean") {
+        stroke.sequenceEnabled = true;
+      }
+      selectEditLayer(stroke.id);
+      renderEditLayers();
+      scheduleSessionSave();
+      return;
+    }
+
+    const sequenceEnabledButton = event.target.closest(".edit-layer-sequence-enable-button");
+    if (sequenceEnabledButton) {
+      event.preventDefault();
+      stroke.sequenceEnabled = !isLayerSequenceEnabled(stroke);
+      refreshStrokeSequenceEffect(stroke);
+      selectEditLayer(stroke.id);
+      renderEditLayers();
+      scheduleSessionSave();
+      return;
+    }
+
+    const sequenceAddButton = event.target.closest(".edit-layer-sequence-add-button");
+    if (sequenceAddButton) {
+      event.preventDefault();
+      const extras = getExtraLayerSequenceSlots(stroke);
+      if (extras.length < MAX_LAYER_SEQUENCE_EFFECTS - 1) {
+        extras.push(normalizeLayerSequenceSlot({
+          effect: "show-hide",
+          timingStyle: "pulse",
+          settings: LAYER_SEQUENCE_DEFAULT_SETTINGS
+        }));
+        setExtraLayerSequenceSlots(stroke, extras);
+        stroke.sequenceEnabled = true;
+        refreshStrokeSequenceEffect(stroke);
+        selectEditLayer(stroke.id);
+        renderEditLayers();
+        scheduleSessionSave();
+      }
+      return;
+    }
+
+    const sequenceRemoveButton = event.target.closest(".edit-layer-sequence-remove-button");
+    if (sequenceRemoveButton) {
+      event.preventDefault();
+      const slotIndex = Math.floor(Number(sequenceRemoveButton.dataset.sequenceSlotIndex));
+      if (slotIndex > 0) {
+        const extras = getExtraLayerSequenceSlots(stroke);
+        extras.splice(slotIndex - 1, 1);
+        setExtraLayerSequenceSlots(stroke, extras);
+        refreshStrokeSequenceEffect(stroke);
+        selectEditLayer(stroke.id);
+        renderEditLayers();
+        scheduleSessionSave();
+      }
+      return;
+    }
+
+    const visibilityButton = event.target.closest(".edit-layer-eye-button");
+    if (visibilityButton) {
+      event.preventDefault();
+      stroke.hidden = !stroke.hidden;
+      applyStrokeVisibility(stroke);
+      selectEditLayer(stroke.id);
+      scheduleSessionSave();
+      return;
+    }
+
+    if (row) {
+      selectEditLayer(stroke.id);
+    }
+  });
+
+  editLayerList.addEventListener("change", (event) => {
+    const settingInput = event.target.closest(".edit-layer-sequence-setting-input");
+    if (settingInput) {
+      const settingsPanelElement = settingInput.closest(".edit-layer-sequence-settings");
+      const stroke = state.strokeById.get(Number(settingsPanelElement?.dataset.strokeId));
+      if (!stroke) {
+        return;
+      }
+      const key = settingInput.dataset.sequenceSetting || "";
+      const value = settingInput.dataset.sequenceSettingType === "boolean"
+        ? settingInput.checked
+        : settingInput.value;
+      setLayerSequenceSetting(stroke, key, value, Number(settingInput.dataset.sequenceSlotIndex) || 0);
+      refreshStrokeSequenceEffect(stroke);
+      selectEditLayer(stroke.id);
+      if (settingInput.dataset.sequenceSettingType === "boolean") {
+        renderEditLayers();
+      }
+      scheduleSessionSave();
+      return;
+    }
+
+    const select = event.target.closest(".edit-layer-sequence-select");
+    if (!select) {
+      return;
+    }
+    const sequenceRow = select.closest(".edit-layer-sequence-row");
+    const stroke = state.strokeById.get(Number(sequenceRow?.dataset.strokeId));
+    if (!stroke) {
+      return;
+    }
+    setLayerSequenceValue(
+      stroke,
+      select.dataset.sequenceGroup || "effects",
+      select.value,
+      Number(select.dataset.sequenceSlotIndex) || 0
+    );
+    stroke.sequenceEnabled = true;
+    refreshStrokeSequenceEffect(stroke);
+    selectEditLayer(stroke.id);
+    renderEditLayers();
+    scheduleSessionSave();
+  });
+
+  editLayerList.addEventListener("input", (event) => {
+    const settingInput = event.target.closest(".edit-layer-sequence-setting-input");
+    if (!settingInput) {
+      return;
+    }
+    const settingsPanelElement = settingInput.closest(".edit-layer-sequence-settings");
+    const stroke = state.strokeById.get(Number(settingsPanelElement?.dataset.strokeId));
+    if (!stroke) {
+      return;
+    }
+    if (settingInput.dataset.sequenceSettingType === "string") {
+      setLayerSequenceSetting(
+        stroke,
+        settingInput.dataset.sequenceSetting || "",
+        settingInput.value,
+        Number(settingInput.dataset.sequenceSlotIndex) || 0
+      );
+      refreshStrokeSequenceEffect(stroke);
+      scheduleSessionSave();
+      return;
+    }
+    if (settingInput.dataset.sequenceSettingType !== "number") {
+      return;
+    }
+    setLayerSequenceSetting(
+      stroke,
+      settingInput.dataset.sequenceSetting || "",
+      settingInput.value,
+      Number(settingInput.dataset.sequenceSlotIndex) || 0
+    );
+    refreshStrokeSequenceEffect(stroke);
+    const valueLabel = settingInput.parentElement?.querySelector(".edit-layer-sequence-setting-value");
+    if (valueLabel) {
+      const suffix = valueLabel.textContent.endsWith("ms")
+        ? "ms"
+        : valueLabel.textContent.endsWith("%")
+        ? "%"
+        : "";
+      valueLabel.textContent = `${settingInput.value}${suffix}`;
+    }
+    scheduleSessionSave();
+  });
+
+  editLayerList.addEventListener("pointerdown", (event) => {
+	    if (
+	      event.button !== 0 ||
+      event.target.closest(".edit-layer-eye-button") ||
+      event.target.closest(".edit-layer-animation-button") ||
+      event.target.closest(".edit-layer-sequence-button") ||
+      event.target.closest(".edit-layer-sequence-enable-button") ||
+      event.target.closest(".edit-layer-sequence-row") ||
+	      event.target.closest(".edit-layer-sequence-settings") ||
+	      event.target.closest(".edit-layer-sequence-add-row")
+	    ) {
+	      return;
+	    }
+    const row = event.target.closest(".edit-layer-row");
+    if (row) {
+      startEditLayerRowDrag(row, event);
+    }
+  });
+}
 if (stockBrushButtons) {
   stockBrushButtons.addEventListener("click", (event) => {
     const button = event.target.closest(".stock-brush-button");
@@ -5671,6 +11685,54 @@ if (stockBrushButtons) {
     }
     event.preventDefault();
     void loadStockBrushFolder(button.dataset.stockBrushFolderId || "");
+  });
+}
+if (loadAllStockBrushesButton) {
+  loadAllStockBrushesButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void loadAllStockBrushFolders();
+  });
+}
+for (const favoriteLoaderButton of [loadFavoriteBrushesButton, loadFavoriteBrushesFullButton]) {
+  if (favoriteLoaderButton) {
+    favoriteLoaderButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      void loadFavoriteBrushes();
+    });
+  }
+}
+if (brushSortSelect) {
+  brushSortSelect.addEventListener("change", () => {
+    state.brushGallerySort = normalizeBrushGallerySort(brushSortSelect.value);
+    renderBrushGallery();
+    scheduleSessionSave();
+  });
+}
+if (saveCompositionButton) {
+  saveCompositionButton.addEventListener("click", () => {
+    void saveCurrentComposition();
+  });
+}
+if (savedCompositionsGallery) {
+  savedCompositionsGallery.addEventListener("click", (event) => {
+    const deleteButton = event.target.closest(".saved-composition-delete-button");
+    if (deleteButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      openSavedDeleteConfirmModal(deleteButton.dataset.savedCompositionDeleteId || "");
+      return;
+    }
+
+    const loadButton = event.target.closest(".saved-composition-load-button");
+    if (!loadButton) {
+      return;
+    }
+    event.preventDefault();
+    const card = loadButton.closest(".saved-composition-card");
+    if (!card) {
+      return;
+    }
+    void loadSavedComposition(card.dataset.savedCompositionId || "");
   });
 }
 dropZone.addEventListener("dragover", (event) => {
@@ -5696,16 +11758,19 @@ brushInput.addEventListener("change", async () => {
 sizeSlider.addEventListener("input", () => {
   updateSliderText();
   updateEraseCursorGeometry();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 consistentToggle.addEventListener("change", () => {
   updateConsistentModeUI();
   updateEraseCursorGeometry();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 consistentSizeSlider.addEventListener("input", () => {
   updateSliderText();
   updateEraseCursorGeometry();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 spacingSlider.addEventListener("input", () => {
@@ -5716,6 +11781,7 @@ rotationSlider.addEventListener("input", () => {
   updateSliderText();
   updateRotationIndicator();
   updateActiveStrokeTailRotation();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 rotationIndicator.addEventListener("pointerdown", onRotationIndicatorPointerDown);
@@ -5738,6 +11804,7 @@ rotationIndicator.addEventListener("dblclick", (event) => {
   updateSliderText();
   updateRotationIndicator();
   updateActiveStrokeTailRotation();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 tintPickerButton.addEventListener("pointerdown", (event) => {
@@ -5790,10 +11857,12 @@ tintColorInput.addEventListener("blur", () => {
 });
 tintColorInput.addEventListener("input", () => {
   applyTintSettingsFromInputs();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 tintAmountSlider.addEventListener("input", () => {
   applyTintSettingsFromInputs();
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 opacitySlider.addEventListener("input", () => {
@@ -5802,6 +11871,11 @@ opacitySlider.addEventListener("input", () => {
 });
 renderModeToggle.addEventListener("change", () => {
   updateRenderModeUI();
+  scheduleSessionSave();
+});
+brushPreviewToggle.addEventListener("change", () => {
+  state.brushPreviewEnabled = brushPreviewToggle.checked;
+  updateBrushCursorPreview();
   scheduleSessionSave();
 });
 cursorTrailToggle.addEventListener("change", () => {
@@ -5827,11 +11901,36 @@ spraySpreadSlider.addEventListener("input", () => {
   updateSliderText();
   scheduleSessionSave();
 });
-sidebarOptionsButton.addEventListener("click", () => {
-  state.sidebarTab = state.sidebarTab === "settings" ? "main" : "settings";
-  updateSidebarTabUI();
-  scheduleSessionSave();
-});
+if (mainModeBar) {
+  mainModeBar.addEventListener("click", (event) => {
+    if (state.exportTask) {
+      event.preventDefault();
+      return;
+    }
+    const button = event.target.closest(".main-mode-tab-button");
+    if (!button || button === exportModeButton) {
+      return;
+    }
+    event.preventDefault();
+    if (button.dataset.sidebarTab === "settings" && state.sidebarTab === "settings") {
+      setSidebarTab(state.previousSidebarTab || "draw");
+      return;
+    }
+    setSidebarTab(button.dataset.sidebarTab || "draw");
+  });
+}
+if (sidebarOptionsButton) {
+  sidebarOptionsButton.addEventListener("click", () => {
+    if (state.exportTask) {
+      return;
+    }
+    setSidebarTab(
+      state.sidebarTab === "settings"
+        ? state.previousSidebarTab || "draw"
+        : "settings"
+    );
+  });
+}
 sidebarToggleButton.addEventListener("click", () => {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   updateSidebarVisibilityUI();
@@ -5884,8 +11983,71 @@ canvasBgColorInput.addEventListener("input", () => {
   applyCanvasBackgroundColor(canvasBgColorInput.value);
   scheduleSessionSave();
 });
+if (exportCanvasBgColorLabel) {
+  exportCanvasBgColorLabel.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+}
+if (exportCanvasBgColorInput) {
+  exportCanvasBgColorInput.addEventListener("input", () => {
+    applyCanvasBackgroundColor(exportCanvasBgColorInput.value);
+    scheduleSessionSave();
+  });
+}
+if (exportBgImageButton && exportBgImageInput) {
+  exportBgImageButton.addEventListener("click", () => {
+    exportBgImageInput.click();
+  });
+}
+if (exportBgImageInput) {
+  exportBgImageInput.addEventListener("change", () => {
+    const file = exportBgImageInput.files && exportBgImageInput.files[0]
+      ? exportBgImageInput.files[0]
+      : null;
+    loadExportBackgroundImageFile(file);
+    exportBgImageInput.value = "";
+  });
+}
+if (exportBgImageOpacitySlider) {
+  exportBgImageOpacitySlider.addEventListener("input", () => {
+    state.exportBgImageOpacity = clamp(Number(exportBgImageOpacitySlider.value) || 0, 0, 100);
+    updateExportBackgroundImageUI();
+    scheduleSessionSave();
+  });
+}
+if (exportBgImageTileToggle) {
+  exportBgImageTileToggle.addEventListener("change", () => {
+    state.exportBgImageMode = exportBgImageTileToggle.checked ? "tile" : "stretch";
+    updateExportBackgroundImageUI();
+    scheduleSessionSave();
+  });
+}
+if (exportBgImageTileSizeSlider) {
+  exportBgImageTileSizeSlider.addEventListener("input", () => {
+    state.exportBgImageTileSize = mapExportBgTileSliderToSize(exportBgImageTileSizeSlider.value);
+    updateExportBackgroundImageUI();
+    scheduleSessionSave();
+  });
+}
 exportBackgroundToggle.addEventListener("change", () => {
   state.exportBackgroundEnabled = exportBackgroundToggle.checked;
+  scheduleSessionSave();
+});
+if (exportSeeBeyondToggle) {
+  exportSeeBeyondToggle.addEventListener("change", () => {
+    state.exportSeeBeyondEnabled = exportSeeBeyondToggle.checked;
+    updateExportOverlayGeometry();
+    scheduleSessionSave();
+  });
+}
+gifCountToggle.addEventListener("change", () => {
+  state.showGifCountIndicator = gifCountToggle.checked;
+  updateGifCountIndicator();
+  scheduleSessionSave();
+});
+gifPauseToggle.addEventListener("change", () => {
+  state.showGifPauseButton = gifPauseToggle.checked;
+  updateGifPauseButtonUI();
   scheduleSessionSave();
 });
 eraseModeButton.addEventListener("click", () => {
@@ -5894,19 +12056,38 @@ eraseModeButton.addEventListener("click", () => {
 undoButton.addEventListener("click", undoLastStroke);
 redoButton.addEventListener("click", redoLastStroke);
 clearButton.addEventListener("click", openClearConfirmModal);
-exportButton.addEventListener("click", () => {
-  if (state.exportMode) {
-    void confirmExport();
+exportModeButton.addEventListener("click", () => {
+  if (state.sidebarTab === "export" && state.sidebarCollapsed) {
+    state.sidebarCollapsed = false;
+    updateSidebarVisibilityUI();
+    scheduleSessionSave();
     return;
   }
+  setSidebarTab("export", { keepExportMode: true });
   enterExportMode();
 });
+exportButton.addEventListener("click", () => {
+  void confirmExport();
+});
 exportCancelButton.addEventListener("click", () => {
-  if (!state.exportMode) {
+  if (!state.exportTask) {
     return;
   }
-  exitExportMode({ focusButton: true });
+  cancelExportTask();
 });
+if (exportVideoButton) {
+  exportVideoButton.addEventListener("click", () => {
+    void confirmVideoExport();
+  });
+}
+if (exportVideoCancelButton) {
+  exportVideoCancelButton.addEventListener("click", () => {
+    if (!state.exportTask) {
+      return;
+    }
+    cancelExportTask();
+  });
+}
 gifPauseButton.addEventListener("click", () => {
   setGifAnimationsPaused(!state.gifAnimationsPaused);
 });
@@ -5920,6 +12101,21 @@ clearConfirmModal.addEventListener("click", (event) => {
     closeClearConfirmModal();
   }
 });
+if (savedDeleteConfirmYesButton) {
+  savedDeleteConfirmYesButton.addEventListener("click", () => {
+    void confirmDeleteSavedComposition();
+  });
+}
+if (savedDeleteConfirmNoButton) {
+  savedDeleteConfirmNoButton.addEventListener("click", closeSavedDeleteConfirmModal);
+}
+if (savedDeleteConfirmModal) {
+  savedDeleteConfirmModal.addEventListener("click", (event) => {
+    if (event.target === savedDeleteConfirmModal) {
+      closeSavedDeleteConfirmModal();
+    }
+  });
+}
 brushCropConfirmButton.addEventListener("click", () => {
   void confirmBrushCropModal();
 });
@@ -5934,6 +12130,85 @@ brushCropModal.addEventListener("click", (event) => {
 brushCropImage.addEventListener("load", () => {
   renderBrushCropModal();
 });
+if (brushCropWidthInput) {
+  brushCropWidthInput.addEventListener("input", () => {
+    state.brushCropEditor.outputWidth = clamp(
+      Math.round(Number(brushCropWidthInput.value) || 1),
+      1,
+      EXPORT_MAX_DIMENSION
+    );
+    syncBrushCropOutputToAspect("width");
+    updateBrushCropResolutionInputs();
+  });
+}
+if (brushCropHeightInput) {
+  brushCropHeightInput.addEventListener("input", () => {
+    state.brushCropEditor.outputHeight = clamp(
+      Math.round(Number(brushCropHeightInput.value) || 1),
+      1,
+      EXPORT_MAX_DIMENSION
+    );
+    syncBrushCropOutputToAspect("height");
+    updateBrushCropResolutionInputs();
+  });
+}
+if (brushCropResolutionResetButton) {
+  brushCropResolutionResetButton.addEventListener("click", () => {
+    const nativeSize = getBrushCropNativeOutputSize();
+    setBrushCropOutputSize(nativeSize.width, nativeSize.height);
+    updateBrushCropResolutionInputs();
+  });
+}
+if (brushCropProbabilityControls) {
+  brushCropProbabilityControls.addEventListener("click", (event) => {
+    const button = event.target.closest(".brush-crop-probability-button");
+    if (!button) {
+      return;
+    }
+    state.brushCropEditor.weightMode = normalizeBrushWeightMode(button.dataset.weightMode);
+    updateBrushCropProbabilityUI();
+  });
+}
+if (brushCropFrameTrack) {
+  brushCropFrameTrack.addEventListener("pointerdown", (event) => {
+    if (!state.brushCropEditor.open || event.button !== 0) {
+      return;
+    }
+    const handle = event.target.closest(".brush-crop-frame-handle");
+    const edge = handle?.dataset.frameEdge || "";
+    if (edge !== "start" && edge !== "end") {
+      return;
+    }
+    event.preventDefault();
+    state.brushCropEditor.frameDrag = {
+      pointerId: event.pointerId,
+      edge
+    };
+    handle.setPointerCapture(event.pointerId);
+    updateBrushCropFrameRangeFromPointer(event.clientX, edge);
+  });
+  brushCropFrameTrack.addEventListener("pointermove", (event) => {
+    const drag = state.brushCropEditor.frameDrag;
+    if (!state.brushCropEditor.open || !drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    updateBrushCropFrameRangeFromPointer(event.clientX, drag.edge);
+  });
+  const endBrushCropFrameDrag = (event) => {
+    const drag = state.brushCropEditor.frameDrag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const handle = drag.edge === "start" ? brushCropFrameStartHandle : brushCropFrameEndHandle;
+    if (handle && handle.hasPointerCapture(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+    state.brushCropEditor.frameDrag = null;
+  };
+  brushCropFrameTrack.addEventListener("pointerup", endBrushCropFrameDrag);
+  brushCropFrameTrack.addEventListener("pointercancel", endBrushCropFrameDrag);
+}
 brushCropSelection.addEventListener("pointerdown", onBrushCropSelectionPointerDown);
 brushCropSelection.addEventListener("pointermove", onBrushCropPointerMove);
 brushCropSelection.addEventListener("pointerup", onBrushCropPointerUp);
@@ -5960,25 +12235,120 @@ exportOverlay.addEventListener("contextmenu", (event) => {
     event.preventDefault();
   }
 });
-exportScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
+if (exportScaleButtonsGroup) {
+  exportScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
+}
+if (exportSidebarScaleButtonsGroup) {
+  exportSidebarScaleButtonsGroup.addEventListener("click", onExportScaleButtonClick);
+}
+if (exportAnimationAutoToggle) {
+  exportAnimationAutoToggle.addEventListener("change", () => {
+    state.exportAnimationAuto = exportAnimationAutoToggle.checked;
+    updateExportAnimationUI();
+    scheduleSessionSave();
+  });
+}
+if (exportAnimationSecondsButtonsGroup) {
+  exportAnimationSecondsButtonsGroup.addEventListener("click", (event) => {
+    const button = event.target.closest(".export-animation-seconds-button");
+    if (!button || button.disabled) {
+      return;
+    }
+    const seconds = Number(button.dataset.seconds);
+    if (!EXPORT_MANUAL_SECONDS_PRESETS.includes(seconds)) {
+      return;
+    }
+    state.exportAnimationFrameCount = "";
+    state.exportAnimationSeconds = seconds;
+    updateExportAnimationUI();
+    scheduleSessionSave();
+  });
+}
+if (exportFrameCountInput) {
+  exportFrameCountInput.addEventListener("input", () => {
+    const value = String(exportFrameCountInput.value || "").trim();
+    if (!value) {
+      state.exportAnimationFrameCount = "";
+    } else {
+      state.exportAnimationFrameCount = String(
+        clamp(Math.floor(Number(value)) || 1, 1, EXPORT_MAX_FRAME_COUNT)
+      );
+      if (exportFrameCountInput.value !== state.exportAnimationFrameCount) {
+        exportFrameCountInput.value = state.exportAnimationFrameCount;
+      }
+    }
+    updateExportAnimationUI();
+    scheduleSessionSave();
+  });
+}
+if (exportVideoAutoToggle) {
+  exportVideoAutoToggle.addEventListener("change", () => {
+    state.exportVideoAuto = exportVideoAutoToggle.checked;
+    updateExportAnimationUI();
+    scheduleSessionSave();
+  });
+}
+if (exportVideoLengthInput) {
+  exportVideoLengthInput.addEventListener("input", () => {
+    const value = String(exportVideoLengthInput.value || "").trim();
+    state.exportVideoSeconds = value
+      ? clamp(Number(value) || 0, 0, EXPORT_VIDEO_MAX_SECONDS)
+      : 0;
+    if (value && Number(exportVideoLengthInput.value) !== state.exportVideoSeconds) {
+      exportVideoLengthInput.value = String(state.exportVideoSeconds);
+    }
+    updateExportAnimationUI();
+    scheduleSessionSave();
+  });
+}
 exportWidthInput.addEventListener("input", () => {
   onExportResolutionInput("width", exportWidthInput);
 });
 exportHeightInput.addEventListener("input", () => {
   onExportResolutionInput("height", exportHeightInput);
 });
+if (exportSidebarWidthInput) {
+  exportSidebarWidthInput.addEventListener("input", () => {
+    onExportResolutionInput("width", exportSidebarWidthInput);
+  });
+}
+if (exportSidebarHeightInput) {
+  exportSidebarHeightInput.addEventListener("input", () => {
+    onExportResolutionInput("height", exportSidebarHeightInput);
+  });
+}
 exportWidthInput.addEventListener("blur", () => {
   updateExportOverlayGeometry();
 });
 exportHeightInput.addEventListener("blur", () => {
   updateExportOverlayGeometry();
 });
+if (exportSidebarWidthInput) {
+  exportSidebarWidthInput.addEventListener("blur", () => {
+    updateExportOverlayGeometry();
+  });
+}
+if (exportSidebarHeightInput) {
+  exportSidebarHeightInput.addEventListener("blur", () => {
+    updateExportOverlayGeometry();
+  });
+}
 exportWidthInput.addEventListener("focus", () => {
   exportWidthInput.select();
 });
 exportHeightInput.addEventListener("focus", () => {
   exportHeightInput.select();
 });
+if (exportSidebarWidthInput) {
+  exportSidebarWidthInput.addEventListener("focus", () => {
+    exportSidebarWidthInput.select();
+  });
+}
+if (exportSidebarHeightInput) {
+  exportSidebarHeightInput.addEventListener("focus", () => {
+    exportSidebarHeightInput.select();
+  });
+}
 document.addEventListener("pointerdown", (event) => {
   if (!state.tintPopoverOpen) {
     return;
@@ -5995,6 +12365,16 @@ document.addEventListener("pointerdown", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   state.ctrlOrMetaHeld = Boolean(event.ctrlKey || event.metaKey);
+  if (event.key === "Escape" && state.exportTask) {
+    event.preventDefault();
+    cancelExportTask();
+    return;
+  }
+  if (event.key === "Escape" && state.placementTask) {
+    event.preventDefault();
+    cancelPlacementTask();
+    return;
+  }
   if (event.key === "Escape" && state.brushCropEditor.open) {
     event.preventDefault();
     closeBrushCropModal();
@@ -6019,7 +12399,7 @@ document.addEventListener("keydown", (event) => {
   const key = String(event.key || "").toLowerCase();
   const hasUndoModifier = event.ctrlKey || event.metaKey;
   if (hasUndoModifier && !event.altKey && key === "z") {
-    if (state.exportMode) {
+    if (state.exportMode || state.placementTask || state.exportTask) {
       event.preventDefault();
       return;
     }
@@ -6034,14 +12414,36 @@ document.addEventListener("keydown", (event) => {
 
   if (event.key === "Escape" && clearConfirmModal.classList.contains("is-open")) {
     closeClearConfirmModal();
+    return;
+  }
+
+  if (
+    event.key === "Escape" &&
+    savedDeleteConfirmModal &&
+    savedDeleteConfirmModal.classList.contains("is-open")
+  ) {
+    closeSavedDeleteConfirmModal();
   }
 });
 document.addEventListener("keyup", (event) => {
   state.ctrlOrMetaHeld = Boolean(event.ctrlKey || event.metaKey);
 });
+window.addEventListener("pointermove", updateEditLayerRowDrag);
+window.addEventListener("pointerup", (event) => {
+  stopEditLayerRowDrag(event.pointerId, event);
+});
+window.addEventListener("pointercancel", (event) => {
+  stopEditLayerRowDrag(event.pointerId);
+  stopEditLayerMove(event.pointerId);
+});
 window.addEventListener("blur", () => {
   stopRotationIndicatorDrag();
   cancelShapeDraft();
+  state.editLayerDrag = null;
+  setEditLayerDeleteDropzoneState(false, false);
+  if (state.editLayerMove) {
+    stopEditLayerMove(state.editLayerMove.pointerId);
+  }
   if (state.eraseCursorRafId !== null) {
     window.cancelAnimationFrame(state.eraseCursorRafId);
     state.eraseCursorRafId = null;
@@ -6051,6 +12453,7 @@ window.addEventListener("blur", () => {
   closeCanvasBgPicker();
   suppressNextCanvasBgInputClick = false;
   hideShortcutPreview(true);
+  hideBrushCursorPreview();
 });
 
 viewport.addEventListener("pointerdown", onPointerDown);
@@ -6069,11 +12472,13 @@ viewport.addEventListener("pointerenter", (event) => {
   state.lastPointerClientY = event.clientY;
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
+  updateBrushCursorPreview();
 });
 viewport.addEventListener("pointerleave", () => {
   state.pointerInViewport = false;
   resetCursorTrailAnchor();
   updateEraseCursorVisibility();
+  hideBrushCursorPreview();
 });
 viewport.addEventListener("wheel", onWheel, { passive: false });
 window.addEventListener("wheel", (event) => {
@@ -6091,11 +12496,18 @@ viewport.addEventListener("auxclick", (event) => {
 window.addEventListener("pagehide", flushSessionSaveNow);
 window.addEventListener("beforeunload", flushSessionSaveNow);
 window.addEventListener("resize", () => {
+  updateEditLayerDeleteDropzonePosition();
+  updateGifPauseButtonPosition();
   if (state.exportMode) {
     updateExportOverlayGeometry();
   }
   if (state.brushCropEditor.open) {
     renderBrushCropModal();
+  }
+});
+controlsPanel.addEventListener("scroll", () => {
+  if (state.editLayerDrag) {
+    updateEditLayerDeleteDropzonePosition();
   }
 });
 document.addEventListener("visibilitychange", () => {
@@ -6106,8 +12518,11 @@ document.addEventListener("visibilitychange", () => {
 gifPauseObserver.observe(document.body, { childList: true, subtree: true });
 
 async function initializeApp() {
+  loadFavoriteBrushSources();
+  startLayerSequenceLoop();
   const restored = await restoreSessionState();
   if (restored) {
+    updateFavoriteBrushButtons();
     return;
   }
   applyCollapsedSliderGroupSnapshot(null);

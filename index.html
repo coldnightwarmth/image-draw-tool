@@ -11,14 +11,21 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260506-brush-preview">
 </head>
 <body>
   <div id="viewport" aria-label="Drawing canvas">
-    <div id="world"></div>
+    <div id="world">
+      <div id="exportBgImageLayer" hidden></div>
+    </div>
   </div>
   <div id="eraseCursor" aria-hidden="true"></div>
   <div id="shapePreview" aria-hidden="true"></div>
+  <button id="gifPauseButton" type="button" aria-pressed="false" aria-label="Pause GIF animations" title="Pause GIF animations">
+    <span class="gif-pause-symbol" aria-hidden="true"></span>
+  </button>
+  <div id="gifCountIndicator" aria-live="polite">0 gifs</div>
+  <img id="brushCursorPreview" alt="" aria-hidden="true" draggable="false">
   <img id="shortcutPreview" alt="" aria-hidden="true" draggable="false">
   <svg id="filterDefs" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
@@ -33,45 +40,17 @@
   </svg>
 
   <aside id="controls" aria-label="Drawing controls">
-    <button id="sidebarOptionsButton" type="button" aria-pressed="false" aria-label="Show settings">
-      <span class="options-icon" aria-hidden="true"></span>
-    </button>
     <button id="sidebarToggleButton" type="button" aria-expanded="true" aria-label="Hide sidebar contents">
       <span class="chevron-icon" aria-hidden="true"></span>
     </button>
 
-    <div id="controlsMain">
-    <div class="control-group">
-      <button
-        id="brushDataToggleButton"
-        type="button"
-        class="control-label brush-data-toggle"
-        aria-expanded="true"
-        aria-label="Hide brush data gallery"
-      >brush data</button>
-      <div id="dropZone" aria-controls="brushInput">
-        <div id="dropZoneHeader">
-          <div id="dropZonePrompt" role="button" tabindex="0" aria-controls="brushInput">
-            Drop folder/files here or click to load
-          </div>
-          <button id="unloadBrushDataButton" type="button" aria-label="Unload brush data" title="Unload brush data" disabled>
-            &#10005;
-          </button>
-        </div>
-        <div id="brushGallery" hidden></div>
-      </div>
-      <div id="stockBrushButtons" aria-label="Stock brush data"></div>
-      <input
-        id="brushInput"
-        type="file"
-        accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif"
-        multiple
-        webkitdirectory
-      >
-      <p id="brushStatus">No brush data loaded.</p>
-    </div>
+	    <div id="controlsMain" class="sidebar-panel" data-sidebar-panel="draw">
+	      <div id="drawingBrushDataSlot"></div>
+	      <div id="drawingFavoritesRow" class="favorites-loader-row">
+	        <button id="loadFavoriteBrushesButton" class="favorite-loader-button" type="button" aria-label="Load favorite brushes" title="Load favorite brushes">★</button>
+	      </div>
 
-    <div class="control-group" id="tintGroup">
+	    <div class="control-group" id="tintGroup">
       <div class="toggle-row">
         <p class="control-label inline-label">color tint</p>
         <button id="tintPickerButton" type="button" aria-expanded="false" aria-controls="tintPopover">
@@ -101,10 +80,10 @@
         >
           <svg class="draw-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path class="icon-shadow" d="M5 19.5l3.7-.8L19.6 7.8l-2.4-2.4L6.3 16.3 5 19.5z"/>
-            <path class="icon-metal" d="M15.9 4.2l3.9 3.9 1.1-1.1a1.8 1.8 0 0 0 0-2.5l-1.4-1.4a1.8 1.8 0 0 0-2.5 0l-1.1 1.1z"/>
+            <path class="icon-metal" d="M16.6 4.7 19.3 7.4l0.9-0.9a1.25 1.25 0 0 0 0-1.8l-0.9-0.9a1.25 1.25 0 0 0-1.8 0l-0.9 0.9z"/>
             <path class="icon-gold" d="M6.2 16.5L15.9 6.8l3.1 3.1-9.7 9.7-3.9 1 0.8-4.1z"/>
             <path class="icon-light" d="M8.2 16.7l8.3-8.3"/>
-            <path class="icon-dark" d="M5.4 20.6l0.8-4.1L17 5.7m-1.1-1.5l3.9 3.9m-1.1 1.8l-3.1-3.1"/>
+            <path class="icon-dark" d="M5.4 20.6l0.8-4.1L17 5.7m-0.4-1 2.7 2.7m-0.6 2.5-3.1-3.1"/>
             <path class="icon-tip" d="M5.4 20.6l2.7-.7-2-2z"/>
           </svg>
         </button>
@@ -188,8 +167,8 @@
       </div>
       <div id="spraySpreadGroup" hidden>
         <label for="spraySpreadSlider" class="control-label">spray spread</label>
-        <input id="spraySpreadSlider" type="range" min="8" max="2000" value="64" step="1" disabled>
-        <p class="value-text"><span id="spraySpreadValue">64</span>px</p>
+        <input id="spraySpreadSlider" type="range" min="8" max="2000" value="256" step="1" disabled>
+        <p class="value-text"><span id="spraySpreadValue">256</span>px</p>
       </div>
     </div>
 
@@ -263,37 +242,217 @@
     <div id="historyActions">
       <button id="undoButton" type="button" disabled>Undo</button>
       <button id="redoButton" type="button" disabled>Redo</button>
-      <button id="clearButton" type="button" disabled>Clear</button>
+      <button id="clearButton" type="button" disabled>
+        <span>Clear</span>
+        <img class="button-icon clear-icon-image" src="bomb.png" alt="" aria-hidden="true" draggable="false">
+      </button>
     </div>
-    <div id="exportActions">
-      <button id="exportButton" type="button" disabled>Export</button>
-      <button id="exportCancelButton" type="button" aria-label="Cancel export" hidden>&#10005;</button>
-    </div>
-    <button id="gifPauseButton" type="button" aria-pressed="false" aria-label="Pause GIF animations" title="Pause GIF animations">
-      <span class="gif-pause-symbol" aria-hidden="true"></span>
-    </button>
     </div>
 
-    <section id="settingsPanel" hidden aria-label="Settings">
-      <h2 id="settingsTitle">settings</h2>
+    <section id="brushDataPanel" class="sidebar-panel sidebar-panel--brushes" data-sidebar-panel="brushes" hidden aria-label="Brush data">
+      <div id="brushDataControlGroup" class="control-group">
+        <button
+          id="brushDataToggleButton"
+          type="button"
+          class="control-label brush-data-toggle"
+          aria-expanded="true"
+          aria-label="Hide brush data gallery"
+        >brush data</button>
+        <div id="dropZone" aria-controls="brushInput">
+          <div id="dropZoneHeader">
+            <div id="dropZonePrompt" role="button" tabindex="0" aria-controls="brushInput">
+              Drop folder/files here or click to load
+            </div>
+            <button id="unloadBrushDataButton" type="button" aria-label="Unload brush data" title="Unload brush data" disabled>
+              &#10005;
+            </button>
+          </div>
+          <div id="brushSortControls">
+            <label for="brushSortSelect" class="control-label inline-label">sort by</label>
+            <select id="brushSortSelect" aria-label="Sort brush gallery">
+              <option value="alpha">alphabetical</option>
+              <option value="area-asc">size small-big</option>
+              <option value="area-desc">size big-small</option>
+            </select>
+          </div>
+          <div id="brushGallery" hidden></div>
+        </div>
+        <div id="stockBrushButtons" aria-label="Stock brush data"></div>
+        <input
+          id="brushInput"
+          type="file"
+          accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          webkitdirectory
+        >
+	        <p id="brushStatus">No brush data loaded.</p>
+	        <button id="loadAllStockBrushesButton" type="button">ALL</button>
+	        <div id="brushesFavoritesRow" class="favorites-loader-row">
+	          <button id="loadFavoriteBrushesFullButton" class="favorite-loader-button" type="button" aria-label="Load favorite brushes" title="Load favorite brushes">★</button>
+	        </div>
+	      </div>
+	    </section>
 
-      <div class="settings-row">
-        <label id="canvasBgColorLabel" for="canvasBgColorInput" class="control-label inline-label">bkg color</label>
-        <input id="canvasBgColorInput" type="color" value="#ffffff" aria-label="Canvas background color">
+    <section id="editPanel" class="sidebar-panel" data-sidebar-panel="edit" hidden aria-label="Edit and sequencing">
+      <h2 class="sidebar-panel-title">layers</h2>
+      <div id="editLayerList" aria-label="Stroke layers"></div>
+      <div id="editLayerDeleteDropzone" class="edit-layer-delete-dropzone" hidden>drop to delete</div>
+    </section>
+
+    <section id="exportPanel" class="sidebar-panel" data-sidebar-panel="export" hidden aria-label="Export controls">
+      <h2 class="sidebar-panel-title">export</h2>
+      <div class="settings-row export-settings-row">
+        <label id="exportCanvasBgColorLabel" for="exportCanvasBgColorInput" class="control-label inline-label">bkg color</label>
+        <input id="exportCanvasBgColorInput" type="color" value="#ffffff" aria-label="Export background color">
       </div>
-
-      <div class="settings-row">
+      <div class="settings-row export-settings-row">
+        <span class="control-label inline-label">bkg image</span>
+        <button id="exportBgImageButton" class="export-bg-image-button" type="button" aria-label="Choose export preview background image" title="Choose export preview background image">
+          <span id="exportBgImagePreview" aria-hidden="true"></span>
+        </button>
+        <input id="exportBgImageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif" hidden>
+      </div>
+      <div id="exportBgImageControls" hidden>
+        <div class="control-group">
+          <label for="exportBgImageOpacitySlider" class="control-label">image opacity</label>
+          <input id="exportBgImageOpacitySlider" type="range" min="0" max="100" value="100" step="1" disabled>
+          <p class="value-text"><span id="exportBgImageOpacityValue">100</span>%</p>
+        </div>
+        <div class="settings-row export-settings-row">
+          <label id="exportBgImageModeLabel" for="exportBgImageTileToggle" class="control-label inline-label">stretch</label>
+          <label class="ios-switch" for="exportBgImageTileToggle">
+            <input id="exportBgImageTileToggle" type="checkbox" disabled>
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div id="exportBgImageTileSizeGroup" class="control-group" hidden>
+          <label for="exportBgImageTileSizeSlider" class="control-label">tile size</label>
+          <input id="exportBgImageTileSizeSlider" type="range" min="0" max="1000" value="91" step="1" disabled>
+          <p class="value-text"><span id="exportBgImageTileSizeValue">128</span>px</p>
+        </div>
+      </div>
+      <div class="settings-row export-settings-row">
         <label for="exportBackgroundToggle" class="control-label inline-label">export bkg?</label>
         <label class="ios-switch" for="exportBackgroundToggle">
           <input id="exportBackgroundToggle" type="checkbox" checked>
           <span class="ios-switch-slider" aria-hidden="true"></span>
         </label>
       </div>
+      <div class="settings-row export-settings-row">
+        <label for="exportSeeBeyondToggle" class="control-label inline-label">see beyond?</label>
+        <label class="ios-switch" for="exportSeeBeyondToggle">
+          <input id="exportSeeBeyondToggle" type="checkbox" checked>
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="control-group">
+        <p class="control-label">resolution</p>
+        <div id="exportSidebarResolutionControls" aria-label="Export sidebar resolution">
+          <input
+            id="exportSidebarWidthInput"
+            type="number"
+            min="1"
+            max="10000"
+            step="1"
+            value="1"
+            aria-label="Export sidebar width"
+          >
+          <span aria-hidden="true">x</span>
+          <input
+            id="exportSidebarHeightInput"
+            type="number"
+            min="1"
+            max="10000"
+            step="1"
+            value="1"
+            aria-label="Export sidebar height"
+          >
+        </div>
+      </div>
+      <div class="control-group">
+        <p class="control-label">scale</p>
+        <div id="exportSidebarScaleButtons" class="export-scale-buttons export-scale-buttons-sidebar" role="group" aria-label="Export scale">
+          <button type="button" class="export-scale-button" data-scale="5">5%</button>
+          <button type="button" class="export-scale-button" data-scale="10">10%</button>
+          <button type="button" class="export-scale-button" data-scale="25">25%</button>
+          <button type="button" class="export-scale-button" data-scale="50">50%</button>
+          <button type="button" class="export-scale-button is-active" data-scale="100">100%</button>
+          <button type="button" class="export-scale-button" data-scale="200">200%</button>
+        </div>
+      </div>
+      <div class="control-group" id="exportAnimationControls">
+        <div class="settings-row export-settings-row">
+          <label id="exportAnimationDurationLabel" for="exportAnimationAutoToggle" class="control-label inline-label">gif duration: auto</label>
+          <label class="ios-switch" for="exportAnimationAutoToggle">
+            <input id="exportAnimationAutoToggle" type="checkbox" checked>
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div id="exportAnimationManualControls" hidden>
+          <div id="exportAnimationSecondsButtons" class="export-animation-seconds-buttons" role="group" aria-label="Export animation length">
+            <button type="button" class="export-animation-seconds-button" data-seconds="0.5">0.5 sec</button>
+            <button type="button" class="export-animation-seconds-button" data-seconds="1">1 sec</button>
+            <button type="button" class="export-animation-seconds-button" data-seconds="2">2 sec</button>
+            <button type="button" class="export-animation-seconds-button is-active" data-seconds="3">3 sec</button>
+            <button type="button" class="export-animation-seconds-button" data-seconds="4">4 sec</button>
+            <button type="button" class="export-animation-seconds-button" data-seconds="5">5 sec</button>
+          </div>
+          <label id="exportFrameCountRow" for="exportFrameCountInput">
+            <span class="control-label inline-label">set frame count</span>
+            <input id="exportFrameCountInput" type="number" min="1" max="512" step="1" inputmode="numeric" aria-label="Set export frame count">
+          </label>
+        </div>
+      </div>
+      <div id="exportSidebarActions">
+        <button id="exportButton" type="button" disabled>Render GIF</button>
+        <button id="exportCancelButton" type="button" aria-label="Cancel export" title="Cancel export" disabled>&#10005;</button>
+      </div>
+      <div class="control-group" id="exportVideoControls">
+        <div class="settings-row export-settings-row">
+          <label id="exportVideoDurationLabel" for="exportVideoAutoToggle" class="control-label inline-label">video duration: auto</label>
+          <label class="ios-switch" for="exportVideoAutoToggle">
+            <input id="exportVideoAutoToggle" type="checkbox" checked>
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
+        <label id="exportVideoLengthRow" for="exportVideoLengthInput" hidden>
+          <span class="control-label inline-label">set length <span class="muted-inline-label">(in sec)</span></span>
+          <input id="exportVideoLengthInput" type="number" min="0" max="30" step="0.1" inputmode="decimal" aria-label="Set video length in seconds">
+        </label>
+      </div>
+      <div id="exportVideoActions">
+        <button id="exportVideoButton" type="button" disabled>Render Video</button>
+        <button id="exportVideoCancelButton" type="button" aria-label="Cancel video export" title="Cancel video export" disabled>&#10005;</button>
+      </div>
+    </section>
+
+    <section id="communityPanel" class="sidebar-panel" data-sidebar-panel="community" hidden aria-label="Saved compositions">
+      <h2 class="sidebar-panel-title">saved</h2>
+      <button id="saveCompositionButton" type="button">save current scene</button>
+      <p id="savedCompositionsStatus" class="saved-compositions-status"></p>
+      <div id="savedCompositionsGallery" class="saved-compositions-gallery" aria-label="Saved compositions"></div>
+    </section>
+
+    <section id="settingsPanel" class="sidebar-panel" data-sidebar-panel="settings" hidden aria-label="Settings">
+      <h2 id="settingsTitle">settings</h2>
+
+      <div class="settings-row" id="canvasBgRow">
+        <label id="canvasBgColorLabel" for="canvasBgColorInput" class="control-label inline-label">bkg color</label>
+        <input id="canvasBgColorInput" type="color" value="#ffffff" aria-label="Canvas background color">
+      </div>
+
       <div class="settings-toggle-group">
         <div class="toggle-row">
           <p id="renderModeLabel" class="control-label inline-label">point</p>
           <label class="ios-switch ios-switch-neutral" for="renderModeToggle">
             <input id="renderModeToggle" type="checkbox">
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label for="brushPreviewToggle" class="control-label inline-label">brush preview</label>
+          <label class="ios-switch" for="brushPreviewToggle">
+            <input id="brushPreviewToggle" type="checkbox" checked>
             <span class="ios-switch-slider" aria-hidden="true"></span>
           </label>
         </div>
@@ -313,9 +472,77 @@
           <input id="cursorTrailCountSlider" type="range" min="1" max="200" value="24" step="1" disabled>
           <p class="value-text"><span id="cursorTrailCountValue">24</span></p>
         </div>
+        <div class="toggle-row">
+          <label for="gifCountToggle" class="control-label inline-label">gif count</label>
+          <label class="ios-switch" for="gifCountToggle">
+            <input id="gifCountToggle" type="checkbox" checked>
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label for="gifPauseToggle" class="control-label inline-label">pause button</label>
+          <label class="ios-switch" for="gifPauseToggle">
+            <input id="gifPauseToggle" type="checkbox" checked>
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
       </div>
     </section>
   </aside>
+
+  <nav id="mainModeBar" aria-label="Main modes">
+    <button id="mainModeDrawButton" class="main-mode-button main-mode-tab-button is-active" type="button" data-sidebar-tab="draw" aria-label="Drawing mode" aria-pressed="true" title="Drawing mode">
+      <svg class="main-mode-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <g transform="rotate(-45 16 16)">
+          <path class="main-icon-stroke main-icon-stroke-strong" d="M7 13.5h14v5H7z"/>
+          <path class="main-icon-stroke main-icon-stroke-strong" d="M3.5 16 7 13.5v5L3.5 16z"/>
+          <path class="main-icon-stroke main-icon-stroke-strong" d="M23 13.5h5v5h-5z"/>
+          <path class="main-icon-stroke main-icon-stroke-thin" d="M21.6 13.8v4.4"/>
+          <path class="main-icon-stroke main-icon-stroke-thin" d="M10 13.8v4.4"/>
+        </g>
+      </svg>
+    </button>
+    <button id="mainModeBrushButton" class="main-mode-button main-mode-tab-button" type="button" data-sidebar-tab="brushes" aria-label="Brush data mode" aria-pressed="false" title="Brush data mode">
+      <svg class="main-mode-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <path class="main-icon-stroke main-icon-stroke-strong" d="M7 8h18v16H7z"/>
+        <path class="main-icon-stroke main-icon-stroke-strong" d="M7 13h18"/>
+        <path class="main-icon-stroke main-icon-stroke-strong" d="M12 8v16M20 8v16"/>
+        <circle class="main-icon-solid" cx="9.5" cy="10.5" r="1"/>
+        <circle class="main-icon-solid" cx="16" cy="10.5" r="1"/>
+        <circle class="main-icon-solid" cx="22.5" cy="10.5" r="1"/>
+        <path class="main-icon-stroke main-icon-stroke-thin" d="m8.5 22 3-3.2 3 3.2m-1-2.2 2.4-2.7 3.1 4.9m1.4 0 2.1-2.6 2 2.6"/>
+      </svg>
+    </button>
+    <button id="mainModeEditButton" class="main-mode-button main-mode-tab-button" type="button" data-sidebar-tab="edit" aria-label="Edit and sequencing mode" aria-pressed="false" title="Edit and sequencing mode">
+      <svg class="main-mode-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <path class="main-icon-stroke main-icon-stroke-strong" d="M7 10h18M7 16h18M7 22h18"/>
+        <path class="main-icon-stroke main-icon-stroke-strong" d="M12 7v6M20 13v6M15 19v6"/>
+      </svg>
+    </button>
+    <div id="exportActions">
+      <button id="exportModeButton" class="main-mode-button main-mode-tab-button main-mode-export-button" type="button" data-sidebar-tab="export" aria-label="Export mode" aria-pressed="false" title="Export mode" disabled>
+        <svg class="main-mode-icon main-mode-icon-export" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <path class="main-icon-stroke main-icon-stroke-strong" d="M10 8H7v17h17v-3"/>
+          <path class="main-icon-stroke main-icon-stroke-strong" d="M14 18 25 7"/>
+          <path class="main-icon-stroke main-icon-stroke-strong" d="M17 7h8v8"/>
+        </svg>
+      </button>
+    </div>
+    <button id="mainModeCommunityButton" class="main-mode-button main-mode-tab-button" type="button" data-sidebar-tab="community" aria-label="Saved mode" aria-pressed="false" title="Saved mode">
+      <svg class="main-mode-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <g transform="translate(16 16.3) scale(1.023) translate(-16 -16)">
+          <path class="main-icon-stroke main-icon-stroke-strong" d="m16 5 3.2 7 7.6.8-5.7 5.1 1.6 7.5-6.7-3.8-6.7 3.8 1.6-7.5-5.7-5.1 7.6-.8L16 5z"/>
+        </g>
+      </svg>
+    </button>
+    <button id="mainModeSettingsButton" class="main-mode-button main-mode-tab-button" type="button" data-sidebar-tab="settings" aria-label="Settings" aria-pressed="false" title="Settings">
+      <svg class="main-mode-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <g transform="translate(16 15) scale(.92) translate(-16 -16)">
+          <path class="main-icon-solid" fill-rule="evenodd" d="M14 3.5h4l1 4.2 1.5.6 3.6-2.2 2.8 2.8-2.2 3.6.6 1.5 4.2 1v4l-4.2 1-.6 1.5 2.2 3.6-2.8 2.8-3.6-2.2-1.5.6-1 4.2h-4l-1-4.2-1.5-.6-3.6 2.2-2.8-2.8 2.2-3.6-.6-1.5-4.2-1v-4l4.2-1 .6-1.5-2.2-3.6 2.8-2.8 3.6 2.2 1.5-.6 1-4.2zM16 23.4a5.8 5.8 0 1 0 0-11.6 5.8 5.8 0 0 0 0 11.6z"/>
+        </g>
+      </svg>
+    </button>
+  </nav>
 
   <div id="clearConfirmModal" aria-hidden="true">
     <div id="clearConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="clearConfirmMessage">
@@ -323,6 +550,16 @@
       <div class="confirm-actions">
         <button id="confirmYesButton" type="button">Yes &#10003;</button>
         <button id="confirmNoButton" type="button">No &#10005;</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="savedDeleteConfirmModal" aria-hidden="true">
+    <div id="savedDeleteConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="savedDeleteConfirmMessage">
+      <p id="savedDeleteConfirmMessage">Are you sure? This cannot be undone.</p>
+      <div class="confirm-actions">
+        <button id="savedDeleteConfirmYesButton" type="button">Yes &#10003;</button>
+        <button id="savedDeleteConfirmNoButton" type="button">No &#10005;</button>
       </div>
     </div>
   </div>
@@ -347,6 +584,29 @@
             <div class="brush-crop-edge" data-edge="left"></div>
           </div>
         </div>
+      </div>
+      <div id="brushCropResolutionControls" class="brush-crop-resolution-controls">
+        <input id="brushCropWidthInput" type="number" min="1" max="10000" step="1" aria-label="Brush draw width">
+        <span aria-hidden="true">x</span>
+        <input id="brushCropHeightInput" type="number" min="1" max="10000" step="1" aria-label="Brush draw height">
+        <button id="brushCropResolutionResetButton" type="button" aria-label="Reset brush draw size" title="Reset brush draw size" hidden>&#8635;</button>
+      </div>
+      <div id="brushCropFrameControls" class="brush-crop-frame-controls" hidden>
+        <div id="brushCropFrameTrack" class="brush-crop-frame-track" aria-label="GIF frame range">
+          <div id="brushCropFrameSegments" class="brush-crop-frame-segments"></div>
+          <div id="brushCropFrameSelection" class="brush-crop-frame-selection"></div>
+          <button id="brushCropFrameStartHandle" class="brush-crop-frame-handle" type="button" data-frame-edge="start" aria-label="Start frame"></button>
+          <button id="brushCropFrameEndHandle" class="brush-crop-frame-handle" type="button" data-frame-edge="end" aria-label="End frame"></button>
+        </div>
+        <p id="brushCropFrameReadout" class="brush-crop-frame-readout"></p>
+      </div>
+      <div id="brushCropProbabilityControls" class="brush-crop-probability-controls">
+        <span class="brush-crop-probability-label">probability:</span>
+        <button type="button" class="brush-crop-probability-button" data-weight-mode="standard">Standard</button>
+        <button type="button" class="brush-crop-probability-button" data-weight-mode="common">Common</button>
+        <button type="button" class="brush-crop-probability-button" data-weight-mode="normal">Normal</button>
+        <button type="button" class="brush-crop-probability-button" data-weight-mode="uncommon">Uncommon</button>
+        <button type="button" class="brush-crop-probability-button" data-weight-mode="rare">Rare</button>
       </div>
       <div class="confirm-actions brush-crop-actions">
         <button id="brushCropConfirmButton" type="button">Confirm</button>
@@ -394,18 +654,10 @@
           aria-label="Export height"
         >
       </div>
-      <div id="exportScaleButtons" role="group" aria-label="Export scale">
-        <button type="button" class="export-scale-button" data-scale="5">5%</button>
-        <button type="button" class="export-scale-button" data-scale="10">10%</button>
-        <button type="button" class="export-scale-button" data-scale="25">25%</button>
-        <button type="button" class="export-scale-button" data-scale="50">50%</button>
-        <button type="button" class="export-scale-button is-active" data-scale="100">100%</button>
-        <button type="button" class="export-scale-button" data-scale="200">200%</button>
-      </div>
     </div>
   </div>
 
-  <script src="stock-brushes.js"></script>
-  <script src="app.js"></script>
+  <script src="stock-brushes.js?v=20260506-anime"></script>
+  <script src="app.js?v=20260506-brush-preview"></script>
 </body>
 </html>
