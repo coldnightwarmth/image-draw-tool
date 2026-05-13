@@ -45,8 +45,13 @@
     </button>
 
 	    <div id="controlsMain" class="sidebar-panel" data-sidebar-panel="draw">
+	      <div class="settings-row draw-settings-row" id="drawCanvasBgRow" hidden>
+	        <label id="drawCanvasBgColorLabel" for="drawCanvasBgColorInput" class="control-label inline-label">bkg color</label>
+	        <input id="drawCanvasBgColorInput" type="color" value="#ffffff" aria-label="Drawing sidebar background color">
+	      </div>
 	      <div id="drawingBrushDataSlot"></div>
 	      <div id="drawingFavoritesRow" class="favorites-loader-row">
+	        <div id="drawingBrushPresetButtons" class="custom-brush-preset-buttons" aria-label="Custom brush presets"></div>
 	        <button id="loadFavoriteBrushesButton" class="favorite-loader-button" type="button" aria-label="Load favorite brushes" title="Load favorite brushes">★</button>
 	      </div>
 
@@ -166,20 +171,31 @@
         </button>
       </div>
       <div id="spraySpreadGroup" hidden>
-        <label for="spraySpreadSlider" class="control-label">spray spread</label>
+        <div class="control-label-row">
+          <label for="spraySpreadSlider" class="control-label">spray spread</label>
+          <p class="value-text"><span id="spraySpreadValue">256</span>px</p>
+        </div>
         <input id="spraySpreadSlider" type="range" min="8" max="2000" value="256" step="1" disabled>
-        <p class="value-text"><span id="spraySpreadValue">256</span>px</p>
       </div>
     </div>
 
     <div class="control-group" id="sizeScaleGroup">
-      <label
-        for="sizeSlider"
-        class="control-label slider-toggle-label"
-        data-slider-toggle-target="sizeScaleGroup"
-      >size</label>
-      <input id="sizeSlider" type="range" min="10" max="1000" value="100" step="1">
-      <p class="value-text"><span id="sizeValue">100</span>%</p>
+      <div class="control-label-row">
+        <label
+          id="sizeControlLabel"
+          for="sizeSlider"
+          class="control-label slider-toggle-label"
+          data-slider-toggle-target="sizeScaleGroup"
+        >size</label>
+        <p id="sizePercentValueText" class="value-text"><span id="sizeValue">100</span>%</p>
+        <p id="consistentSizeValueText" class="value-text" hidden><span id="consistentSizeValue">96</span>px</p>
+      </div>
+      <div id="sizePercentGroup">
+        <input id="sizeSlider" type="range" min="10" max="1000" value="100" step="1">
+      </div>
+      <div id="consistentSizeGroup" hidden>
+        <input id="consistentSizeSlider" type="range" min="8" max="1000" value="96" step="1" disabled>
+      </div>
     </div>
 
     <div class="control-group" id="consistentControlGroup">
@@ -190,24 +206,18 @@
           <span class="ios-switch-slider" aria-hidden="true"></span>
         </label>
       </div>
-      <div id="consistentSizeGroup" hidden>
-        <label
-          for="consistentSizeSlider"
-          class="control-label"
-        >size</label>
-        <input id="consistentSizeSlider" type="range" min="8" max="1000" value="96" step="1" disabled>
-        <p class="value-text"><span id="consistentSizeValue">96</span>px</p>
-      </div>
     </div>
 
     <div class="control-group" id="spacingGroup">
-      <label
-        for="spacingSlider"
-        class="control-label slider-toggle-label"
-        data-slider-toggle-target="spacingGroup"
-      >spacing</label>
-      <input id="spacingSlider" type="range" min="4" max="1000" value="48" step="1">
-      <p class="value-text"><span id="spacingValue">48</span>px</p>
+      <div class="control-label-row">
+        <label
+          for="spacingSlider"
+          class="control-label slider-toggle-label"
+          data-slider-toggle-target="spacingGroup"
+        >spacing</label>
+        <p class="value-text"><span id="spacingValue">48</span>px</p>
+      </div>
+      <input id="spacingSlider" type="range" min="4" max="1200" value="48" step="1">
     </div>
 
     <div class="control-group" id="rotationGroup">
@@ -217,36 +227,26 @@
           class="control-label inline-label slider-toggle-label"
           data-slider-toggle-target="rotationGroup"
         >rotation</label>
+        <p class="value-text"><span id="rotationValue">0</span>deg</p>
         <div id="rotationIndicator" aria-hidden="true">
           <span id="rotationNeedle"></span>
         </div>
       </div>
       <input id="rotationSlider" type="range" min="-180" max="180" value="0" step="1">
-      <p class="value-text"><span id="rotationValue">0</span>deg</p>
     </div>
 
     <div class="control-group" id="opacityGroup">
-      <label
-        for="opacitySlider"
-        class="control-label slider-toggle-label"
-        data-slider-toggle-target="opacityGroup"
-      >opacity</label>
+      <div class="control-label-row">
+        <label
+          for="opacitySlider"
+          class="control-label slider-toggle-label"
+          data-slider-toggle-target="opacityGroup"
+        >opacity</label>
+        <p class="value-text"><span id="opacityValue">100</span>%</p>
+      </div>
       <input id="opacitySlider" type="range" min="1" max="100" value="100" step="1">
-      <p class="value-text"><span id="opacityValue">100</span>%</p>
     </div>
 
-    <button id="eraseModeButton" type="button">
-      <span>Erase</span>
-      <img class="button-icon erase-icon-image" src="eraser%20icon.png" alt="" aria-hidden="true" draggable="false">
-    </button>
-    <div id="historyActions">
-      <button id="undoButton" type="button" disabled>Undo</button>
-      <button id="redoButton" type="button" disabled>Redo</button>
-      <button id="clearButton" type="button" disabled>
-        <span>Clear</span>
-        <img class="button-icon clear-icon-image" src="bomb.png" alt="" aria-hidden="true" draggable="false">
-      </button>
-    </div>
     </div>
 
     <section id="brushDataPanel" class="sidebar-panel sidebar-panel--brushes" data-sidebar-panel="brushes" hidden aria-label="Brush data">
@@ -288,10 +288,26 @@
 	        <p id="brushStatus">No brush data loaded.</p>
 	        <button id="loadAllStockBrushesButton" type="button">ALL</button>
 	        <div id="brushesFavoritesRow" class="favorites-loader-row">
+	          <div id="brushesBrushPresetButtons" class="custom-brush-preset-buttons" aria-label="Custom brush presets"></div>
 	          <button id="loadFavoriteBrushesFullButton" class="favorite-loader-button" type="button" aria-label="Load favorite brushes" title="Load favorite brushes">★</button>
 	        </div>
 	      </div>
 	    </section>
+
+    <div id="sidebarPinnedActions" aria-label="Drawing actions">
+      <button id="eraseModeButton" type="button">
+        <span>Erase</span>
+        <img class="button-icon erase-icon-image" src="eraser%20icon.png" alt="" aria-hidden="true" draggable="false">
+      </button>
+      <div id="historyActions">
+        <button id="undoButton" type="button" disabled>Undo</button>
+        <button id="redoButton" type="button" disabled>Redo</button>
+        <button id="clearButton" type="button" disabled>
+          <span>Clear</span>
+          <img class="button-icon clear-icon-image" src="bomb.png" alt="" aria-hidden="true" draggable="false">
+        </button>
+      </div>
+    </div>
 
     <section id="editPanel" class="sidebar-panel" data-sidebar-panel="edit" hidden aria-label="Edit and sequencing">
       <h2 class="sidebar-panel-title">layers</h2>
@@ -301,12 +317,13 @@
 
     <section id="exportPanel" class="sidebar-panel" data-sidebar-panel="export" hidden aria-label="Export controls">
       <h2 class="sidebar-panel-title">export</h2>
-      <div class="settings-row export-settings-row">
+      <div id="exportCanvasBgRow" class="settings-row export-settings-row">
         <label id="exportCanvasBgColorLabel" for="exportCanvasBgColorInput" class="control-label inline-label">bkg color</label>
         <input id="exportCanvasBgColorInput" type="color" value="#ffffff" aria-label="Export background color">
       </div>
       <div class="settings-row export-settings-row">
         <span class="control-label inline-label">bkg image</span>
+        <button id="clearExportBgImageButton" class="clear-export-bg-image-button" type="button" aria-label="Clear export background image" title="Clear export background image" hidden>x</button>
         <button id="exportBgImageButton" class="export-bg-image-button" type="button" aria-label="Choose export preview background image" title="Choose export preview background image">
           <span id="exportBgImagePreview" aria-hidden="true"></span>
         </button>
@@ -398,7 +415,7 @@
             <button type="button" class="export-animation-seconds-button" data-seconds="5">5 sec</button>
           </div>
           <label id="exportFrameCountRow" for="exportFrameCountInput">
-            <span class="control-label inline-label">set frame count</span>
+            <span class="control-label inline-label">set frame count <span class="muted-inline-label">(max 512)</span></span>
             <input id="exportFrameCountInput" type="number" min="1" max="512" step="1" inputmode="numeric" aria-label="Set export frame count">
           </label>
         </div>
@@ -416,8 +433,8 @@
           </label>
         </div>
         <label id="exportVideoLengthRow" for="exportVideoLengthInput" hidden>
-          <span class="control-label inline-label">set length <span class="muted-inline-label">(in sec)</span></span>
-          <input id="exportVideoLengthInput" type="number" min="0" max="30" step="0.1" inputmode="decimal" aria-label="Set video length in seconds">
+          <span class="control-label inline-label">set length <span class="muted-inline-label">(max 300s)</span></span>
+          <input id="exportVideoLengthInput" type="number" min="0" max="300" step="0.1" inputmode="decimal" aria-label="Set video length in seconds">
         </label>
       </div>
       <div id="exportVideoActions">
@@ -486,6 +503,13 @@
             <span class="ios-switch-slider" aria-hidden="true"></span>
           </label>
         </div>
+        <div class="toggle-row">
+          <label for="drawBkgColorToggle" class="control-label inline-label">bkg color on draw</label>
+          <label class="ios-switch" for="drawBkgColorToggle">
+            <input id="drawBkgColorToggle" type="checkbox">
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
       </div>
     </section>
   </aside>
@@ -504,13 +528,10 @@
     </button>
     <button id="mainModeBrushButton" class="main-mode-button main-mode-tab-button" type="button" data-sidebar-tab="brushes" aria-label="Brush data mode" aria-pressed="false" title="Brush data mode">
       <svg class="main-mode-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-        <path class="main-icon-stroke main-icon-stroke-strong" d="M7 8h18v16H7z"/>
-        <path class="main-icon-stroke main-icon-stroke-strong" d="M7 13h18"/>
-        <path class="main-icon-stroke main-icon-stroke-strong" d="M12 8v16M20 8v16"/>
-        <circle class="main-icon-solid" cx="9.5" cy="10.5" r="1"/>
-        <circle class="main-icon-solid" cx="16" cy="10.5" r="1"/>
-        <circle class="main-icon-solid" cx="22.5" cy="10.5" r="1"/>
-        <path class="main-icon-stroke main-icon-stroke-thin" d="m8.5 22 3-3.2 3 3.2m-1-2.2 2.4-2.7 3.1 4.9m1.4 0 2.1-2.6 2 2.6"/>
+        <rect class="main-icon-solid" x="7" y="7" width="8" height="8"/>
+        <rect class="main-icon-solid" x="17" y="7" width="8" height="8"/>
+        <rect class="main-icon-solid" x="7" y="17" width="8" height="8"/>
+        <rect class="main-icon-solid" x="17" y="17" width="8" height="8"/>
       </svg>
     </button>
     <button id="mainModeEditButton" class="main-mode-button main-mode-tab-button" type="button" data-sidebar-tab="edit" aria-label="Edit and sequencing mode" aria-pressed="false" title="Edit and sequencing mode">
@@ -519,6 +540,7 @@
         <path class="main-icon-stroke main-icon-stroke-strong" d="M12 7v6M20 13v6M15 19v6"/>
       </svg>
     </button>
+    <span class="main-mode-divider" aria-hidden="true"></span>
     <div id="exportActions">
       <button id="exportModeButton" class="main-mode-button main-mode-tab-button main-mode-export-button" type="button" data-sidebar-tab="export" aria-label="Export mode" aria-pressed="false" title="Export mode" disabled>
         <svg class="main-mode-icon main-mode-icon-export" viewBox="0 0 32 32" aria-hidden="true" focusable="false">

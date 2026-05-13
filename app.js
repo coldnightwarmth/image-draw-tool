@@ -62,9 +62,12 @@ const LAYER_SEQUENCE_DEFAULT_SETTINGS = {
   colorCycleInstant: false,
   colorCycleSpeed: 45,
   rotateSpeed: 45,
+  rotateContinuous: false,
+  rotateReverse: false,
   scaleSpeed: 45,
   scaleAmount: 50,
   imageCycleRandom: false,
+  imageCycleSpeed: 50,
   pulseSpeed: 35,
   pulseRate: 35,
   waveSpeed: 45,
@@ -82,6 +85,7 @@ const SESSION_IDB_STORE_NAME = "snapshots";
 const SAVED_COMPOSITIONS_INDEX_KEY = "saved-compositions:index";
 const SAVED_COMPOSITION_KEY_PREFIX = "saved-composition:";
 const FAVORITE_BRUSH_SOURCES_KEY = "favorite-brush-sources:v1";
+const CUSTOM_BRUSH_PRESET_SOURCES_KEY = "custom-brush-preset-sources:v1";
 const SAVE_DEBOUNCE_MS = 140;
 
 const viewport = document.getElementById("viewport");
@@ -114,15 +118,21 @@ const brushSortSelect = document.getElementById("brushSortSelect");
 const loadAllStockBrushesButton = document.getElementById("loadAllStockBrushesButton");
 const loadFavoriteBrushesButton = document.getElementById("loadFavoriteBrushesButton");
 const loadFavoriteBrushesFullButton = document.getElementById("loadFavoriteBrushesFullButton");
+const drawingBrushPresetButtons = document.getElementById("drawingBrushPresetButtons");
+const brushesBrushPresetButtons = document.getElementById("brushesBrushPresetButtons");
 const brushInput = document.getElementById("brushInput");
 const brushStatus = document.getElementById("brushStatus");
 const sizeScaleGroup = document.getElementById("sizeScaleGroup");
+const sizeControlLabel = document.getElementById("sizeControlLabel");
+const sizePercentGroup = document.getElementById("sizePercentGroup");
 const sizeSlider = document.getElementById("sizeSlider");
 const sizeValue = document.getElementById("sizeValue");
 const consistentToggle = document.getElementById("consistentToggle");
 const consistentSizeGroup = document.getElementById("consistentSizeGroup");
 const consistentSizeSlider = document.getElementById("consistentSizeSlider");
 const consistentSizeValue = document.getElementById("consistentSizeValue");
+const sizePercentValueText = document.getElementById("sizePercentValueText");
+const consistentSizeValueText = document.getElementById("consistentSizeValueText");
 const spacingSlider = document.getElementById("spacingSlider");
 const spacingValue = document.getElementById("spacingValue");
 const rotationSlider = document.getElementById("rotationSlider");
@@ -137,11 +147,16 @@ const tintColorField = document.getElementById("tintColorField");
 const tintColorInput = document.getElementById("tintColorInput");
 const tintAmountSlider = document.getElementById("tintAmountSlider");
 const tintAmountValue = document.getElementById("tintAmountValue");
+const drawCanvasBgRow = document.getElementById("drawCanvasBgRow");
+const drawCanvasBgColorLabel = document.getElementById("drawCanvasBgColorLabel");
+const drawCanvasBgColorInput = document.getElementById("drawCanvasBgColorInput");
 const canvasBgColorLabel = document.getElementById("canvasBgColorLabel");
 const canvasBgColorInput = document.getElementById("canvasBgColorInput");
+const exportCanvasBgRow = document.getElementById("exportCanvasBgRow");
 const exportCanvasBgColorLabel = document.getElementById("exportCanvasBgColorLabel");
 const exportCanvasBgColorInput = document.getElementById("exportCanvasBgColorInput");
 const exportBgImageButton = document.getElementById("exportBgImageButton");
+const clearExportBgImageButton = document.getElementById("clearExportBgImageButton");
 const exportBgImagePreview = document.getElementById("exportBgImagePreview");
 const exportBgImageInput = document.getElementById("exportBgImageInput");
 const exportBgImageControls = document.getElementById("exportBgImageControls");
@@ -157,6 +172,7 @@ const exportSeeBeyondToggle = document.getElementById("exportSeeBeyondToggle");
 const gifCountToggle = document.getElementById("gifCountToggle");
 const gifCountIndicator = document.getElementById("gifCountIndicator");
 const gifPauseToggle = document.getElementById("gifPauseToggle");
+const drawBkgColorToggle = document.getElementById("drawBkgColorToggle");
 const brushPreviewToggle = document.getElementById("brushPreviewToggle");
 const filterDefs = document.getElementById("filterDefs");
 const opacitySlider = document.getElementById("opacitySlider");
@@ -274,7 +290,7 @@ const EXPORT_GIF_FRAME_DELAY_MS = 50;
 const EXPORT_MAX_FRAME_COUNT = 512;
 const EXPORT_MANUAL_SECONDS_PRESETS = [0.5, 1, 2, 3, 4, 5];
 const EXPORT_VIDEO_MAX_DIMENSION = 1600;
-const EXPORT_VIDEO_MAX_SECONDS = 30;
+const EXPORT_VIDEO_MAX_SECONDS = 300;
 const EXPORT_VIDEO_FPS = 30;
 const EXPORT_PROGRESS_COLLECT_END = 5;
 const EXPORT_PROGRESS_DECODE_END = 18;
@@ -317,6 +333,7 @@ const SEQUENCE_DATASET_KEYS = [
   "sequenceBaseOpacity",
   "sequenceBaseSrc",
   "sequenceImageCycleKey",
+  "sequenceImageCycleSrc",
   "sequenceTriggerKey",
   "sequenceHidden",
   "sequenceVisibilityStart",
@@ -335,6 +352,9 @@ const SEQUENCE_DATASET_KEYS = [
   "sequenceRotateFrom",
   "sequenceRotateTo",
   "sequenceRotateDuration",
+  "sequenceRotateContinuousStart",
+  "sequenceRotateContinuousActive",
+  "sequenceRotateRestAngle",
   "sequenceScaleStart",
   "sequenceScaleFrom",
   "sequenceScaleTo",
@@ -389,6 +409,8 @@ const state = {
   selectedBrushIds: new Set(),
   favoriteBrushSources: new Set(),
   favoriteReturnState: null,
+  customBrushPresetSources: Array.from({ length: 5 }, () => new Set()),
+  activeCustomBrushPresetIndex: null,
   activeStockBrushFolderId: null,
   stockBrushLoadingFolderId: null,
   gifAnimationsPaused: false,
@@ -410,8 +432,10 @@ const state = {
   exportBgImageTileSize: 128,
   exportBgImageNaturalWidth: 0,
   exportBgImageNaturalHeight: 0,
+  exportBgImagePreviewUrl: "",
   showGifCountIndicator: true,
   showGifPauseButton: true,
+  showDrawBackgroundColorControl: false,
   brushPreviewEnabled: true,
   eraseMode: false,
   pointerInViewport: false,
@@ -601,6 +625,10 @@ let suppressNextCanvasBgInputClick = false;
 const tintFilterCache = new Map();
 let exportTintScratchCanvas = null;
 const exportBackgroundImageCache = new Map();
+const exportBackgroundAnimationCache = new Map();
+const exportBackgroundStillPreviewCache = new Map();
+const exportBackgroundRenderCache = new Map();
+const brushSourceDataCache = new Map();
 const stockBrushIconPaths = new Map();
 const brushFrameCountPromises = new Map();
 const brushFrameCountQueue = [];
@@ -939,16 +967,19 @@ function openNativeTintPicker() {
 function isCanvasBgPickerActive() {
   return Boolean(
     canvasBgNativePickerOpen ||
+      (drawCanvasBgColorInput && document.activeElement === drawCanvasBgColorInput) ||
       (canvasBgColorInput && document.activeElement === canvasBgColorInput)
   );
 }
 
 function closeCanvasBgPicker() {
-  if (!canvasBgColorInput) {
-    return;
-  }
   canvasBgNativePickerOpen = false;
-  canvasBgColorInput.blur();
+  if (drawCanvasBgColorInput) {
+    drawCanvasBgColorInput.blur();
+  }
+  if (canvasBgColorInput) {
+    canvasBgColorInput.blur();
+  }
 }
 
 function setTintPopoverOpen(nextOpen) {
@@ -2394,6 +2425,107 @@ function isBrushFavorite(brush) {
   return isBrushSourceFavorite(getBrushFavoriteSource(brush));
 }
 
+function getBrushPresetSource(brush) {
+  return normalizeFavoriteBrushSource(brush?.originalUrl || brush?.url || "");
+}
+
+function normalizeCustomBrushPresetIndex(index) {
+  const numericIndex = Math.floor(Number(index));
+  return Number.isFinite(numericIndex) && numericIndex >= 0 && numericIndex < 5
+    ? numericIndex
+    : null;
+}
+
+function getCustomBrushPresetSources(index) {
+  const presetIndex = normalizeCustomBrushPresetIndex(index);
+  if (presetIndex === null) {
+    return new Set();
+  }
+  if (!Array.isArray(state.customBrushPresetSources)) {
+    state.customBrushPresetSources = Array.from({ length: 5 }, () => new Set());
+  }
+  if (!(state.customBrushPresetSources[presetIndex] instanceof Set)) {
+    state.customBrushPresetSources[presetIndex] = new Set();
+  }
+  return state.customBrushPresetSources[presetIndex];
+}
+
+function getCustomBrushPresetSourcesSnapshot() {
+  return Array.from({ length: 5 }, (_, index) =>
+    Array.from(getCustomBrushPresetSources(index)).filter(Boolean)
+  );
+}
+
+function normalizeCustomBrushPresetSourcesSnapshot(value) {
+  return Array.from({ length: 5 }, (_, index) => {
+    const sources = Array.isArray(value?.[index]) ? value[index] : [];
+    return new Set(sources.map(normalizeFavoriteBrushSource).filter(Boolean));
+  });
+}
+
+function loadCustomBrushPresetSources() {
+  const raw = getLocalStorageItemSafe(CUSTOM_BRUSH_PRESET_SOURCES_KEY);
+  if (!raw) {
+    state.customBrushPresetSources = Array.from({ length: 5 }, () => new Set());
+    return;
+  }
+
+  try {
+    state.customBrushPresetSources = normalizeCustomBrushPresetSourcesSnapshot(JSON.parse(raw));
+  } catch (error) {
+    state.customBrushPresetSources = Array.from({ length: 5 }, () => new Set());
+  }
+}
+
+function saveCustomBrushPresetSources() {
+  setLocalStorageItemSafe(
+    CUSTOM_BRUSH_PRESET_SOURCES_KEY,
+    JSON.stringify(getCustomBrushPresetSourcesSnapshot())
+  );
+}
+
+function isActiveCustomBrushPresetSource(source) {
+  const presetIndex = normalizeCustomBrushPresetIndex(state.activeCustomBrushPresetIndex);
+  if (presetIndex === null) {
+    return false;
+  }
+  const normalized = normalizeFavoriteBrushSource(source);
+  return Boolean(normalized && getCustomBrushPresetSources(presetIndex).has(normalized));
+}
+
+function clearActiveCustomBrushPreset() {
+  state.activeCustomBrushPresetIndex = null;
+}
+
+function updateCustomBrushPresetButtons() {
+  for (const container of [drawingBrushPresetButtons, brushesBrushPresetButtons]) {
+    if (!container) {
+      continue;
+    }
+    container.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 5; index += 1) {
+      const sources = getCustomBrushPresetSources(index);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "custom-brush-preset-button";
+      button.dataset.presetIndex = String(index);
+      button.textContent = String(index + 1);
+      button.title = sources.size
+        ? `Load custom brush preset ${index + 1}`
+        : `Drop brush images here for preset ${index + 1}`;
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-pressed", String(state.activeCustomBrushPresetIndex === index));
+      button.disabled = Boolean(state.stockBrushLoadingFolderId);
+      button.classList.toggle("has-items", sources.size > 0);
+      button.classList.toggle("is-active", state.activeCustomBrushPresetIndex === index);
+      button.classList.toggle("is-loading", state.stockBrushLoadingFolderId === `preset-${index}`);
+      fragment.appendChild(button);
+    }
+    container.appendChild(fragment);
+  }
+}
+
 function updateFavoriteBrushButtons() {
   const count = state.favoriteBrushSources instanceof Set ? state.favoriteBrushSources.size : 0;
   const disabled = Boolean(state.stockBrushLoadingFolderId) || count === 0;
@@ -2405,6 +2537,7 @@ function updateFavoriteBrushButtons() {
     button.classList.toggle("is-active", state.activeStockBrushFolderId === "favorites");
     button.classList.toggle("is-loading", state.stockBrushLoadingFolderId === "favorites");
   }
+  updateCustomBrushPresetButtons();
 }
 
 function toggleBrushFavorite(brush) {
@@ -2423,6 +2556,114 @@ function toggleBrushFavorite(brush) {
   saveFavoriteBrushSources();
   updateFavoriteBrushButtons();
   return true;
+}
+
+function addBrushToCustomPreset(brush, index) {
+  const source = getBrushPresetSource(brush);
+  const presetIndex = normalizeCustomBrushPresetIndex(index);
+  if (!source || presetIndex === null) {
+    return false;
+  }
+  getCustomBrushPresetSources(presetIndex).add(source);
+  saveCustomBrushPresetSources();
+  updateCustomBrushPresetButtons();
+  return true;
+}
+
+function removeBrushFromCustomPreset(brush, index = state.activeCustomBrushPresetIndex) {
+  const source = getBrushPresetSource(brush);
+  const presetIndex = normalizeCustomBrushPresetIndex(index);
+  if (!source || presetIndex === null) {
+    return false;
+  }
+  const sources = getCustomBrushPresetSources(presetIndex);
+  const removed = sources.delete(source);
+  if (!removed) {
+    return false;
+  }
+  saveCustomBrushPresetSources();
+  if (state.activeCustomBrushPresetIndex === presetIndex) {
+    const brushIndex = state.brushes.indexOf(brush);
+    if (brushIndex >= 0) {
+      state.brushes.splice(brushIndex, 1);
+      maybeReleaseObjectUrl(brush.url);
+    }
+    if (state.soloBrushId === brush.id) {
+      state.soloBrushId = null;
+    }
+    if (state.selectedBrushIds instanceof Set) {
+      state.selectedBrushIds.delete(brush.id);
+    }
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
+  }
+  updateCustomBrushPresetButtons();
+  return true;
+}
+
+async function loadCustomBrushPreset(index) {
+  const presetIndex = normalizeCustomBrushPresetIndex(index);
+  if (presetIndex === null || state.stockBrushLoadingFolderId) {
+    return;
+  }
+
+  const sources = Array.from(getCustomBrushPresetSources(presetIndex)).filter(Boolean);
+  if (!sources.length) {
+    updateBrushStatus(`Preset ${presetIndex + 1} is empty.`);
+    updateCustomBrushPresetButtons();
+    return;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  state.favoriteReturnState = null;
+  state.stockBrushLoadingFolderId = `preset-${presetIndex}`;
+  updateCustomBrushPresetButtons();
+  updateBrushStatus(`Loading preset ${presetIndex + 1}...`);
+
+  try {
+    const loaded = await loadBrushSourceData(sources);
+    if (!loaded.length) {
+      updateBrushStatus(`Could not load preset ${presetIndex + 1}.`);
+      return;
+    }
+
+    const previousBrushUrls = state.brushes.map((brush) => brush.url);
+    state.brushes = loaded.map((brushData) => {
+      const brush = {
+        id: state.nextBrushId,
+        ...brushData
+      };
+      state.nextBrushId += 1;
+      return brush;
+    });
+    clearBrushFrameCountJobs();
+    state.soloBrushId = null;
+    clearSelectedBrushes();
+    state.activeStockBrushFolderId = null;
+    state.activeCustomBrushPresetIndex = presetIndex;
+    state.brushCursorPreview.brushId = null;
+    resetBrushCursorPreviewSource();
+    for (const oldUrl of previousBrushUrls) {
+      maybeReleaseObjectUrl(oldUrl);
+    }
+    if (state.eraseMode) {
+      setEraseMode(false);
+    }
+
+    brushInput.value = "";
+    updateBrushStatus();
+    renderBrushGallery();
+    renderStockBrushButtons();
+    updateEraseCursorGeometry();
+    updateBrushCursorPreview();
+    scheduleSessionSave();
+  } finally {
+    state.stockBrushLoadingFolderId = null;
+    renderStockBrushButtons();
+  }
 }
 
 function cloneBrushForReturnState(brush) {
@@ -2553,12 +2794,30 @@ function setSoloBrushId(brushId) {
 function updateSliderText() {
   sizeValue.textContent = String(sizeSlider.value);
   consistentSizeValue.textContent = String(consistentSizeSlider.value);
-  spacingValue.textContent = String(spacingSlider.value);
+  spacingValue.textContent = String(getSpacingValue());
   rotationValue.textContent = String(rotationSlider.value);
   opacityValue.textContent = String(opacitySlider.value);
   cursorTrailCountValue.textContent = String(cursorTrailCountSlider.value);
   spraySpreadValue.textContent = String(spraySpreadSlider.value);
   tintAmountValue.textContent = String(tintAmountSlider.value);
+}
+
+function mapSpacingSliderToValue(value) {
+  const sliderValue = clamp(Math.round(Number(value) || 48), 4, 1200);
+  if (sliderValue <= 1000) {
+    return sliderValue;
+  }
+  const progress = (sliderValue - 1000) / 200;
+  return Math.round(1000 + progress * 1000);
+}
+
+function mapSpacingValueToSlider(value) {
+  const spacing = clamp(Math.round(Number(value) || 48), 4, 2000);
+  if (spacing <= 1000) {
+    return spacing;
+  }
+  const progress = (spacing - 1000) / 1000;
+  return Math.round(1000 + progress * 200);
 }
 
 function updateBrushDataToggleUI() {
@@ -2667,7 +2926,22 @@ function initializeSliderGroupToggles() {
 function updateConsistentModeUI() {
   const isConsistentMode = consistentToggle.checked;
   sizeSlider.disabled = isConsistentMode;
-  sizeScaleGroup.classList.toggle("is-disabled", isConsistentMode);
+  sizeScaleGroup.classList.toggle("is-consistent-size", isConsistentMode);
+  if (sizeControlLabel) {
+    sizeControlLabel.textContent = isConsistentMode ? "size (consistent)" : "size";
+  }
+  if (sizeControlLabel) {
+    sizeControlLabel.setAttribute("for", isConsistentMode ? "consistentSizeSlider" : "sizeSlider");
+  }
+  if (sizePercentValueText) {
+    sizePercentValueText.hidden = isConsistentMode;
+  }
+  if (consistentSizeValueText) {
+    consistentSizeValueText.hidden = !isConsistentMode;
+  }
+  if (sizePercentGroup) {
+    sizePercentGroup.hidden = isConsistentMode;
+  }
   consistentSizeGroup.hidden = !isConsistentMode;
   consistentSizeSlider.disabled = !isConsistentMode;
 }
@@ -2855,7 +3129,7 @@ function updateCursorTrailAtClientPoint(clientX, clientY) {
   }
 
   const point = screenToWorld(clientX, clientY);
-  const spacing = Math.max(1, parseNumericInputValue(spacingSlider, 48));
+  const spacing = getSpacingValue();
   if (
     !Number.isFinite(state.cursorTrailLastWorldX) ||
     !Number.isFinite(state.cursorTrailLastWorldY)
@@ -2900,6 +3174,9 @@ function applyCanvasBackgroundColor(nextColor) {
   const normalized = normalizeHexColor(nextColor, "#ffffff");
   state.canvasBackgroundColor = normalized;
   document.documentElement.style.setProperty("--canvas-bg", normalized);
+  if (drawCanvasBgColorInput && drawCanvasBgColorInput.value !== normalized) {
+    drawCanvasBgColorInput.value = normalized;
+  }
   if (canvasBgColorInput && canvasBgColorInput.value !== normalized) {
     canvasBgColorInput.value = normalized;
   }
@@ -2913,6 +3190,7 @@ function revokeExportBackgroundImageUrl() {
     URL.revokeObjectURL(state.exportBgImageObjectUrl);
   }
   state.exportBgImageObjectUrl = "";
+  state.exportBgImagePreviewUrl = "";
 }
 
 function normalizeExportBgTileSize(value) {
@@ -2972,13 +3250,18 @@ function updateExportBackgroundImageLayer() {
     return;
   }
 
-  const imageUrl = state.exportBgImageUrl || "";
+  const imageUrl = state.exportBgImagePreviewUrl ||
+    (isGifUrl(state.exportBgImageUrl) ? "" : state.exportBgImageUrl) ||
+    "";
+  const showCheckerboard = state.exportBackgroundEnabled === false;
   const selectionBounds = state.exportSelectionBounds
     ? normalizeExportSelectionBounds(state.exportSelectionBounds)
     : null;
-  const shouldShow = Boolean(state.exportMode && imageUrl && selectionBounds);
+  const shouldShow = Boolean(state.exportMode && selectionBounds && (showCheckerboard || imageUrl));
   exportBgImageLayer.hidden = !shouldShow;
+  exportBgImageLayer.classList.toggle("is-checkerboard", showCheckerboard);
   if (!shouldShow) {
+    exportBgImageLayer.classList.remove("is-checkerboard");
     exportBgImageLayer.style.removeProperty("background-image");
     return;
   }
@@ -2989,6 +3272,17 @@ function updateExportBackgroundImageLayer() {
   exportBgImageLayer.style.top = `${selectionBounds.top}px`;
   exportBgImageLayer.style.width = `${boundsWidth}px`;
   exportBgImageLayer.style.height = `${boundsHeight}px`;
+
+  if (showCheckerboard) {
+    const checkerTileSize = 16 / Math.max(0.0001, Number(state.camera.scale) || 1);
+    const checkerOffset = checkerTileSize / 2;
+    exportBgImageLayer.style.removeProperty("background-image");
+    exportBgImageLayer.style.opacity = "1";
+    exportBgImageLayer.style.backgroundPosition = `0 0, ${checkerOffset}px ${checkerOffset}px`;
+    exportBgImageLayer.style.backgroundRepeat = "repeat";
+    exportBgImageLayer.style.backgroundSize = `${checkerTileSize}px ${checkerTileSize}px`;
+    return;
+  }
 
   const opacity = clamp(Number(state.exportBgImageOpacity) || 0, 0, 100);
   exportBgImageLayer.style.backgroundImage = `url("${imageUrl.replace(/"/g, '\\"')}")`;
@@ -3010,11 +3304,17 @@ function updateExportBackgroundImageLayer() {
 
 function updateExportBackgroundImageUI() {
   const hasImage = Boolean(state.exportBgImageUrl);
+  if (clearExportBgImageButton) {
+    clearExportBgImageButton.hidden = !hasImage;
+    clearExportBgImageButton.disabled = !hasImage;
+  }
   if (exportBgImageButton) {
     exportBgImageButton.classList.toggle("has-image", hasImage);
   }
   if (exportBgImagePreview) {
-    exportBgImagePreview.style.backgroundImage = hasImage ? `url("${state.exportBgImageUrl.replace(/"/g, '\\"')}")` : "";
+    const previewUrl = state.exportBgImagePreviewUrl ||
+      (isGifUrl(state.exportBgImageUrl) ? "" : state.exportBgImageUrl);
+    exportBgImagePreview.style.backgroundImage = hasImage && previewUrl ? `url("${previewUrl.replace(/"/g, '\\"')}")` : "";
   }
   if (exportBgImageControls) {
     exportBgImageControls.hidden = !hasImage;
@@ -3044,6 +3344,68 @@ function updateExportBackgroundImageUI() {
     exportBgImageTileSizeValue.textContent = String(normalizeExportBgTileSize(state.exportBgImageTileSize));
   }
   updateExportBackgroundImageLayer();
+  ensureExportBackgroundStillPreview();
+}
+
+function clearExportBackgroundImage() {
+  revokeExportBackgroundImageUrl();
+  exportBackgroundAnimationCache.clear();
+  exportBackgroundStillPreviewCache.clear();
+  exportBackgroundRenderCache.clear();
+  state.exportBgImageUrl = "";
+  state.exportBgImageOpacity = 100;
+  state.exportBgImageMode = "stretch";
+  state.exportBgImageTileSize = 128;
+  state.exportBgImageNaturalWidth = 0;
+  state.exportBgImageNaturalHeight = 0;
+  updateExportBackgroundImageUI();
+  scheduleSessionSave();
+}
+
+async function getExportBackgroundStillPreviewUrl(url) {
+  if (!isGifUrl(url)) {
+    return url;
+  }
+  if (!exportBackgroundStillPreviewCache.has(url)) {
+    exportBackgroundStillPreviewCache.set(
+      url,
+      decodeGifAnimation(url)
+        .then((animation) => {
+          const frame = Array.isArray(animation.frames) ? animation.frames[0] : null;
+          if (!frame || typeof frame.toDataURL !== "function") {
+            return url;
+          }
+          return frame.toDataURL("image/png");
+        })
+        .catch(() => url)
+    );
+  }
+  return exportBackgroundStillPreviewCache.get(url);
+}
+
+function ensureExportBackgroundStillPreview() {
+  const url = state.exportBgImageUrl || "";
+  if (!url) {
+    state.exportBgImagePreviewUrl = "";
+    return;
+  }
+  if (!isGifUrl(url)) {
+    if (state.exportBgImagePreviewUrl !== url) {
+      state.exportBgImagePreviewUrl = url;
+      updateExportBackgroundImageLayer();
+    }
+    return;
+  }
+  getExportBackgroundStillPreviewUrl(url).then((previewUrl) => {
+    if (state.exportBgImageUrl !== url || !previewUrl || state.exportBgImagePreviewUrl === previewUrl) {
+      return;
+    }
+    state.exportBgImagePreviewUrl = previewUrl;
+    if (exportBgImagePreview) {
+      exportBgImagePreview.style.backgroundImage = `url("${previewUrl.replace(/"/g, '\\"')}")`;
+    }
+    updateExportBackgroundImageLayer();
+  });
 }
 
 function loadExportBackgroundImageFile(file) {
@@ -3054,7 +3416,11 @@ function loadExportBackgroundImageFile(file) {
   readFileAsDataUrl(file)
     .then((dataUrl) => {
       revokeExportBackgroundImageUrl();
+      exportBackgroundAnimationCache.clear();
+      exportBackgroundStillPreviewCache.clear();
+      exportBackgroundRenderCache.clear();
       state.exportBgImageUrl = dataUrl;
+      state.exportBgImagePreviewUrl = isGifUrl(dataUrl) ? "" : dataUrl;
       state.exportBgImageNaturalWidth = 0;
       state.exportBgImageNaturalHeight = 0;
       updateExportBackgroundImageUI();
@@ -3078,11 +3444,20 @@ function loadExportBackgroundImageFile(file) {
 }
 
 function updateSettingsPanelUI() {
+  if (drawCanvasBgRow) {
+    drawCanvasBgRow.hidden = !state.showDrawBackgroundColorControl;
+  }
+  if (drawCanvasBgColorInput) {
+    drawCanvasBgColorInput.value = normalizeHexColor(state.canvasBackgroundColor, "#ffffff");
+  }
   if (canvasBgColorInput) {
     canvasBgColorInput.value = normalizeHexColor(state.canvasBackgroundColor, "#ffffff");
   }
   if (exportCanvasBgColorInput) {
     exportCanvasBgColorInput.value = normalizeHexColor(state.canvasBackgroundColor, "#ffffff");
+  }
+  if (exportCanvasBgRow) {
+    exportCanvasBgRow.hidden = state.exportBackgroundEnabled === false;
   }
   if (exportBackgroundToggle) {
     exportBackgroundToggle.checked = Boolean(state.exportBackgroundEnabled);
@@ -3097,6 +3472,9 @@ function updateSettingsPanelUI() {
   }
   if (gifPauseToggle) {
     gifPauseToggle.checked = state.showGifPauseButton !== false;
+  }
+  if (drawBkgColorToggle) {
+    drawBkgColorToggle.checked = Boolean(state.showDrawBackgroundColorControl);
   }
   if (brushPreviewToggle) {
     brushPreviewToggle.checked = state.brushPreviewEnabled !== false;
@@ -3513,19 +3891,17 @@ function unregisterStampSpatialCells(element) {
   state.stampSpatialCells.delete(element);
 }
 
-function registerStampSpatialCells(element) {
+function cacheStampWorldBounds(element) {
   if (!element || !element.classList || !element.classList.contains("stamp")) {
-    return;
+    return null;
   }
-
-  unregisterStampSpatialCells(element);
 
   const left = parseFloat(element.style.left) || 0;
   const top = parseFloat(element.style.top) || 0;
   const width = Math.max(0, parseFloat(element.style.width) || 0);
   const height = Math.max(0, parseFloat(element.style.height) || 0);
   if (width <= 0 || height <= 0) {
-    return;
+    return null;
   }
   const rotation = Number(element.dataset.rotation) || 0;
   const bounds = getStampWorldBoundsFromLayout(left, top, width, height, rotation);
@@ -3533,6 +3909,20 @@ function registerStampSpatialCells(element) {
   element.dataset.worldTop = String(bounds.top);
   element.dataset.worldRight = String(bounds.right);
   element.dataset.worldBottom = String(bounds.bottom);
+  return bounds;
+}
+
+function registerStampSpatialCells(element) {
+  if (!element || !element.classList || !element.classList.contains("stamp")) {
+    return;
+  }
+
+  unregisterStampSpatialCells(element);
+  const bounds = cacheStampWorldBounds(element);
+  if (!bounds) {
+    return;
+  }
+
   const minCellX = getStampIndexCellCoord(bounds.left);
   const maxCellX = getStampIndexCellCoord(bounds.right);
   const minCellY = getStampIndexCellCoord(bounds.top);
@@ -3567,6 +3957,9 @@ function rebuildStampSpatialIndexFromDom() {
   const elements = world.getElementsByClassName("stamp");
   for (let index = 0; index < elements.length; index += 1) {
     const element = elements[index];
+    if (element.classList.contains("is-layer-hidden")) {
+      continue;
+    }
     registerStampSpatialCells(element);
   }
 }
@@ -3589,7 +3982,7 @@ function getEraseCandidateStamps(centerX, centerY, radius) {
         continue;
       }
       for (const element of bucket) {
-        if (element.parentElement === world) {
+        if (element.parentElement === world && !element.classList.contains("is-layer-hidden")) {
           candidates.add(element);
         }
       }
@@ -5415,11 +5808,20 @@ function normalizeLayerSequenceSettings(settings) {
     : 70;
   normalized.colorCycleInstant = Boolean(normalized.colorCycleInstant);
   normalized.colorCycleSpeed = normalizeSequenceSpeedSliderValue(normalized.colorCycleSpeed, 5000, 50, 45);
-  normalized.rotateSpeed = normalizeSequenceSpeedSliderValue(normalized.rotateSpeed, 6000, 100, 45);
+  normalized.rotateSpeed = Number.isFinite(Number(normalized.rotateSpeed))
+    ? clamp(Math.round(Number(normalized.rotateSpeed)), 1, 100)
+    : 45;
+  normalized.rotateContinuous = Boolean(normalized.rotateContinuous);
+  normalized.rotateReverse = Boolean(normalized.rotateReverse);
   normalized.scaleSpeed = normalizeSequenceSpeedSliderValue(normalized.scaleSpeed, 6000, 100, 45);
   normalized.scaleAmount = clamp(Math.round(Number(normalized.scaleAmount) || 50), 0, 300);
-  normalized.pulseSpeed = normalizeSequenceSpeedSliderValue(normalized.pulseSpeed, 700, 15, 35);
-  normalized.pulseRate = normalizeSequenceSpeedSliderValue(normalized.pulseRate, 5000, 100, 35);
+  normalized.imageCycleSpeed = normalizeSequenceSpeedSliderValue(normalized.imageCycleSpeed, 4000, 50, 50);
+  normalized.pulseSpeed = Number.isFinite(Number(normalized.pulseSpeed))
+    ? clamp(Math.round(Number(normalized.pulseSpeed)), 1, 500)
+    : 35;
+  normalized.pulseRate = Number.isFinite(Number(normalized.pulseRate))
+    ? clamp(Math.round(Number(normalized.pulseRate)), 1, 300)
+    : 35;
   normalized.waveSpeed = normalizeSequenceSpeedSliderValue(normalized.waveSpeed, 2000, 20, 45);
   normalized.waveReverse = Boolean(normalized.waveReverse);
   normalized.stepLength = clamp(Math.round(Number(normalized.stepLength) || 350), 50, 4000);
@@ -5500,8 +5902,64 @@ function createLayerSequenceToggleControl(stroke, key, label, slotIndex = 0) {
   return field;
 }
 
+function getCompressedSequenceSliderConfig(key) {
+  if (key === "imageCycleSpeed") {
+    return { min: 1, knee: 75, max: 100, kneePosition: 50 };
+  }
+  if (key === "pulseSpeed") {
+    return { min: 1, knee: 100, max: 500, kneePosition: 67 };
+  }
+  if (key === "pulseRate") {
+    return { min: 1, knee: 100, max: 300, kneePosition: 67 };
+  }
+  return null;
+}
+
+function mapSequenceSettingToSliderPosition(key, value) {
+  const config = getCompressedSequenceSliderConfig(key);
+  if (!config) {
+    return Number(value);
+  }
+  const numericValue = clamp(Number(value) || config.min, config.min, config.max);
+  if (numericValue <= config.knee) {
+    return Math.round(
+      1 + ((numericValue - config.min) / (config.knee - config.min)) * (config.kneePosition - 1)
+    );
+  }
+  return Math.round(
+    config.kneePosition +
+      ((numericValue - config.knee) / (config.max - config.knee)) * (100 - config.kneePosition)
+  );
+}
+
+function mapSequenceSliderPositionToSetting(key, value) {
+  const config = getCompressedSequenceSliderConfig(key);
+  if (!config) {
+    return Number(value);
+  }
+  const sliderValue = clamp(Number(value) || 1, 1, 100);
+  if (sliderValue <= config.kneePosition) {
+    return Math.round(
+      config.min +
+        ((sliderValue - 1) / (config.kneePosition - 1)) * (config.knee - config.min)
+    );
+  }
+  return Math.round(
+    config.knee +
+      ((sliderValue - config.kneePosition) / (100 - config.kneePosition)) * (config.max - config.knee)
+  );
+}
+
+function getSequenceSettingInputValue(input) {
+  if (!input || input.dataset.sequenceSettingType !== "number") {
+    return input?.value;
+  }
+  return mapSequenceSliderPositionToSetting(input.dataset.sequenceSetting || "", input.value);
+}
+
 function createLayerSequenceRangeControl(stroke, key, label, min, max, step, suffix = "", slotIndex = 0) {
   const settings = getLayerSequenceSettings(stroke, slotIndex);
+  const compressedSlider = getCompressedSequenceSliderConfig(key);
   const field = document.createElement("label");
   field.className = "edit-layer-sequence-setting edit-layer-sequence-range";
 
@@ -5519,10 +5977,10 @@ function createLayerSequenceRangeControl(stroke, key, label, min, max, step, suf
   input.dataset.sequenceSetting = key;
   input.dataset.sequenceSettingType = "number";
   input.dataset.sequenceSlotIndex = String(slotIndex);
-  input.min = String(min);
-  input.max = String(max);
-  input.step = String(step);
-  input.value = String(settings[key]);
+  input.min = compressedSlider ? "1" : String(min);
+  input.max = compressedSlider ? "100" : String(max);
+  input.step = compressedSlider ? "1" : String(step);
+  input.value = String(compressedSlider ? mapSequenceSettingToSliderPosition(key, settings[key]) : settings[key]);
 
   field.appendChild(labelText);
   field.appendChild(value);
@@ -5624,6 +6082,8 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
     }
     panel.appendChild(moveSpeedControl);
   } else if (effect === "rotate") {
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "rotateContinuous", "continuous?", slotIndex));
+    panel.appendChild(createLayerSequenceToggleControl(stroke, "rotateReverse", "reverse?", slotIndex));
     panel.appendChild(
       createLayerSequenceRangeControl(stroke, "rotateSpeed", "rotate speed", 1, 100, 1, "", slotIndex)
     );
@@ -5636,6 +6096,11 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
     );
   } else if (effect === "image-cycle") {
     panel.appendChild(createLayerSequenceToggleControl(stroke, "imageCycleRandom", "random?", slotIndex));
+    if (timingStyle === "all") {
+      panel.appendChild(
+        createLayerSequenceRangeControl(stroke, "imageCycleSpeed", "speed", 1, 100, 1, "", slotIndex)
+      );
+    }
   } else if (effect === "color-cycle") {
     panel.appendChild(createLayerSequenceColorControl(stroke, "colorCycleColor", "color", slotIndex));
     panel.appendChild(
@@ -5664,10 +6129,10 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
 
   if (timingStyle === "pulse") {
     panel.appendChild(
-      createLayerSequenceRangeControl(stroke, "pulseSpeed", "pulse speed", 1, 100, 1, "", slotIndex)
+      createLayerSequenceRangeControl(stroke, "pulseSpeed", "pulse speed", 1, 500, 1, "", slotIndex)
     );
     panel.appendChild(
-      createLayerSequenceRangeControl(stroke, "pulseRate", "pulse rate", 1, 100, 1, "", slotIndex)
+      createLayerSequenceRangeControl(stroke, "pulseRate", "pulse rate", 1, 300, 1, "", slotIndex)
     );
   } else if (timingStyle === "wave") {
     panel.appendChild(createLayerSequenceToggleControl(stroke, "waveReverse", "reverse?", slotIndex));
@@ -5737,6 +6202,7 @@ function createLayerSequenceAddRemoveRow(stroke, slotIndex, slotCount) {
 function serializeStrokeList(strokes) {
   return strokes.map((stroke) => ({
     id: Number.isFinite(Number(stroke.id)) ? Number(stroke.id) : null,
+    layerNumber: Number.isFinite(Number(stroke.layerNumber)) ? Number(stroke.layerNumber) : null,
     layerType: normalizeStrokeLayerType(stroke.layerType),
     brushCategoryName: typeof stroke.brushCategoryName === "string"
       ? stroke.brushCategoryName
@@ -5833,7 +6299,7 @@ function buildSessionSnapshot() {
       size: parseNumericInputValue(sizeSlider, 100),
       consistent: consistentToggle.checked,
       consistentSize: parseNumericInputValue(consistentSizeSlider, 96),
-      spacing: parseNumericInputValue(spacingSlider, 48),
+      spacing: getSpacingValue(),
       rotation: parseNumericInputValue(rotationSlider, 0),
       opacity: parseNumericInputValue(opacitySlider, 100),
       tintColor: normalizeHexColor(tintColorInput.value),
@@ -5848,6 +6314,8 @@ function buildSessionSnapshot() {
       sidebarTab: state.sidebarTab === "export" ? "draw" : state.sidebarTab,
       brushGalleryCollapsed: state.brushGalleryCollapsed,
       brushGallerySort: normalizeBrushGallerySort(state.brushGallerySort),
+      customBrushPresetSources: getCustomBrushPresetSourcesSnapshot(),
+      activeCustomBrushPresetIndex: normalizeCustomBrushPresetIndex(state.activeCustomBrushPresetIndex),
       canvasBackgroundColor: normalizeHexColor(state.canvasBackgroundColor, "#ffffff"),
       exportBackgroundEnabled: state.exportBackgroundEnabled !== false,
       exportSeeBeyondEnabled: state.exportSeeBeyondEnabled !== false,
@@ -5868,6 +6336,7 @@ function buildSessionSnapshot() {
       exportVideoSeconds: Number(state.exportVideoSeconds) || 3,
       showGifCountIndicator: state.showGifCountIndicator !== false,
       showGifPauseButton: state.showGifPauseButton !== false,
+      showDrawBackgroundColorControl: Boolean(state.showDrawBackgroundColorControl),
       collapsedSliderGroups: getCollapsedSliderGroupSnapshot()
     },
     brushes: state.brushes.map((brush) => ({
@@ -6130,12 +6599,12 @@ async function loadSavedComposition(id) {
         `${SESSION_IDB_PREFIX}${SAVED_COMPOSITION_KEY_PREFIX}${id}`
       );
     }
-    const restored = await restoreSessionState();
+    await yieldToMainThread();
+    const restored = await restoreSessionState(snapshotJson);
     if (!restored) {
       setSavedCompositionsStatus("could not load");
       return;
     }
-    await saveSessionStateNow();
     setSavedCompositionsStatus("loaded");
   } catch (error) {
     setSavedCompositionsStatus("could not load");
@@ -6277,12 +6746,17 @@ function resolveBrushForStamp(stampData, brushById) {
 function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallbackTintSettings = null) {
   const restored = [];
   const list = Array.isArray(serializedStrokes) ? serializedStrokes : [];
+  const fragment = appendToWorld ? document.createDocumentFragment() : null;
+  const restoredStampRefs = appendToWorld ? [] : null;
 
   for (const strokeData of list) {
     const snapshotStrokeId = Number(strokeData?.id);
     const strokeId = Number.isFinite(snapshotStrokeId) ? snapshotStrokeId : state.nextStrokeId;
     const stroke = {
       id: strokeId,
+      layerNumber: Number.isFinite(Number(strokeData?.layerNumber))
+        ? Number(strokeData.layerNumber)
+        : strokeId,
       layerType: normalizeStrokeLayerType(strokeData?.layerType),
 	      brushCategoryName:
 	        typeof strokeData?.brushCategoryName === "string" && strokeData.brushCategoryName.trim()
@@ -6319,11 +6793,11 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
       const stamp = createStampElement(stampData, brush, fallbackTintSettings);
       stamp.dataset.strokeId = String(stroke.id);
       if (appendToWorld) {
-        world.appendChild(stamp);
+        fragment.appendChild(stamp);
         state.stampCount += 1;
-        registerStampSpatialCells(stamp);
-        updateStampViewportVisibility(stamp);
+        cacheStampWorldBounds(stamp);
         incrementUrlRef(brush.url);
+        restoredStampRefs.push(stamp);
       }
       stroke.elements.push(stamp);
     }
@@ -6333,14 +6807,19 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
     }
   }
 
-  if (appendToWorld && restored.length) {
+  if (appendToWorld && restoredStampRefs.length) {
+    world.appendChild(fragment);
+    const viewportBounds = getViewportWorldBounds();
+    for (const stamp of restoredStampRefs) {
+      updateStampViewportVisibility(stamp, viewportBounds);
+    }
     scheduleStampVisibilityRefresh();
   }
   return restored;
 }
 
-async function restoreSessionState() {
-  let raw = getSessionStorageItemSafe(SESSION_STORAGE_KEY);
+async function restoreSessionState(rawSnapshot = null) {
+  let raw = typeof rawSnapshot === "string" ? rawSnapshot : getSessionStorageItemSafe(SESSION_STORAGE_KEY);
   if (!raw) {
     const pointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY) || "";
     if (pointer.startsWith(SESSION_IDB_PREFIX)) {
@@ -6432,6 +6911,7 @@ async function restoreSessionState() {
 	    ) || snapshotStockFolderId === "all" || snapshotStockFolderId === "favorites"
 	      ? snapshotStockFolderId
 	      : null;
+    clearActiveCustomBrushPreset();
     const soloBrush = getSoloBrush();
     if (soloBrush) {
       soloBrush.enabled = true;
@@ -6485,6 +6965,17 @@ async function restoreSessionState() {
       amountPercent: controls.tintAmount
     });
 
+    const camera = snapshot.camera || {};
+    if (Number.isFinite(Number(camera.x))) {
+      state.camera.x = Number(camera.x);
+    }
+    if (Number.isFinite(Number(camera.y))) {
+      state.camera.y = Number(camera.y);
+    }
+    if (Number.isFinite(Number(camera.scale))) {
+      state.camera.scale = clamp(Number(camera.scale), MIN_CAMERA_SCALE, MAX_CAMERA_SCALE);
+    }
+
     state.strokes = restoreStrokeList(snapshot.strokes, brushById, true, fallbackStrokeTint);
     const restoredRedoStrokes = restoreStrokeList(
       snapshot.redoStrokes,
@@ -6506,7 +6997,7 @@ async function restoreSessionState() {
     setInputNumericValue(sizeSlider, controls.size);
     consistentToggle.checked = Boolean(controls.consistent);
     setInputNumericValue(consistentSizeSlider, controls.consistentSize);
-    setInputNumericValue(spacingSlider, controls.spacing);
+    setInputNumericValue(spacingSlider, mapSpacingValueToSlider(controls.spacing));
     setInputNumericValue(rotationSlider, controls.rotation);
     setInputNumericValue(opacitySlider, controls.opacity);
     tintColorInput.value = normalizeHexColor(controls.tintColor, "#ffffff");
@@ -6521,6 +7012,16 @@ async function restoreSessionState() {
     state.sidebarTab = normalizeSidebarTab(controls.sidebarTab) === "export"
       ? "draw"
       : normalizeSidebarTab(controls.sidebarTab);
+    if (Array.isArray(controls.customBrushPresetSources)) {
+      state.customBrushPresetSources = normalizeCustomBrushPresetSourcesSnapshot(
+        controls.customBrushPresetSources
+      );
+      saveCustomBrushPresetSources();
+    }
+    state.activeCustomBrushPresetIndex =
+      state.activeStockBrushFolderId === null
+        ? normalizeCustomBrushPresetIndex(controls.activeCustomBrushPresetIndex)
+        : null;
     state.exportMode = false;
     state.exportSelectionBounds = null;
     state.exportDrag = null;
@@ -6534,6 +7035,7 @@ async function restoreSessionState() {
       controls.exportBgImageUrl.startsWith("data:image/")
       ? controls.exportBgImageUrl
       : "";
+    state.exportBgImagePreviewUrl = isGifUrl(state.exportBgImageUrl) ? "" : state.exportBgImageUrl;
     state.exportBgImageOpacity = clamp(Number(controls.exportBgImageOpacity) || 100, 0, 100);
     state.exportBgImageMode = controls.exportBgImageMode === "tile" ? "tile" : "stretch";
     state.exportBgImageTileSize = normalizeExportBgTileSize(controls.exportBgImageTileSize);
@@ -6554,19 +7056,9 @@ async function restoreSessionState() {
       : 3;
     state.showGifCountIndicator = controls.showGifCountIndicator !== false;
     state.showGifPauseButton = controls.showGifPauseButton !== false;
+    state.showDrawBackgroundColorControl = Boolean(controls.showDrawBackgroundColorControl);
     state.canvasBackgroundColor = normalizeHexColor(controls.canvasBackgroundColor, "#ffffff");
     applyCollapsedSliderGroupSnapshot(controls.collapsedSliderGroups);
-
-    const camera = snapshot.camera || {};
-    if (Number.isFinite(Number(camera.x))) {
-      state.camera.x = Number(camera.x);
-    }
-    if (Number.isFinite(Number(camera.y))) {
-      state.camera.y = Number(camera.y);
-    }
-    if (Number.isFinite(Number(camera.scale))) {
-      state.camera.scale = clamp(Number(camera.scale), MIN_CAMERA_SCALE, MAX_CAMERA_SCALE);
-    }
 
     updateSliderText();
     updateTintControlUI();
@@ -6688,6 +7180,9 @@ function getActiveBrushCategoryName() {
   }
   if (state.activeStockBrushFolderId === "favorites") {
     return "favorites";
+  }
+  if (normalizeCustomBrushPresetIndex(state.activeCustomBrushPresetIndex) !== null) {
+    return `preset ${state.activeCustomBrushPresetIndex + 1}`;
   }
 
   const folder = getStockBrushFolderById(state.activeStockBrushFolderId);
@@ -6838,6 +7333,7 @@ function renderBrushGallery() {
   updateBrushDataToggleUI();
   brushGallery.innerHTML = "";
   const showBrushFileMeta = state.sidebarTab === "brushes";
+  const activePresetIndex = normalizeCustomBrushPresetIndex(state.activeCustomBrushPresetIndex);
   if (brushSortSelect) {
     brushSortSelect.value = normalizeBrushGallerySort(state.brushGallerySort);
   }
@@ -6889,12 +7385,13 @@ function renderBrushGallery() {
       card.classList.add("is-solo-muted");
     }
     card.dataset.brushId = String(brush.id);
+    card.draggable = true;
 
     const preview = document.createElement("img");
     preview.className = "brush-thumb";
     preview.src = brush.url;
     preview.alt = brush.name;
-    preview.draggable = false;
+    preview.draggable = true;
     preview.loading = "lazy";
     preview.decoding = "async";
     applyBrushGalleryPreviewAnimationState(preview, brush);
@@ -6909,6 +7406,17 @@ function renderBrushGallery() {
     drawingFavoriteButton.setAttribute("aria-label", drawingFavoriteButton.title);
     drawingFavoriteButton.setAttribute("aria-pressed", isBrushFavorite(brush) ? "true" : "false");
     drawingFavoriteButton.classList.toggle("is-active", isBrushFavorite(brush));
+
+    let presetRemoveButton = null;
+    if (activePresetIndex !== null && isActiveCustomBrushPresetSource(getBrushPresetSource(brush))) {
+      presetRemoveButton = document.createElement("button");
+      presetRemoveButton.type = "button";
+      presetRemoveButton.className = "brush-preset-remove-button";
+      presetRemoveButton.dataset.action = "remove-preset";
+      presetRemoveButton.textContent = "x";
+      presetRemoveButton.title = "Remove from custom brush preset";
+      presetRemoveButton.setAttribute("aria-label", "Remove from custom brush preset");
+    }
 
     const name = document.createElement("p");
     name.className = "brush-name";
@@ -6956,6 +7464,9 @@ function renderBrushGallery() {
     actionRow.appendChild(favoriteButton);
     card.appendChild(preview);
     card.appendChild(drawingFavoriteButton);
+    if (presetRemoveButton) {
+      card.appendChild(presetRemoveButton);
+    }
     card.appendChild(name);
     if (meta) {
       card.appendChild(meta);
@@ -6967,20 +7478,79 @@ function renderBrushGallery() {
   brushGallery.appendChild(fragment);
 }
 
-function getStrokeLayerName(stroke, index) {
+function getStrokeLayerName(stroke) {
   const stampCount = Array.isArray(stroke?.elements) ? stroke.elements.length : 0;
   const categoryName = typeof stroke?.brushCategoryName === "string" && stroke.brushCategoryName.trim()
     ? stroke.brushCategoryName.trim()
     : "custom";
   const layerType = normalizeStrokeLayerType(stroke?.layerType);
   const typeLabel = layerType;
-  return `${categoryName} ${typeLabel} ${index + 1} (${stampCount})`;
+  const layerNumber = Number.isFinite(Number(stroke?.layerNumber))
+    ? Number(stroke.layerNumber)
+    : Number.isFinite(Number(stroke?.id))
+    ? Number(stroke.id)
+    : 1;
+  return `${categoryName} ${typeLabel} ${layerNumber} (${stampCount})`;
 }
 
 function selectEditLayer(strokeId) {
   const numericId = Number(strokeId);
   state.selectedEditLayerId = Number.isFinite(numericId) ? numericId : null;
   renderEditLayers();
+}
+
+function createEditLayerPreview(stroke) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "edit-layer-preview";
+  canvas.width = 64;
+  canvas.height = 64;
+  canvas.setAttribute("aria-hidden", "true");
+  if (!stroke || !Array.isArray(stroke.elements) || !stroke.elements.length) {
+    return canvas;
+  }
+
+  const boundsList = stroke.elements.map((element) => getCachedStampWorldBounds(element));
+  const left = Math.min(...boundsList.map((bounds) => bounds.left));
+  const top = Math.min(...boundsList.map((bounds) => bounds.top));
+  const right = Math.max(...boundsList.map((bounds) => bounds.right));
+  const bottom = Math.max(...boundsList.map((bounds) => bounds.bottom));
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
+  const scale = Math.min(60 / width, 60 / height);
+  const offsetX = (64 - width * scale) / 2;
+  const offsetY = (64 - height * scale) / 2;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) {
+    return canvas;
+  }
+
+  ctx.imageSmoothingEnabled = false;
+  const maxPreviewStamps = 32;
+  const step = Math.max(1, Math.ceil(stroke.elements.length / maxPreviewStamps));
+  for (let index = 0; index < stroke.elements.length; index += step) {
+    const element = stroke.elements[index];
+    if (!(element instanceof HTMLImageElement) || !element.complete || element.naturalWidth <= 0) {
+      continue;
+    }
+    const elementLeft = parseFloat(element.style.left) || 0;
+    const elementTop = parseFloat(element.style.top) || 0;
+    const elementWidth = Math.max(1, parseFloat(element.style.width) || 1);
+    const elementHeight = Math.max(1, parseFloat(element.style.height) || 1);
+    try {
+      ctx.globalAlpha = clamp(Number(element.dataset.sequenceBaseOpacity || element.style.opacity) || 1, 0, 1);
+      ctx.drawImage(
+        element,
+        offsetX + (elementLeft - left) * scale,
+        offsetY + (elementTop - top) * scale,
+        Math.max(1, elementWidth * scale),
+        Math.max(1, elementHeight * scale)
+      );
+    } catch (error) {
+      // Cross-origin or not-yet-ready images simply skip the lightweight preview.
+    }
+  }
+  ctx.globalAlpha = 1;
+  return canvas;
 }
 
 function applyStrokeVisibility(stroke) {
@@ -7059,6 +7629,9 @@ function applyGlobalGifPauseState(paused) {
 }
 
 function getSequenceEffectDuration(effect, settings) {
+  if (effect === "image-cycle") {
+    return getImageCycleDurationMs(settings);
+  }
   if (effect === "move") {
     return getMoveDurationMs(settings);
   }
@@ -7082,6 +7655,16 @@ function mapSequenceSlider(value, lowValue, highValue) {
   return lowValue + (highValue - lowValue) * percent;
 }
 
+function mapExponentialSequenceSlider(value, min, max, lowValue, highValue) {
+  const percent = (clamp(Number(value) || min, min, max) - min) / (max - min);
+  return lowValue * Math.pow(highValue / lowValue, percent);
+}
+
+function mapCompressedSequenceSlider(key, value, lowValue, highValue) {
+  const percent = (mapSequenceSettingToSliderPosition(key, value) - 1) / 99;
+  return lowValue + (highValue - lowValue) * percent;
+}
+
 function normalizeSequenceSpeedSliderValue(value, slowValue, fastValue, fallback = 50) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
@@ -7095,7 +7678,7 @@ function normalizeSequenceSpeedSliderValue(value, slowValue, fastValue, fallback
 }
 
 function getRotateDurationMs(settings) {
-  return mapSequenceSlider(settings.rotateSpeed, 6000, 100);
+  return mapExponentialSequenceSlider(settings.rotateSpeed, 1, 100, 90000, 60);
 }
 
 function getScaleDurationMs(settings) {
@@ -7110,12 +7693,16 @@ function getColorCycleDurationMs(settings) {
   return mapSequenceSlider(settings.colorCycleSpeed, 5000, 50);
 }
 
+function getImageCycleDurationMs(settings) {
+  return mapCompressedSequenceSlider("imageCycleSpeed", settings.imageCycleSpeed, 4000, 50);
+}
+
 function getPulseSpacingMs(settings) {
-  return mapSequenceSlider(settings.pulseSpeed, 700, 15);
+  return mapCompressedSequenceSlider("pulseSpeed", settings.pulseSpeed, 700, 15);
 }
 
 function getPulseIntervalMs(settings) {
-  return mapSequenceSlider(settings.pulseRate, 5000, 100);
+  return mapCompressedSequenceSlider("pulseRate", settings.pulseRate, 5000, 100);
 }
 
 function getWaveSpacingMs(settings) {
@@ -7419,6 +8006,15 @@ function setStampSequenceImage(stamp, src) {
   }
 }
 
+function getCurrentSequenceImageSource(stamp, fallbackSrc = "") {
+  return stamp?.dataset?.sequenceImageCycleSrc ||
+    fallbackSrc ||
+    stamp?.dataset?.sequenceBaseSrc ||
+    stamp?.dataset?.brushUrl ||
+    stamp?.getAttribute("src") ||
+    "";
+}
+
 function resetStampSequenceStyle(stamp, force = false) {
   if (!stamp || (!force && stamp.dataset.sequenceActive !== "1")) {
     return;
@@ -7432,22 +8028,23 @@ function resetStampSequenceStyle(stamp, force = false) {
   deleteSequenceRuntimeDataset(stamp);
 }
 
-function triggerImageCycleSequence(stamp, trigger, settings, pool, index) {
+function triggerImageCycleSequence(stamp, trigger, settings, pool, index, currentSource = "") {
   if (!pool.length) {
     return;
   }
-  const currentSrc = stamp.getAttribute("src") || stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || "";
+  const currentSrc = currentSource || getCurrentSequenceImageSource(stamp);
   let poolIndex = pool.findIndex((brush) => brush.url === currentSrc);
   if (poolIndex < 0) {
     poolIndex = 0;
   }
   const nextIndex = settings.imageCycleRandom
-    ? Math.floor(sequenceHash(String(trigger.key).length + index, poolIndex) * pool.length) % pool.length
+    ? Math.floor(sequenceHash(sequenceKeyNumber(trigger.key), index + poolIndex) * pool.length) % pool.length
     : (poolIndex + 1) % pool.length;
   const safeNextIndex = pool.length > 1 && pool[nextIndex]?.url === currentSrc
     ? (nextIndex + 1) % pool.length
     : nextIndex;
-  setStampSequenceImage(stamp, pool[safeNextIndex]?.url || currentSrc);
+  stamp.dataset.sequenceImageCycleKey = trigger.key;
+  stamp.dataset.sequenceImageCycleSrc = pool[safeNextIndex]?.url || currentSrc;
 }
 
 function getCurrentSequenceScale(stamp, settings, now) {
@@ -7629,6 +8226,40 @@ function applySequenceColorStyle(stamp, settings, amountPercent) {
 }
 
 function getCurrentSequenceRotation(stamp, settings, now) {
+  if (settings.rotateContinuous) {
+    const restAngle = Number(stamp.dataset.sequenceRotateRestAngle);
+    const continuousStart = Number(stamp.dataset.sequenceRotateContinuousStart);
+    const active = stamp.dataset.sequenceRotateContinuousActive === "1";
+    if (!active) {
+      const startTime = Number(stamp.dataset.sequenceRotateStart);
+      const from = Number(stamp.dataset.sequenceRotateFrom);
+      const to = Number(stamp.dataset.sequenceRotateTo);
+      const duration = Number.isFinite(Number(stamp.dataset.sequenceRotateDuration))
+        ? Math.max(1, Number(stamp.dataset.sequenceRotateDuration))
+        : SEQUENCE_INTERRUPT_TWEEN_MS;
+      if (!Number.isFinite(startTime) || !Number.isFinite(from) || !Number.isFinite(to)) {
+        return Number.isFinite(restAngle) ? restAngle : 0;
+      }
+      const progress = clamp((now - startTime) / duration, 0, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      if (progress >= 1) {
+        delete stamp.dataset.sequenceRotateStart;
+        delete stamp.dataset.sequenceRotateFrom;
+        delete stamp.dataset.sequenceRotateTo;
+        delete stamp.dataset.sequenceRotateDuration;
+        stamp.dataset.sequenceRotateRestAngle = String(to);
+        return to;
+      }
+      return from + (to - from) * eased;
+    }
+    if (!Number.isFinite(continuousStart)) {
+      return Number.isFinite(restAngle) ? restAngle : 0;
+    }
+    const duration = Math.max(1, getRotateDurationMs(settings));
+    const elapsed = Math.max(0, now - continuousStart);
+    const direction = settings.rotateReverse ? -1 : 1;
+    return (Number.isFinite(restAngle) ? restAngle : 0) + direction * ((elapsed / duration) * 360);
+  }
   const startTime = Number(stamp.dataset.sequenceRotateStart);
   const from = Number(stamp.dataset.sequenceRotateFrom);
   const to = Number(stamp.dataset.sequenceRotateTo);
@@ -7652,7 +8283,7 @@ function getCurrentSequenceRotation(stamp, settings, now) {
   return from + (to - from) * eased;
 }
 
-function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, index, now) {
+function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, index, now, currentSource = "") {
   if (!trigger.active || !trigger.key || stamp.dataset.sequenceTriggerKey === trigger.key) {
     return;
   }
@@ -7697,11 +8328,34 @@ function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, inde
       }
     }
   } else if (effect === "rotate") {
-    const currentRotation = getCurrentSequenceRotation(stamp, settings, now);
-    stamp.dataset.sequenceRotateStart = String(triggerStartTime);
-    stamp.dataset.sequenceRotateFrom = String(currentRotation);
-    stamp.dataset.sequenceRotateTo = String(currentRotation + 360);
-    stamp.dataset.sequenceRotateDuration = String(getRotateDurationMs(settings));
+    if (settings.rotateContinuous) {
+      const currentRotation = getCurrentSequenceRotation(stamp, settings, now);
+      const isActive = stamp.dataset.sequenceRotateContinuousActive === "1";
+      if (isActive) {
+        delete stamp.dataset.sequenceRotateContinuousActive;
+        delete stamp.dataset.sequenceRotateContinuousStart;
+        stamp.dataset.sequenceRotateStart = String(triggerStartTime);
+        stamp.dataset.sequenceRotateFrom = String(currentRotation);
+        stamp.dataset.sequenceRotateTo = String(currentRotation);
+        stamp.dataset.sequenceRotateDuration = String(SEQUENCE_INTERRUPT_TWEEN_MS);
+        stamp.dataset.sequenceRotateRestAngle = String(currentRotation);
+      } else {
+        delete stamp.dataset.sequenceRotateStart;
+        delete stamp.dataset.sequenceRotateFrom;
+        delete stamp.dataset.sequenceRotateTo;
+        delete stamp.dataset.sequenceRotateDuration;
+        stamp.dataset.sequenceRotateRestAngle = String(currentRotation);
+        stamp.dataset.sequenceRotateContinuousStart = String(triggerStartTime);
+        stamp.dataset.sequenceRotateContinuousActive = "1";
+      }
+    } else {
+      const currentRotation = getCurrentSequenceRotation(stamp, settings, now);
+      const direction = settings.rotateReverse ? -1 : 1;
+      stamp.dataset.sequenceRotateStart = String(triggerStartTime);
+      stamp.dataset.sequenceRotateFrom = String(currentRotation);
+      stamp.dataset.sequenceRotateTo = String(currentRotation + direction * 360);
+      stamp.dataset.sequenceRotateDuration = String(getRotateDurationMs(settings));
+    }
   } else if (effect === "scale") {
     const targetScale = stamp.dataset.sequenceScaleExpanded === "1"
       ? 1
@@ -7728,7 +8382,7 @@ function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, inde
     stamp.dataset.sequenceColorDuration = String(isInstant ? 1 : getColorCycleDurationMs(settings));
     stamp.dataset.sequenceColorShifted = nextShifted ? "1" : "0";
   } else if (effect === "image-cycle") {
-    triggerImageCycleSequence(stamp, trigger, settings, pool, index);
+    triggerImageCycleSequence(stamp, trigger, settings, pool, index, currentSource);
   }
 }
 
@@ -7836,10 +8490,9 @@ function runLayerSequences(now = performance.now()) {
           continue;
         }
         loadSequenceSlotScratch(stamp, slotIndex);
-
-        if (effect === "image-cycle") {
-          setStampSequenceImage(stamp, visual.sourceUrl);
-        }
+        const currentImageCycleSource = effect === "image-cycle"
+          ? getCurrentSequenceImageSource(stamp, visual.sourceUrl)
+          : visual.sourceUrl;
 
         const trigger = getLayerSequenceTrigger(
           stroke,
@@ -7851,7 +8504,16 @@ function runLayerSequences(now = performance.now()) {
           effectDuration,
           runtimeHost
         );
-        triggerStampSequenceEffect(stamp, effect, trigger, settings, imageCyclePool, index, now);
+        triggerStampSequenceEffect(
+          stamp,
+          effect,
+          trigger,
+          settings,
+          imageCyclePool,
+          index,
+          now,
+          currentImageCycleSource
+        );
 
         if (effect === "show-hide") {
           const baseOpacity = clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1);
@@ -7875,7 +8537,7 @@ function runLayerSequences(now = performance.now()) {
             });
           }
         } else if (effect === "image-cycle") {
-          visual.sourceUrl = stamp.getAttribute("src") || visual.sourceUrl;
+          visual.sourceUrl = getCurrentSequenceImageSource(stamp, currentImageCycleSource);
         }
 
         commitSequenceSlotScratch(stamp, slotIndex);
@@ -7931,7 +8593,6 @@ function renderEditLayers() {
   const fragment = document.createDocumentFragment();
   const topFirstStrokes = state.strokes.slice().reverse();
   for (const stroke of topFirstStrokes) {
-    const sourceIndex = state.strokes.indexOf(stroke);
     const entry = document.createElement("div");
     entry.className = "edit-layer-entry";
     entry.classList.toggle("is-sequence-open", Boolean(stroke.sequenceOpen));
@@ -7948,7 +8609,7 @@ function renderEditLayers() {
 
     const name = document.createElement("span");
     name.className = "edit-layer-name";
-    name.textContent = getStrokeLayerName(stroke, sourceIndex);
+    name.textContent = getStrokeLayerName(stroke);
 
     const sequenceButton = document.createElement("button");
     sequenceButton.type = "button";
@@ -7984,6 +8645,7 @@ function renderEditLayers() {
     eyeButton.setAttribute("aria-label", eyeButton.title);
     eyeButton.setAttribute("aria-pressed", String(!stroke.hidden));
 
+    row.appendChild(createEditLayerPreview(stroke));
     row.appendChild(name);
     row.appendChild(sequenceButton);
     row.appendChild(animationButton);
@@ -8334,6 +8996,7 @@ function onBrushGalleryClick(event) {
     }
 
     if (event.ctrlKey || event.metaKey) {
+      clearActiveCustomBrushPreset();
       state.soloBrushId = null;
       if (!(state.selectedBrushIds instanceof Set)) {
         state.selectedBrushIds = new Set();
@@ -8345,8 +9008,10 @@ function onBrushGalleryClick(event) {
         previewBrush.enabled = true;
       }
     } else if (state.soloBrushId === previewBrush.id) {
+      clearActiveCustomBrushPreset();
       setSoloBrushId(null);
     } else {
+      clearActiveCustomBrushPreset();
       setSoloBrushId(previewBrush.id);
       previewBrush.enabled = true;
     }
@@ -8361,7 +9026,7 @@ function onBrushGalleryClick(event) {
     return;
   }
 
-	  const button = event.target.closest(".brush-action-button, .brush-favorite-overlay-button");
+	  const button = event.target.closest(".brush-action-button, .brush-favorite-overlay-button, .brush-preset-remove-button");
   if (!button) {
     return;
   }
@@ -8379,6 +9044,7 @@ function onBrushGalleryClick(event) {
 
   const action = button.dataset.action;
   if (action === "toggle-enabled") {
+    clearActiveCustomBrushPreset();
     brush.enabled = !brush.enabled;
     if (!brush.enabled && state.soloBrushId === brush.id) {
       state.soloBrushId = null;
@@ -8401,6 +9067,10 @@ function onBrushGalleryClick(event) {
       if (!brush.enabled && state.selectedBrushIds instanceof Set) {
         state.selectedBrushIds.delete(brush.id);
       }
+    }
+  } else if (action === "remove-preset") {
+    if (!removeBrushFromCustomPreset(brush)) {
+      return;
     }
   }
 
@@ -8430,6 +9100,7 @@ function onBrushGalleryContextMenu(event) {
   }
 
   event.preventDefault();
+  clearActiveCustomBrushPreset();
   brush.enabled = !brush.enabled;
   if (!brush.enabled && state.soloBrushId === brush.id) {
     state.soloBrushId = null;
@@ -8444,6 +9115,96 @@ function onBrushGalleryContextMenu(event) {
   renderBrushGallery();
   updateBrushCursorPreview();
   scheduleSessionSave();
+}
+
+function getBrushFromGalleryEventTarget(target) {
+  const item = target?.closest ? target.closest(".brush-item") : null;
+  if (!item) {
+    return null;
+  }
+  return findBrushById(Number(item.dataset.brushId));
+}
+
+function onBrushGalleryDragStart(event) {
+  const brush = getBrushFromGalleryEventTarget(event.target);
+  if (!brush) {
+    event.preventDefault();
+    return;
+  }
+  const source = getBrushPresetSource(brush);
+  if (!source) {
+    event.preventDefault();
+    return;
+  }
+  event.dataTransfer.effectAllowed = "copy";
+  event.dataTransfer.setData("text/plain", source);
+  event.dataTransfer.setData("application/x-image-draw-brush-id", String(brush.id));
+  event.dataTransfer.setData("application/x-image-draw-brush-source", source);
+  const item = event.target.closest(".brush-item");
+  if (item) {
+    item.classList.add("is-dragging");
+  }
+}
+
+function onBrushGalleryDragEnd(event) {
+  const item = event.target.closest(".brush-item");
+  if (item) {
+    item.classList.remove("is-dragging");
+  }
+}
+
+function getDraggedBrushForPresetDrop(event) {
+  const brushId = Number(event.dataTransfer.getData("application/x-image-draw-brush-id"));
+  if (Number.isFinite(brushId)) {
+    const brush = findBrushById(brushId);
+    if (brush) {
+      return brush;
+    }
+  }
+  const source = normalizeFavoriteBrushSource(
+    event.dataTransfer.getData("application/x-image-draw-brush-source") ||
+      event.dataTransfer.getData("text/plain")
+  );
+  if (!source) {
+    return null;
+  }
+  return state.brushes.find((brush) => getBrushPresetSource(brush) === source) || null;
+}
+
+function onCustomBrushPresetDragOver(event) {
+  const button = event.target.closest(".custom-brush-preset-button");
+  if (!button || button.disabled) {
+    return;
+  }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+}
+
+function onCustomBrushPresetDrop(event) {
+  const button = event.target.closest(".custom-brush-preset-button");
+  if (!button || button.disabled) {
+    return;
+  }
+  event.preventDefault();
+  const brush = getDraggedBrushForPresetDrop(event);
+  if (!brush) {
+    return;
+  }
+  const presetIndex = normalizeCustomBrushPresetIndex(button.dataset.presetIndex);
+  if (presetIndex === null || !addBrushToCustomPreset(brush, presetIndex)) {
+    return;
+  }
+  updateBrushStatus(`Added ${brush.name} to preset ${presetIndex + 1}.`);
+  scheduleSessionSave();
+}
+
+function onCustomBrushPresetClick(event) {
+  const button = event.target.closest(".custom-brush-preset-button");
+  if (!button || button.disabled) {
+    return;
+  }
+  event.preventDefault();
+  void loadCustomBrushPreset(button.dataset.presetIndex);
 }
 
 function screenToWorld(clientX, clientY) {
@@ -8840,7 +9601,7 @@ function ensureDrawableBrushes() {
 }
 
 function getSpacingValue() {
-  return Math.max(1, Number(spacingSlider.value) || 1);
+  return Math.max(1, mapSpacingSliderToValue(spacingSlider.value));
 }
 
 function getSpraySpreadValue() {
@@ -9107,6 +9868,7 @@ async function commitShapeStroke(mode, startX, startY, endX, endY) {
   const task = createCancellableTask("placement");
   const stroke = {
     id: state.nextStrokeId,
+    layerNumber: state.nextStrokeId,
     layerType: normalizeStrokeLayerType(mode),
     brushCategoryName: getActiveBrushCategoryName(),
     elements: []
@@ -9249,8 +10011,11 @@ function getExportSequenceVisualState(element, now = performance.now()) {
           amountPercent: colorCycleAmount
         });
       }
-    } else if (effect === "image-cycle" && currentSource && currentSource !== TRANSPARENT_STAMP_SRC) {
-      visual.sourceUrl = currentSource;
+    } else if (effect === "image-cycle") {
+      const sequenceSource = getCurrentSequenceImageSource(element, visual.sourceUrl);
+      if (sequenceSource && sequenceSource !== TRANSPARENT_STAMP_SRC) {
+        visual.sourceUrl = sequenceSource;
+      }
     }
     commitSequenceSlotScratch(element, slotIndex);
   }
@@ -9387,6 +10152,12 @@ async function decodeGifAnimation(url) {
     throw new Error("Could not create GIF decode canvas.");
   }
 
+  const patchCanvas = document.createElement("canvas");
+  const patchCtx = patchCanvas.getContext("2d", { alpha: true });
+  if (!patchCtx) {
+    throw new Error("Could not create GIF patch canvas.");
+  }
+
   compositeCtx.clearRect(0, 0, width, height);
 
   const frames = [];
@@ -9408,7 +10179,15 @@ async function decodeGifAnimation(url) {
     if (frame?.patch && frame.patch.length === frameWidth * frameHeight * 4) {
       const patchData = new Uint8ClampedArray(frame.patch);
       const patchImage = new ImageData(patchData, frameWidth, frameHeight);
-      compositeCtx.putImageData(patchImage, left, top);
+      if (patchCanvas.width !== frameWidth) {
+        patchCanvas.width = frameWidth;
+      }
+      if (patchCanvas.height !== frameHeight) {
+        patchCanvas.height = frameHeight;
+      }
+      patchCtx.clearRect(0, 0, frameWidth, frameHeight);
+      patchCtx.putImageData(patchImage, 0, 0);
+      compositeCtx.drawImage(patchCanvas, left, top);
     }
 
     const snapshotCanvas = document.createElement("canvas");
@@ -9442,7 +10221,10 @@ async function decodeGifAnimation(url) {
 function getSequenceExportSourceUrls() {
   const urls = [];
   const hasImageCycleSequence = state.strokes.some(
-    (stroke) => isLayerSequenceEnabled(stroke) && !stroke.hidden && getLayerSequenceEffect(stroke) === "image-cycle"
+    (stroke) =>
+      isLayerSequenceEnabled(stroke) &&
+      !stroke.hidden &&
+      getLayerSequenceSlots(stroke).some((slot) => slot.effect === "image-cycle")
   );
   if (!hasImageCycleSequence) {
     return urls;
@@ -9500,6 +10282,10 @@ function getLongestGifAnimationDuration(gifAnimationMap) {
     longest = Math.max(longest, Math.round(Number(animation?.totalDuration) || 0));
   }
   return longest;
+}
+
+function getBackgroundAnimationDuration(options = {}) {
+  return Math.max(0, Math.round(Number(options.backgroundImageAnimation?.totalDuration) || 0));
 }
 
 function getNativeGifFrameDelaysForCount(gifAnimationMap, frameCountOverride) {
@@ -9566,7 +10352,10 @@ function getExportGifFrameDelays(gifAnimationMap, options = {}) {
   }
 
   if (options.animationAuto !== false) {
-    const longestDuration = getLongestGifAnimationDuration(gifAnimationMap);
+    const longestDuration = Math.max(
+      getLongestGifAnimationDuration(gifAnimationMap),
+      getBackgroundAnimationDuration(options)
+    );
     return createExportFrameDelays(longestDuration || EXPORT_GIF_DURATION_MS);
   }
 
@@ -9578,7 +10367,11 @@ function getExportGifFrameDelays(gifAnimationMap, options = {}) {
 
 function getExportVideoDurationMs(gifAnimationMap, options = {}) {
   if (options.videoAuto !== false) {
-    return Math.max(100, getLongestGifAnimationDuration(gifAnimationMap) || EXPORT_GIF_DURATION_MS);
+    return Math.max(
+      100,
+      Math.max(getLongestGifAnimationDuration(gifAnimationMap), getBackgroundAnimationDuration(options)) ||
+        EXPORT_GIF_DURATION_MS
+    );
   }
   return Math.max(
     100,
@@ -9639,6 +10432,22 @@ function loadExportBackgroundImageElement(url) {
   return exportBackgroundImageCache.get(url);
 }
 
+function loadExportBackgroundAnimation(url) {
+  if (!isGifUrl(url)) {
+    return Promise.resolve(null);
+  }
+  if (!exportBackgroundAnimationCache.has(url)) {
+    exportBackgroundAnimationCache.set(
+      url,
+      decodeGifAnimation(url).catch((error) => {
+        exportBackgroundAnimationCache.delete(url);
+        throw error;
+      })
+    );
+  }
+  return exportBackgroundAnimationCache.get(url);
+}
+
 async function getExportBackgroundImageOptions() {
   const imageUrl = typeof state.exportBgImageUrl === "string" ? state.exportBgImageUrl : "";
   if (!imageUrl || state.exportBackgroundEnabled === false) {
@@ -9646,12 +10455,16 @@ async function getExportBackgroundImageOptions() {
   }
 
   try {
-    const image = await loadExportBackgroundImageElement(imageUrl);
+    const [image, animation] = await Promise.all([
+      loadExportBackgroundImageElement(imageUrl),
+      loadExportBackgroundAnimation(imageUrl).catch(() => null)
+    ]);
     if (!image) {
       return {};
     }
     return {
       backgroundImageElement: image,
+      backgroundImageAnimation: animation,
       backgroundImageOpacity: clamp(Number(state.exportBgImageOpacity) || 0, 0, 100) / 100,
       backgroundImageMode: state.exportBgImageMode === "tile" ? "tile" : "stretch",
       backgroundImageTileSize: normalizeExportBgTileSize(state.exportBgImageTileSize)
@@ -9662,8 +10475,9 @@ async function getExportBackgroundImageOptions() {
 }
 
 function drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeight, options = {}) {
-  const image = options.backgroundImageElement;
-  if (!(image instanceof HTMLImageElement) || !image.complete) {
+  const animatedFrame = resolveGifFrameSource(options.backgroundImageAnimation, options.backgroundImageTimeMs || 0);
+  const image = animatedFrame || options.backgroundImageElement;
+  if (!image || (!(image instanceof HTMLCanvasElement) && (!(image instanceof HTMLImageElement) || !image.complete))) {
     return;
   }
 
@@ -9705,6 +10519,42 @@ function drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeig
   ctx.restore();
 }
 
+function getStaticExportBackgroundCanvas(selectionBounds, outputWidth, outputHeight, options = {}) {
+  if (options.backgroundImageAnimation) {
+    return null;
+  }
+  const image = options.backgroundImageElement;
+  if (!(image instanceof HTMLImageElement) || !image.complete) {
+    return null;
+  }
+  const key = [
+    outputWidth,
+    outputHeight,
+    Math.round((selectionBounds.right - selectionBounds.left) * 100) / 100,
+    Math.round((selectionBounds.bottom - selectionBounds.top) * 100) / 100,
+    options.backgroundImageMode === "tile" ? "tile" : "stretch",
+    normalizeExportBgTileSize(options.backgroundImageTileSize),
+    clamp(Number(options.backgroundImageOpacity), 0, 1),
+    image.currentSrc || image.src || ""
+  ].join("|");
+  if (exportBackgroundRenderCache.has(key)) {
+    return exportBackgroundRenderCache.get(key);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const cacheCtx = canvas.getContext("2d", { alpha: true });
+  if (!cacheCtx) {
+    return null;
+  }
+  drawExportBackgroundImage(cacheCtx, selectionBounds, outputWidth, outputHeight, options);
+  if (exportBackgroundRenderCache.size > 6) {
+    exportBackgroundRenderCache.clear();
+  }
+  exportBackgroundRenderCache.set(key, canvas);
+  return canvas;
+}
+
 function prepareExportFrame(
   ctx,
   selectionBounds,
@@ -9728,7 +10578,12 @@ function prepareExportFrame(
     ctx.fillRect(0, 0, outputWidth, outputHeight);
     ctx.restore();
   }
-  drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeight, options);
+  const staticBackgroundCanvas = getStaticExportBackgroundCanvas(selectionBounds, outputWidth, outputHeight, options);
+  if (staticBackgroundCanvas) {
+    ctx.drawImage(staticBackgroundCanvas, 0, 0);
+  } else {
+    drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeight, options);
+  }
 
   return { scaleX, scaleY };
 }
@@ -9813,7 +10668,13 @@ function drawExportFrame(
     runLayerSequences(Number(options.sequenceTimeMs));
     refreshExportSequenceEntries(entries, selectionBounds, Number(options.sequenceTimeMs));
   }
-  const { scaleX, scaleY } = prepareExportFrame(ctx, selectionBounds, outputWidth, outputHeight, options);
+  const { scaleX, scaleY } = prepareExportFrame(
+    ctx,
+    selectionBounds,
+    outputWidth,
+    outputHeight,
+    { ...options, backgroundImageTimeMs: timeMs }
+  );
   for (const entry of entries) {
     drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAnimationMap, timeMs);
   }
@@ -9835,7 +10696,13 @@ async function drawExportFrameAsync(
     runLayerSequences(Number(options.sequenceTimeMs));
     refreshExportSequenceEntries(entries, selectionBounds, Number(options.sequenceTimeMs));
   }
-  const { scaleX, scaleY } = prepareExportFrame(ctx, selectionBounds, outputWidth, outputHeight, options);
+  const { scaleX, scaleY } = prepareExportFrame(
+    ctx,
+    selectionBounds,
+    outputWidth,
+    outputHeight,
+    { ...options, backgroundImageTimeMs: timeMs }
+  );
   const total = Math.max(1, entries.length);
   for (let index = 0; index < entries.length; index += 1) {
     throwIfTaskCancelled(task);
@@ -9859,6 +10726,27 @@ function canvasToPngBlob(canvas) {
       resolve(blob);
     }, "image/png");
   });
+}
+
+function createTransparentGifFrameImageData(ctx, width, height) {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  let hasTransparentPixel = false;
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] < 128) {
+      data[index] = 0;
+      data[index + 1] = 255;
+      data[index + 2] = 1;
+      hasTransparentPixel = true;
+    }
+    data[index + 3] = 255;
+  }
+  if (!hasTransparentPixel && data.length >= 4) {
+    data[0] = 0;
+    data[1] = 255;
+    data[2] = 1;
+  }
+  return imageData;
 }
 
 async function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
@@ -9902,7 +10790,7 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
   const frameOptions = {
     ...options,
     includeBackground,
-    matteColor: includeBackground ? "" : GIF_TRANSPARENT_MATTE
+    matteColor: ""
   };
   const frameCanvas = document.createElement("canvas");
   frameCanvas.width = outputWidth;
@@ -9969,11 +10857,18 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
         "Drawing"
       )
     );
-    gif.addFrame(frameCanvas, {
-      copy: true,
-      delay: frameDelays[index],
-      dispose: 2
-    });
+    if (includeBackground) {
+      gif.addFrame(frameCanvas, {
+        copy: true,
+        delay: frameDelays[index],
+        dispose: 2
+      });
+    } else {
+      gif.addFrame(createTransparentGifFrameImageData(frameCtx, outputWidth, outputHeight), {
+        delay: frameDelays[index],
+        dispose: 2
+      });
+    }
     elapsedMs += frameDelays[index];
   }
 
@@ -10025,17 +10920,7 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
     throw new Error("Could not create video export canvas.");
   }
 
-  let stream = recordCanvas.captureStream(0);
-  let [track] = stream.getVideoTracks();
-  let manualFrameCapture = Boolean(track && typeof track.requestFrame === "function");
-  if (!manualFrameCapture) {
-    for (const mediaTrack of stream.getTracks()) {
-      mediaTrack.stop();
-    }
-    stream = recordCanvas.captureStream(EXPORT_VIDEO_FPS);
-    [track] = stream.getVideoTracks();
-    manualFrameCapture = Boolean(track && typeof track.requestFrame === "function");
-  }
+  const stream = recordCanvas.captureStream(EXPORT_VIDEO_FPS);
   const chunks = [];
   const recorder = new MediaRecorder(stream, {
     mimeType,
@@ -10078,36 +10963,45 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
     includeBackground: options.includeBackground !== false
   };
 
-  if (!manualFrameCapture) {
-    await drawExportFrameAsync(
-      renderCtx,
-      selectionBounds,
-      outputWidth,
-      outputHeight,
-      entries,
-      gifAnimationMap,
-      0,
-      { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? 0 : null },
-      task
-    );
-    recordCtx.clearRect(0, 0, outputWidth, outputHeight);
-    recordCtx.drawImage(renderCanvas, 0, 0);
-  }
+  await drawExportFrameAsync(
+    renderCtx,
+    selectionBounds,
+    outputWidth,
+    outputHeight,
+    entries,
+    gifAnimationMap,
+    0,
+    { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? 0 : null },
+    task
+  );
+  recordCtx.clearRect(0, 0, outputWidth, outputHeight);
+  recordCtx.drawImage(renderCanvas, 0, 0);
 
+  const recordingStartTime = performance.now();
   recorder.start();
   await yieldToMainThread(task);
   try {
-    const recordingStartTime = performance.now();
-    let frameIndex = 0;
+    const recordingEndTime = recordingStartTime + durationMs;
+    let nextFrameTargetTime = recordingStartTime;
+    let estimatedRenderMs = frameIntervalMs;
+
     while (true) {
       throwIfTaskCancelled(task);
-      const elapsedMs = Math.max(0, performance.now() - recordingStartTime);
-      if (frameIndex > 0 && elapsedMs >= durationMs) {
+      const now = performance.now();
+      const elapsedMs = Math.max(0, now - recordingStartTime);
+      const remainingMs = recordingEndTime - now;
+      if (elapsedMs >= durationMs || remainingMs <= 0) {
         break;
       }
+
+      if (remainingMs < Math.min(frameIntervalMs, Math.max(4, estimatedRenderMs * 1.1))) {
+        await waitForExportFrameDelay(remainingMs, task);
+        break;
+      }
+
       const frameTimeMs = Math.min(durationMs, elapsedMs);
-      const frameStartRatio = clamp(frameTimeMs / Math.max(1, durationMs), 0, 1);
-      await drawExportFrameAsync(
+      const renderStartTime = performance.now();
+      drawExportFrame(
         renderCtx,
         selectionBounds,
         outputWidth,
@@ -10115,34 +11009,39 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
         entries,
         gifAnimationMap,
         frameTimeMs,
-        { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? frameTimeMs : null },
-        task,
-        (entryRatio) => {
-          const nextFrameRatio = clamp(
-            (performance.now() - recordingStartTime) / Math.max(1, durationMs),
-            frameStartRatio,
-            1
-          );
-          updateExportProgress(
-            task,
-            EXPORT_PROGRESS_DECODE_END +
-              (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DECODE_END) *
-                (frameStartRatio + (nextFrameRatio - frameStartRatio) * entryRatio),
-            "Rendering"
-          );
-        }
+        { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? frameTimeMs : null }
       );
       recordCtx.clearRect(0, 0, outputWidth, outputHeight);
       recordCtx.drawImage(renderCanvas, 0, 0);
-      if (manualFrameCapture && track && typeof track.requestFrame === "function") {
-        track.requestFrame();
+
+      const renderElapsedMs = Math.max(0, performance.now() - renderStartTime);
+      estimatedRenderMs = estimatedRenderMs * 0.8 + renderElapsedMs * 0.2;
+      const elapsedAfterRenderMs = clamp(performance.now() - recordingStartTime, 0, durationMs);
+      updateExportProgress(
+        task,
+        EXPORT_PROGRESS_DECODE_END +
+          (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DECODE_END) *
+            (elapsedAfterRenderMs / Math.max(1, durationMs)),
+        "Rendering"
+      );
+
+      while (nextFrameTargetTime <= performance.now()) {
+        nextFrameTargetTime += frameIntervalMs;
       }
-      frameIndex += 1;
-      if (performance.now() - recordingStartTime >= durationMs) {
-        break;
+      const delayMs = Math.min(
+        recordingEndTime - performance.now(),
+        Math.max(0, nextFrameTargetTime - performance.now())
+      );
+      if (delayMs > 0) {
+        await waitForExportFrameDelay(delayMs, task);
+      } else {
+        await yieldToMainThread(task);
       }
-      const nextFrameTargetTime = recordingStartTime + frameIndex * frameIntervalMs;
-      await waitForExportFrameDelay(Math.max(0, nextFrameTargetTime - performance.now()), task);
+    }
+
+    const finalDelayMs = recordingEndTime - performance.now();
+    if (finalDelayMs > 0) {
+      await waitForExportFrameDelay(finalDelayMs, task);
     }
     updateExportProgress(task, EXPORT_PROGRESS_ENCODE_END, "Encoding");
     throwIfTaskCancelled(task);
@@ -10420,6 +11319,7 @@ async function loadStockBrushFolder(folderId) {
   }
 
   state.favoriteReturnState = null;
+  clearActiveCustomBrushPreset();
   state.stockBrushLoadingFolderId = folder.id;
   renderStockBrushButtons();
   updateBrushStatus(`Loading ${folder.name} stock brushes...`);
@@ -10444,6 +11344,7 @@ async function loadStockBrushFolder(folderId) {
     state.soloBrushId = null;
     clearSelectedBrushes();
     state.activeStockBrushFolderId = folder.id;
+    clearActiveCustomBrushPreset();
     state.brushCursorPreview.brushId = null;
     resetBrushCursorPreviewSource();
     for (const oldUrl of previousBrushUrls) {
@@ -10470,6 +11371,14 @@ async function loadStockBrushFileData(files) {
   return loadBrushSourceData(uniqueFiles.map((filePath) => encodeStockBrushPath(filePath)));
 }
 
+function cloneBrushSourceData(brushData) {
+  return {
+    ...brushData,
+    frameRange: brushData?.frameRange ? { ...brushData.frameRange } : null,
+    cropRect: brushData?.cropRect ? { ...brushData.cropRect } : null
+  };
+}
+
 function getBrushSourceFileName(sourceUrl) {
   const cleanUrl = String(sourceUrl || "").split(/[?#]/)[0];
   if (cleanUrl.startsWith("data:")) {
@@ -10490,21 +11399,31 @@ async function loadBrushSourceData(sources) {
   );
   const loadedBrushData = await mapWithConcurrency(uniqueSources, 18, async (sourceUrl) => {
     try {
-      const dimensions = await getImageDimensions(sourceUrl);
-      return {
-        url: sourceUrl,
-        name: getBrushSourceFileName(sourceUrl),
-        width: dimensions.width,
-        height: dimensions.height,
-        originalUrl: sourceUrl,
-        originalWidth: dimensions.width,
-        originalHeight: dimensions.height,
-        frameCount: isGifUrl(sourceUrl) ? null : 1,
-        frameRange: null,
-        cropRect: null,
-        enabled: true,
-        weightMode: "normal"
-      };
+      if (!brushSourceDataCache.has(sourceUrl)) {
+        brushSourceDataCache.set(
+          sourceUrl,
+          getImageDimensions(sourceUrl)
+            .then((dimensions) => ({
+              url: sourceUrl,
+              name: getBrushSourceFileName(sourceUrl),
+              width: dimensions.width,
+              height: dimensions.height,
+              originalUrl: sourceUrl,
+              originalWidth: dimensions.width,
+              originalHeight: dimensions.height,
+              frameCount: isGifUrl(sourceUrl) ? null : 1,
+              frameRange: null,
+              cropRect: null,
+              enabled: true,
+              weightMode: "normal"
+            }))
+            .catch((error) => {
+              brushSourceDataCache.delete(sourceUrl);
+              throw error;
+            })
+        );
+      }
+      return cloneBrushSourceData(await brushSourceDataCache.get(sourceUrl));
     } catch (error) {
       return null;
     }
@@ -10519,6 +11438,7 @@ async function loadFavoriteBrushes() {
 
   if (state.activeStockBrushFolderId === "favorites" && state.favoriteReturnState) {
     restoreFavoriteReturnState();
+    clearActiveCustomBrushPreset();
     return;
   }
 
@@ -10536,6 +11456,7 @@ async function loadFavoriteBrushes() {
   }
 
   state.stockBrushLoadingFolderId = "favorites";
+  clearActiveCustomBrushPreset();
   renderStockBrushButtons();
   updateBrushStatus("Loading favorite brushes...");
 
@@ -10559,6 +11480,7 @@ async function loadFavoriteBrushes() {
     state.soloBrushId = null;
     clearSelectedBrushes();
     state.activeStockBrushFolderId = "favorites";
+    clearActiveCustomBrushPreset();
     state.brushCursorPreview.brushId = null;
     resetBrushCursorPreviewSource();
     if (state.eraseMode) {
@@ -10593,6 +11515,7 @@ async function loadAllStockBrushFolders() {
   }
 
   state.favoriteReturnState = null;
+  clearActiveCustomBrushPreset();
   state.stockBrushLoadingFolderId = "all";
   renderStockBrushButtons();
   updateBrushStatus("Loading all stock brushes...");
@@ -10617,6 +11540,7 @@ async function loadAllStockBrushFolders() {
     state.soloBrushId = null;
     clearSelectedBrushes();
     state.activeStockBrushFolderId = "all";
+    clearActiveCustomBrushPreset();
     state.brushCursorPreview.brushId = null;
     resetBrushCursorPreviewSource();
     for (const oldUrl of previousBrushUrls) {
@@ -10642,6 +11566,7 @@ function unloadBrushDataSelection() {
   if (!state.brushes.length) {
     state.activeStockBrushFolderId = null;
     state.favoriteReturnState = null;
+    clearActiveCustomBrushPreset();
     state.soloBrushId = null;
     clearSelectedBrushes();
     if (state.eraseMode) {
@@ -10658,12 +11583,14 @@ function unloadBrushDataSelection() {
   }
 
   state.favoriteReturnState = null;
+  clearActiveCustomBrushPreset();
   const previousBrushUrls = state.brushes.map((brush) => brush.url);
   state.brushes = [];
   clearBrushFrameCountJobs();
   state.soloBrushId = null;
   clearSelectedBrushes();
   state.activeStockBrushFolderId = null;
+  clearActiveCustomBrushPreset();
   state.brushCursorPreview.brushId = null;
   resetBrushCursorPreviewSource();
   for (const oldUrl of previousBrushUrls) {
@@ -10694,6 +11621,7 @@ async function loadBrushFiles(files) {
   }
 
   state.favoriteReturnState = null;
+  clearActiveCustomBrushPreset();
   const previousBrushUrls = state.brushes.map((brush) => brush.url);
 
   const loaded = [];
@@ -10730,6 +11658,7 @@ async function loadBrushFiles(files) {
   state.soloBrushId = null;
   clearSelectedBrushes();
   state.activeStockBrushFolderId = null;
+  clearActiveCustomBrushPreset();
   state.brushCursorPreview.brushId = null;
   resetBrushCursorPreviewSource();
   for (const oldUrl of previousBrushUrls) {
@@ -10909,6 +11838,7 @@ function startDrawing(event) {
   const point = screenToWorld(event.clientX, event.clientY);
   const stroke = {
     id: state.nextStrokeId,
+    layerNumber: state.nextStrokeId,
     layerType: state.drawMode === "spray" ? "spray" : "stroke",
     brushCategoryName: getActiveBrushCategoryName(),
     elements: []
@@ -11467,6 +12397,8 @@ unloadBrushDataButton.addEventListener("click", (event) => {
 });
 brushGallery.addEventListener("click", onBrushGalleryClick);
 brushGallery.addEventListener("contextmenu", onBrushGalleryContextMenu);
+brushGallery.addEventListener("dragstart", onBrushGalleryDragStart);
+brushGallery.addEventListener("dragend", onBrushGalleryDragEnd);
 if (editLayerList) {
   editLayerList.addEventListener("click", (event) => {
     const row = event.target.closest(".edit-layer-row");
@@ -11582,7 +12514,7 @@ if (editLayerList) {
       const key = settingInput.dataset.sequenceSetting || "";
       const value = settingInput.dataset.sequenceSettingType === "boolean"
         ? settingInput.checked
-        : settingInput.value;
+        : getSequenceSettingInputValue(settingInput);
       setLayerSequenceSetting(stroke, key, value, Number(settingInput.dataset.sequenceSlotIndex) || 0);
       refreshStrokeSequenceEffect(stroke);
       selectEditLayer(stroke.id);
@@ -11642,7 +12574,7 @@ if (editLayerList) {
     setLayerSequenceSetting(
       stroke,
       settingInput.dataset.sequenceSetting || "",
-      settingInput.value,
+      getSequenceSettingInputValue(settingInput),
       Number(settingInput.dataset.sequenceSlotIndex) || 0
     );
     refreshStrokeSequenceEffect(stroke);
@@ -11653,7 +12585,7 @@ if (editLayerList) {
         : valueLabel.textContent.endsWith("%")
         ? "%"
         : "";
-      valueLabel.textContent = `${settingInput.value}${suffix}`;
+      valueLabel.textContent = `${getSequenceSettingInputValue(settingInput)}${suffix}`;
     }
     scheduleSessionSave();
   });
@@ -11699,6 +12631,13 @@ for (const favoriteLoaderButton of [loadFavoriteBrushesButton, loadFavoriteBrush
       event.preventDefault();
       void loadFavoriteBrushes();
     });
+  }
+}
+for (const presetContainer of [drawingBrushPresetButtons, brushesBrushPresetButtons]) {
+  if (presetContainer) {
+    presetContainer.addEventListener("click", onCustomBrushPresetClick);
+    presetContainer.addEventListener("dragover", onCustomBrushPresetDragOver);
+    presetContainer.addEventListener("drop", onCustomBrushPresetDrop);
   }
 }
 if (brushSortSelect) {
@@ -11936,6 +12875,55 @@ sidebarToggleButton.addEventListener("click", () => {
   updateSidebarVisibilityUI();
   scheduleSessionSave();
 });
+if (drawCanvasBgColorInput) {
+  drawCanvasBgColorInput.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    if (!isCanvasBgPickerActive()) {
+      return;
+    }
+    event.preventDefault();
+    suppressNextCanvasBgInputClick = true;
+    closeCanvasBgPicker();
+  });
+  drawCanvasBgColorInput.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!suppressNextCanvasBgInputClick) {
+      return;
+    }
+    event.preventDefault();
+    suppressNextCanvasBgInputClick = false;
+  });
+  drawCanvasBgColorInput.addEventListener("focus", () => {
+    canvasBgNativePickerOpen = true;
+  });
+  drawCanvasBgColorInput.addEventListener("blur", () => {
+    canvasBgNativePickerOpen = false;
+    suppressNextCanvasBgInputClick = false;
+  });
+  drawCanvasBgColorInput.addEventListener("input", () => {
+    applyCanvasBackgroundColor(drawCanvasBgColorInput.value);
+    scheduleSessionSave();
+  });
+}
+if (drawCanvasBgColorLabel) {
+  drawCanvasBgColorLabel.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    if (!isCanvasBgPickerActive()) {
+      return;
+    }
+    event.preventDefault();
+    suppressNextCanvasBgInputClick = true;
+    closeCanvasBgPicker();
+  });
+  drawCanvasBgColorLabel.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!suppressNextCanvasBgInputClick) {
+      return;
+    }
+    event.preventDefault();
+    suppressNextCanvasBgInputClick = false;
+  });
+}
 canvasBgColorInput.addEventListener("pointerdown", (event) => {
   event.stopPropagation();
   if (!isCanvasBgPickerActive()) {
@@ -11999,6 +12987,12 @@ if (exportBgImageButton && exportBgImageInput) {
     exportBgImageInput.click();
   });
 }
+if (clearExportBgImageButton) {
+  clearExportBgImageButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    clearExportBackgroundImage();
+  });
+}
 if (exportBgImageInput) {
   exportBgImageInput.addEventListener("change", () => {
     const file = exportBgImageInput.files && exportBgImageInput.files[0]
@@ -12011,6 +13005,7 @@ if (exportBgImageInput) {
 if (exportBgImageOpacitySlider) {
   exportBgImageOpacitySlider.addEventListener("input", () => {
     state.exportBgImageOpacity = clamp(Number(exportBgImageOpacitySlider.value) || 0, 0, 100);
+    exportBackgroundRenderCache.clear();
     updateExportBackgroundImageUI();
     scheduleSessionSave();
   });
@@ -12018,6 +13013,7 @@ if (exportBgImageOpacitySlider) {
 if (exportBgImageTileToggle) {
   exportBgImageTileToggle.addEventListener("change", () => {
     state.exportBgImageMode = exportBgImageTileToggle.checked ? "tile" : "stretch";
+    exportBackgroundRenderCache.clear();
     updateExportBackgroundImageUI();
     scheduleSessionSave();
   });
@@ -12025,12 +13021,16 @@ if (exportBgImageTileToggle) {
 if (exportBgImageTileSizeSlider) {
   exportBgImageTileSizeSlider.addEventListener("input", () => {
     state.exportBgImageTileSize = mapExportBgTileSliderToSize(exportBgImageTileSizeSlider.value);
+    exportBackgroundRenderCache.clear();
     updateExportBackgroundImageUI();
     scheduleSessionSave();
   });
 }
 exportBackgroundToggle.addEventListener("change", () => {
   state.exportBackgroundEnabled = exportBackgroundToggle.checked;
+  updateSettingsPanelUI();
+  updateExportBackgroundImageUI();
+  updateExportOverlayGeometry();
   scheduleSessionSave();
 });
 if (exportSeeBeyondToggle) {
@@ -12050,6 +13050,13 @@ gifPauseToggle.addEventListener("change", () => {
   updateGifPauseButtonUI();
   scheduleSessionSave();
 });
+if (drawBkgColorToggle) {
+  drawBkgColorToggle.addEventListener("change", () => {
+    state.showDrawBackgroundColorControl = drawBkgColorToggle.checked;
+    updateSettingsPanelUI();
+    scheduleSessionSave();
+  });
+}
 eraseModeButton.addEventListener("click", () => {
   setEraseMode(!state.eraseMode);
 });
@@ -12519,6 +13526,7 @@ gifPauseObserver.observe(document.body, { childList: true, subtree: true });
 
 async function initializeApp() {
   loadFavoriteBrushSources();
+  loadCustomBrushPresetSources();
   startLayerSequenceLoop();
   const restored = await restoreSessionState();
   if (restored) {
