@@ -50,6 +50,24 @@ const LAYER_SEQUENCE_MOVE_MODE_OPTIONS = [
   { value: "swing", label: "swing" },
   { value: "random", label: "random" }
 ];
+const LAYER_BLEND_MODE_OPTIONS = [
+  { value: "normal", label: "Normal" },
+  { value: "multiply", label: "Multiply" },
+  { value: "screen", label: "Screen" },
+  { value: "overlay", label: "Overlay" },
+  { value: "darken", label: "Darken" },
+  { value: "lighten", label: "Lighten" },
+  { value: "color-dodge", label: "Color Dodge" },
+  { value: "color-burn", label: "Color Burn" },
+  { value: "hard-light", label: "Hard Light" },
+  { value: "soft-light", label: "Soft Light" },
+  { value: "difference", label: "Difference" },
+  { value: "exclusion", label: "Exclusion" },
+  { value: "hue", label: "Hue" },
+  { value: "saturation", label: "Saturation" },
+  { value: "color", label: "Color" },
+  { value: "luminosity", label: "Luminosity" }
+];
 const LAYER_SEQUENCE_DEFAULT_SETTINGS = {
   showHideFade: false,
   showHideFadeLength: 300,
@@ -328,6 +346,7 @@ const EXPORT_CANCEL_CHECK_INTERVAL = 40;
 const BRUSH_FRAME_COUNT_DECODE_CONCURRENCY = 2;
 const SEQUENCE_INTERRUPT_TWEEN_MS = 160;
 const SEQUENCE_TRIGGER_PRIME_MS = 16;
+const SEQUENCE_BACKGROUND_GAP_MS = 750;
 const SEQUENCE_DATASET_KEYS = [
   "sequenceActive",
   "sequenceBaseOpacity",
@@ -395,6 +414,8 @@ const state = {
   editLayerDrag: null,
   editLayerMove: null,
   sequenceRafId: null,
+  sequenceLastFrameTime: null,
+  sequenceVisibilityPauseStart: null,
   selectedEditLayerId: null,
   strokeById: new Map(),
   stampSpatialBuckets: new Map(),
@@ -3859,8 +3880,20 @@ function getStampWorldBounds(element) {
   const top = parseFloat(element.style.top) || 0;
   const width = Math.max(0, parseFloat(element.style.width) || 0);
   const height = Math.max(0, parseFloat(element.style.height) || 0);
-  const rotation = Number(element.dataset.rotation) || 0;
-  return getStampWorldBoundsFromLayout(left, top, width, height, rotation);
+  const stroke = getStampLayerStroke(element);
+  const layerTransform = getStampLayerTransform(stroke, element);
+  const rotation = (Number(element.dataset.rotation) || 0) + layerTransform.rotation;
+  const visualWidth = width * layerTransform.scale;
+  const visualHeight = height * layerTransform.scale;
+  const centerX = left + width / 2 + layerTransform.x;
+  const centerY = top + height / 2 + layerTransform.y;
+  return getStampWorldBoundsFromLayout(
+    centerX - visualWidth / 2,
+    centerY - visualHeight / 2,
+    visualWidth,
+    visualHeight,
+    rotation
+  );
 }
 
 function getStampIndexCellCoord(value) {
@@ -3896,15 +3929,12 @@ function cacheStampWorldBounds(element) {
     return null;
   }
 
-  const left = parseFloat(element.style.left) || 0;
-  const top = parseFloat(element.style.top) || 0;
   const width = Math.max(0, parseFloat(element.style.width) || 0);
   const height = Math.max(0, parseFloat(element.style.height) || 0);
   if (width <= 0 || height <= 0) {
     return null;
   }
-  const rotation = Number(element.dataset.rotation) || 0;
-  const bounds = getStampWorldBoundsFromLayout(left, top, width, height, rotation);
+  const bounds = getStampWorldBounds(element);
   element.dataset.worldLeft = String(bounds.left);
   element.dataset.worldTop = String(bounds.top);
   element.dataset.worldRight = String(bounds.right);
@@ -4781,7 +4811,7 @@ function updateEraseCursorVisibility() {
 function updateEraseModeUI() {
   eraseModeButton.classList.toggle("is-active", state.eraseMode);
   eraseModeButton.setAttribute("aria-pressed", String(state.eraseMode));
-  viewport.classList.toggle("is-erasing", state.eraseMode);
+  syncViewportPointerCursorClasses();
   updateEraseCursorGeometry();
   updateEraseCursorVisibility();
 }
@@ -4921,6 +4951,12 @@ function hideBrushCursorPreview(resetBrush = false) {
     state.brushCursorPreview.brushId = null;
     resetBrushCursorPreviewSource();
   }
+}
+
+function syncViewportPointerCursorClasses() {
+  viewport.classList.toggle("is-drawing", Boolean(state.drawing || (state.shapeDraft && state.shapeDraft.pointerId !== null)));
+  viewport.classList.toggle("is-erasing", Boolean(state.eraseMode));
+  viewport.classList.toggle("is-panning", Boolean(state.panning || state.touchGesture));
 }
 
 function isGifBrush(brush) {
@@ -5101,6 +5137,7 @@ function updateBrushCursorPreview() {
 
 function updatePanningStateClass() {
   viewport.classList.toggle("is-panning", Boolean(state.panning || state.touchGesture));
+  syncViewportPointerCursorClasses();
   updateBrushCursorPreview();
 }
 
@@ -5118,7 +5155,7 @@ function cancelDrawingForGesture() {
     viewport.releasePointerCapture(drawing.pointerId);
   }
   state.drawing = null;
-  viewport.classList.remove("is-drawing");
+  syncViewportPointerCursorClasses();
 }
 
 function cancelErasingForGesture() {
@@ -5136,6 +5173,7 @@ function cancelErasingForGesture() {
   }
 
   state.erasing = null;
+  syncViewportPointerCursorClasses();
 }
 
 function hideShapePreview() {
@@ -5154,8 +5192,8 @@ function cancelShapeDraft() {
     viewport.releasePointerCapture(state.shapeDraft.pointerId);
   }
   state.shapeDraft = null;
-  viewport.classList.remove("is-drawing");
   hideShapePreview();
+  syncViewportPointerCursorClasses();
   updateBrushCursorPreview();
 }
 
@@ -5643,6 +5681,52 @@ function normalizeStrokeLayerType(layerType) {
   return "stroke";
 }
 
+function normalizeLayerBlendMode(value) {
+  const candidate = String(value || "normal");
+  return LAYER_BLEND_MODE_OPTIONS.some((option) => option.value === candidate)
+    ? candidate
+    : "normal";
+}
+
+function getLayerBlendMode(stroke) {
+  return normalizeLayerBlendMode(stroke?.blendMode);
+}
+
+function getStrokeById(strokeId) {
+  const numericId = Number(strokeId);
+  if (!Number.isFinite(numericId)) {
+    return null;
+  }
+  return state.strokeById.get(numericId) ||
+    state.strokes.find((stroke) => Number(stroke?.id) === numericId) ||
+    null;
+}
+
+function getCanvasCompositeOperationForBlendMode(blendMode) {
+  const normalized = normalizeLayerBlendMode(blendMode);
+  return normalized === "normal" ? "source-over" : normalized;
+}
+
+function setLayerBlendMode(stroke, blendMode) {
+  if (!stroke) {
+    return;
+  }
+  stroke.blendMode = normalizeLayerBlendMode(blendMode);
+  applyStrokeBlendMode(stroke);
+}
+
+function applyStrokeBlendMode(stroke) {
+  if (!stroke || !Array.isArray(stroke.elements)) {
+    return;
+  }
+  const blendMode = getLayerBlendMode(stroke);
+  const cssBlendMode = blendMode === "normal" ? "" : blendMode;
+  for (const element of stroke.elements) {
+    element.style.mixBlendMode = cssBlendMode;
+    element.dataset.blendMode = blendMode;
+  }
+}
+
 function normalizeLayerSequenceValue(value, options) {
   const allowed = new Set(options.map((option) => option.value));
   const candidate = Array.isArray(value) ? value[0] : value;
@@ -5681,11 +5765,20 @@ function setExtraLayerSequenceSlots(stroke, slots) {
   stroke.sequenceEffectSlots = normalizeExtraLayerSequenceSlots(slots);
 }
 
+function hasLayerSequenceEffectSlots(stroke) {
+  return Boolean(stroke?.sequenceConfigured || getExtraLayerSequenceSlots(stroke).length);
+}
+
 function getLayerSequenceSlotCount(stroke) {
-  return 1 + getExtraLayerSequenceSlots(stroke).length;
+  return hasLayerSequenceEffectSlots(stroke)
+    ? 1 + getExtraLayerSequenceSlots(stroke).length
+    : 0;
 }
 
 function getLayerSequenceSlots(stroke) {
+  if (!hasLayerSequenceEffectSlots(stroke)) {
+    return [];
+  }
   return [
     getLayerSequenceSlot(stroke, 0),
     ...getExtraLayerSequenceSlots(stroke)
@@ -6039,6 +6132,379 @@ function createLayerSequenceOptionControl(stroke, key, label, options, slotIndex
   return field;
 }
 
+function getLayerBlendModeLabel(value) {
+  const normalized = normalizeLayerBlendMode(value);
+  return LAYER_BLEND_MODE_OPTIONS.find((option) => option.value === normalized)?.label || "Normal";
+}
+
+function inferStrokeOpacityPercent(stroke) {
+  const elements = Array.isArray(stroke?.elements) ? stroke.elements : [];
+  for (const element of elements) {
+    const opacity = Number.isFinite(Number(element.dataset.sequenceBaseOpacity))
+      ? Number(element.dataset.sequenceBaseOpacity)
+      : Number(element.style.opacity);
+    if (Number.isFinite(opacity)) {
+      return Math.round(clamp(opacity, 0, 1) * 100);
+    }
+  }
+  return 100;
+}
+
+function normalizeLayerOpacityPercent(value, fallback = 100) {
+  const numericValue = value === null || value === "" ? NaN : Number(value);
+  return clamp(Math.round(Number.isFinite(numericValue) ? numericValue : fallback), 0, 100);
+}
+
+function getLayerOpacityPercent(stroke) {
+  return normalizeLayerOpacityPercent(stroke?.layerOpacity, inferStrokeOpacityPercent(stroke));
+}
+
+function getLayerOpacityFraction(stroke) {
+  return getLayerOpacityPercent(stroke) / 100;
+}
+
+function normalizeLayerScaleValue(value) {
+  return clamp(Math.round(Number.isFinite(Number(value)) ? Number(value) : 0), -1000, 1000);
+}
+
+function getLayerScaleValue(stroke) {
+  return normalizeLayerScaleValue(stroke?.layerScale);
+}
+
+function getLayerScaleFactor(stroke) {
+  const value = getLayerScaleValue(stroke);
+  if (value >= 0) {
+    return 1 + value / 100;
+  }
+  return 1 / (1 + Math.abs(value) / 100);
+}
+
+function normalizeLayerRotationDegrees(value) {
+  return clamp(Math.round(Number.isFinite(Number(value)) ? Number(value) : 0), -360, 360);
+}
+
+function getLayerRotationDegrees(stroke) {
+  return normalizeLayerRotationDegrees(stroke?.layerRotation);
+}
+
+function getLayerScaleDisplayValue(stroke) {
+  return `${Math.round(getLayerScaleFactor(stroke) * 100)}%`;
+}
+
+function getLayerControlDisplayValue(stroke, key) {
+  if (key === "layerOpacity") {
+    return `${getLayerOpacityPercent(stroke)}%`;
+  }
+  if (key === "layerScale") {
+    return getLayerScaleDisplayValue(stroke);
+  }
+  if (key === "layerRotation") {
+    return `${getLayerRotationDegrees(stroke)}deg`;
+  }
+  return "";
+}
+
+function getStrokeLayerBounds(stroke) {
+  const elements = Array.isArray(stroke?.elements) ? stroke.elements : [];
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const element of elements) {
+    const elementLeft = parseFloat(element.style.left) || 0;
+    const elementTop = parseFloat(element.style.top) || 0;
+    const width = Math.max(0, parseFloat(element.style.width) || 0);
+    const height = Math.max(0, parseFloat(element.style.height) || 0);
+    if (width <= 0 || height <= 0) {
+      continue;
+    }
+    left = Math.min(left, elementLeft);
+    top = Math.min(top, elementTop);
+    right = Math.max(right, elementLeft + width);
+    bottom = Math.max(bottom, elementTop + height);
+  }
+  if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right) || !Number.isFinite(bottom)) {
+    return null;
+  }
+  return { left, top, right, bottom };
+}
+
+function getStampLayerTransform(stroke, element) {
+  const scale = getLayerScaleFactor(stroke);
+  const rotation = getLayerRotationDegrees(stroke);
+  if (!stroke || !element || (Math.abs(scale - 1) < 0.0001 && rotation === 0)) {
+    return { x: 0, y: 0, rotation, scale };
+  }
+  const bounds = getStrokeLayerBounds(stroke);
+  if (!bounds) {
+    return { x: 0, y: 0, rotation, scale };
+  }
+  const layerCenterX = (bounds.left + bounds.right) / 2;
+  const layerCenterY = (bounds.top + bounds.bottom) / 2;
+  const left = parseFloat(element.style.left) || 0;
+  const top = parseFloat(element.style.top) || 0;
+  const width = Math.max(0, parseFloat(element.style.width) || 0);
+  const height = Math.max(0, parseFloat(element.style.height) || 0);
+  const centerX = left + width / 2;
+  const centerY = top + height / 2;
+  const dx = (centerX - layerCenterX) * scale;
+  const dy = (centerY - layerCenterY) * scale;
+  const radians = (rotation * Math.PI) / 180;
+  const transformedCenterX = layerCenterX + dx * Math.cos(radians) - dy * Math.sin(radians);
+  const transformedCenterY = layerCenterY + dx * Math.sin(radians) + dy * Math.cos(radians);
+  return {
+    x: transformedCenterX - centerX,
+    y: transformedCenterY - centerY,
+    rotation,
+    scale
+  };
+}
+
+function syncStrokeLayerOpacityBase(stroke) {
+  if (!stroke || !Array.isArray(stroke.elements)) {
+    return;
+  }
+  const opacity = String(getLayerOpacityFraction(stroke));
+  for (const element of stroke.elements) {
+    element.dataset.sequenceBaseOpacity = opacity;
+  }
+}
+
+function applyStampLayerVisualStyle(stroke, stamp, visual = null) {
+  if (!stamp) {
+    return;
+  }
+  const layerTransform = getStampLayerTransform(stroke, stamp);
+  const baseRotation = Number(stamp.dataset.rotation) || 0;
+  const opacity = Number.isFinite(Number(visual?.opacity))
+    ? Number(visual.opacity)
+    : getLayerOpacityFraction(stroke);
+  const moveX = layerTransform.x + (Number(visual?.moveX) || 0);
+  const moveY = layerTransform.y + (Number(visual?.moveY) || 0);
+  const rotation = baseRotation + layerTransform.rotation + (Number(visual?.rotationOffset) || 0);
+  const scale = layerTransform.scale * (Number(visual?.scale) || 1);
+  stamp.style.opacity = String(clamp(opacity, 0, 1));
+  stamp.style.transform =
+    `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`;
+}
+
+function applyStrokeLayerVisuals(stroke) {
+  if (!stroke || !Array.isArray(stroke.elements)) {
+    return;
+  }
+  syncStrokeLayerOpacityBase(stroke);
+  for (const element of stroke.elements) {
+    applyStampLayerVisualStyle(stroke, element);
+    unregisterStampSpatialCells(element);
+    if (!stroke.hidden && element.parentElement === world) {
+      registerStampSpatialCells(element);
+    } else {
+      cacheStampWorldBounds(element);
+    }
+  }
+  scheduleStampVisibilityRefresh();
+}
+
+function setLayerControlValue(stroke, key, value) {
+  if (!stroke) {
+    return;
+  }
+  if (key === "layerOpacity") {
+    stroke.layerOpacity = normalizeLayerOpacityPercent(value, getLayerOpacityPercent(stroke));
+    syncStrokeLayerOpacityBase(stroke);
+  } else if (key === "layerScale") {
+    stroke.layerScale = normalizeLayerScaleValue(value);
+  } else if (key === "layerRotation") {
+    stroke.layerRotation = normalizeLayerRotationDegrees(value);
+  }
+  applyStrokeLayerVisuals(stroke);
+}
+
+function createLayerRangeControl(stroke, key, label, min, max, step) {
+  const field = document.createElement("label");
+  field.className = "edit-layer-property-row";
+
+  const labelText = document.createElement("span");
+  labelText.className = "edit-layer-property-label";
+  labelText.textContent = label;
+
+  const value = document.createElement("span");
+  value.className = "edit-layer-property-value";
+  value.textContent = getLayerControlDisplayValue(stroke, key);
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.className = "edit-layer-property-input";
+  input.dataset.layerSetting = key;
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = key === "layerOpacity"
+    ? String(getLayerOpacityPercent(stroke))
+    : key === "layerScale"
+    ? String(getLayerScaleValue(stroke))
+    : String(getLayerRotationDegrees(stroke));
+
+  field.appendChild(labelText);
+  field.appendChild(value);
+  field.appendChild(input);
+  return field;
+}
+
+function createLayerPropertyControls(stroke) {
+  const panel = document.createElement("div");
+  panel.className = "edit-layer-property-controls";
+  panel.dataset.strokeId = String(stroke.id);
+  panel.appendChild(createLayerRangeControl(stroke, "layerOpacity", "opacity", 0, 100, 1));
+  panel.appendChild(createLayerRangeControl(stroke, "layerScale", "scale", -1000, 1000, 1));
+  panel.appendChild(createLayerRangeControl(stroke, "layerRotation", "rotation", -360, 360, 1));
+  return panel;
+}
+
+function createLayerBlendModeControl(stroke) {
+  const row = document.createElement("div");
+  row.className = "edit-layer-blend-row";
+  row.dataset.strokeId = String(stroke.id);
+
+  const label = document.createElement("span");
+  label.className = "edit-layer-sequence-label";
+  label.textContent = "blend mode";
+
+  const selectedValue = getLayerBlendMode(stroke);
+  const menu = document.createElement("div");
+  menu.className = "edit-layer-blend-menu";
+  menu.dataset.strokeId = String(stroke.id);
+  menu.dataset.originalBlendMode = selectedValue;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "edit-layer-blend-button";
+  button.dataset.layerAction = "blend-menu";
+  button.setAttribute("aria-haspopup", "listbox");
+  button.setAttribute("aria-expanded", "false");
+  button.textContent = getLayerBlendModeLabel(selectedValue);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (menu.classList.contains("is-open")) {
+      closeLayerBlendMenu(menu, true);
+    } else {
+      openLayerBlendMenu(menu, stroke);
+    }
+    state.selectedEditLayerId = stroke.id;
+  });
+
+  const optionsList = document.createElement("div");
+  optionsList.className = "edit-layer-blend-options";
+  optionsList.setAttribute("role", "listbox");
+  optionsList.hidden = true;
+  for (const option of LAYER_BLEND_MODE_OPTIONS) {
+    const optionNode = document.createElement("button");
+    optionNode.type = "button";
+    optionNode.className = "edit-layer-blend-option";
+    optionNode.dataset.blendMode = option.value;
+    optionNode.setAttribute("role", "option");
+    optionNode.setAttribute("aria-selected", String(option.value === selectedValue));
+    optionNode.textContent = option.label;
+    optionNode.classList.toggle("is-selected", option.value === selectedValue);
+    optionNode.addEventListener("pointerover", () => {
+      if (!menu.classList.contains("is-open")) {
+        return;
+      }
+      setLayerBlendMode(stroke, option.value);
+      for (const previewOption of menu.querySelectorAll(".edit-layer-blend-option.is-preview")) {
+        previewOption.classList.remove("is-preview");
+      }
+      optionNode.classList.add("is-preview");
+    });
+    optionNode.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setLayerBlendMode(stroke, option.value);
+      menu.dataset.originalBlendMode = option.value;
+      updateLayerBlendMenuSelection(menu, option.value);
+      closeLayerBlendMenu(menu, false);
+      state.selectedEditLayerId = stroke.id;
+      scheduleSessionSave();
+    });
+    optionsList.appendChild(optionNode);
+  }
+  menu.appendChild(button);
+  menu.appendChild(optionsList);
+  row.appendChild(label);
+  row.appendChild(menu);
+  return row;
+}
+
+function closeLayerBlendMenu(menu, restorePreview = true) {
+  if (!menu || !menu.classList.contains("is-open")) {
+    return;
+  }
+  if (restorePreview) {
+    const stroke = getStrokeById(menu.dataset.strokeId);
+    if (stroke) {
+      setLayerBlendMode(stroke, menu.dataset.originalBlendMode || "normal");
+    }
+  }
+  menu.classList.remove("is-open");
+  const button = menu.querySelector(".edit-layer-blend-button");
+  const optionsList = menu.querySelector(".edit-layer-blend-options");
+  if (button) {
+    button.setAttribute("aria-expanded", "false");
+  }
+  if (optionsList) {
+    optionsList.hidden = true;
+  }
+  for (const option of menu.querySelectorAll(".edit-layer-blend-option.is-preview")) {
+    option.classList.remove("is-preview");
+  }
+}
+
+function closeAllLayerBlendMenus(exceptMenu = null, restorePreview = true) {
+  if (!editLayerList) {
+    return;
+  }
+  for (const menu of editLayerList.querySelectorAll(".edit-layer-blend-menu.is-open")) {
+    if (menu !== exceptMenu) {
+      closeLayerBlendMenu(menu, restorePreview);
+    }
+  }
+}
+
+function openLayerBlendMenu(menu, stroke) {
+  if (!menu || !stroke) {
+    return;
+  }
+  closeAllLayerBlendMenus(menu, true);
+  const currentBlendMode = getLayerBlendMode(stroke);
+  menu.dataset.originalBlendMode = currentBlendMode;
+  menu.classList.add("is-open");
+  const button = menu.querySelector(".edit-layer-blend-button");
+  const optionsList = menu.querySelector(".edit-layer-blend-options");
+  if (button) {
+    button.setAttribute("aria-expanded", "true");
+  }
+  if (optionsList) {
+    optionsList.hidden = false;
+  }
+}
+
+function updateLayerBlendMenuSelection(menu, blendMode) {
+  if (!menu) {
+    return;
+  }
+  const normalized = normalizeLayerBlendMode(blendMode);
+  const button = menu.querySelector(".edit-layer-blend-button");
+  if (button) {
+    button.textContent = getLayerBlendModeLabel(normalized);
+  }
+  for (const option of menu.querySelectorAll(".edit-layer-blend-option")) {
+    const selected = option.dataset.blendMode === normalized;
+    option.classList.toggle("is-selected", selected);
+    option.setAttribute("aria-selected", String(selected));
+  }
+}
+
 function createLayerSequenceSettings(stroke, slotIndex = 0) {
   const effect = getLayerSequenceEffect(stroke, slotIndex);
   const timingStyle = getLayerSequenceTimingStyle(stroke, slotIndex);
@@ -6156,8 +6622,9 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
 }
 
 function createLayerSequenceAddRemoveRow(stroke, slotIndex, slotCount) {
-  const canAdd = slotIndex === slotCount - 1 && slotCount < MAX_LAYER_SEQUENCE_EFFECTS;
-  const canRemove = slotIndex > 0;
+  const noEffects = slotCount <= 0;
+  const canAdd = (noEffects || slotIndex === slotCount - 1) && slotCount < MAX_LAYER_SEQUENCE_EFFECTS;
+  const canRemove = slotCount > 0;
   if (!canAdd && !canRemove) {
     return null;
   }
@@ -6174,7 +6641,16 @@ function createLayerSequenceAddRemoveRow(stroke, slotIndex, slotCount) {
     addButton.type = "button";
     addButton.className = "edit-layer-sequence-add-button";
     addButton.dataset.layerAction = "sequence-add-effect";
-    addButton.textContent = "+";
+    const symbol = document.createElement("span");
+    symbol.className = "edit-layer-sequence-add-symbol";
+    symbol.textContent = "+";
+    addButton.appendChild(symbol);
+    if (noEffects) {
+      const label = document.createElement("span");
+      label.className = "edit-layer-sequence-add-label";
+      label.textContent = "add sequence effect";
+      addButton.appendChild(label);
+    }
     addButton.title = "Add layer effect";
     addButton.setAttribute("aria-label", addButton.title);
     row.appendChild(addButton);
@@ -6199,16 +6675,82 @@ function createLayerSequenceAddRemoveRow(stroke, slotIndex, slotCount) {
   return row;
 }
 
+function addLayerSequenceSlot(stroke) {
+  if (!stroke) {
+    return false;
+  }
+  const slotCount = getLayerSequenceSlotCount(stroke);
+  if (slotCount >= MAX_LAYER_SEQUENCE_EFFECTS) {
+    return false;
+  }
+  if (slotCount <= 0) {
+    stroke.sequenceConfigured = true;
+    stroke.sequenceEnabled = true;
+    stroke.sequenceEffect = "show-hide";
+    stroke.sequenceTimingStyle = "pulse";
+    stroke.sequenceSettings = normalizeLayerSequenceSettings(LAYER_SEQUENCE_DEFAULT_SETTINGS);
+    setExtraLayerSequenceSlots(stroke, []);
+    return true;
+  }
+  const extras = getExtraLayerSequenceSlots(stroke);
+  extras.push(normalizeLayerSequenceSlot({
+    effect: "show-hide",
+    timingStyle: "pulse",
+    settings: LAYER_SEQUENCE_DEFAULT_SETTINGS
+  }));
+  setExtraLayerSequenceSlots(stroke, extras);
+  stroke.sequenceConfigured = true;
+  stroke.sequenceEnabled = true;
+  return true;
+}
+
+function removeLayerSequenceSlot(stroke, slotIndex) {
+  if (!stroke) {
+    return false;
+  }
+  const slotCount = getLayerSequenceSlotCount(stroke);
+  if (slotCount <= 0) {
+    return false;
+  }
+  const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, slotCount - 1);
+  const extras = getExtraLayerSequenceSlots(stroke);
+  if (safeSlotIndex <= 0) {
+    const nextSlot = extras.shift();
+    if (nextSlot) {
+      stroke.sequenceConfigured = true;
+      stroke.sequenceEffect = nextSlot.effect;
+      stroke.sequenceTimingStyle = nextSlot.timingStyle;
+      stroke.sequenceSettings = normalizeLayerSequenceSettings(nextSlot.settings);
+      setExtraLayerSequenceSlots(stroke, extras);
+      stroke.sequenceEnabled = true;
+    } else {
+      stroke.sequenceConfigured = false;
+      stroke.sequenceEnabled = false;
+      setExtraLayerSequenceSlots(stroke, []);
+    }
+    return true;
+  }
+  extras.splice(safeSlotIndex - 1, 1);
+  setExtraLayerSequenceSlots(stroke, extras);
+  return true;
+}
+
 function serializeStrokeList(strokes) {
   return strokes.map((stroke) => ({
     id: Number.isFinite(Number(stroke.id)) ? Number(stroke.id) : null,
     layerNumber: Number.isFinite(Number(stroke.layerNumber)) ? Number(stroke.layerNumber) : null,
     layerType: normalizeStrokeLayerType(stroke.layerType),
+    customName: normalizeLayerCustomName(stroke.customName),
     brushCategoryName: typeof stroke.brushCategoryName === "string"
       ? stroke.brushCategoryName
       : "",
+    blendMode: getLayerBlendMode(stroke),
+    layerOpacity: getLayerOpacityPercent(stroke),
+    layerScale: getLayerScaleValue(stroke),
+    layerRotation: getLayerRotationDegrees(stroke),
     animationPaused: Boolean(stroke.animationPaused),
     sequenceOpen: Boolean(stroke.sequenceOpen),
+    sequenceConfigured: hasLayerSequenceEffectSlots(stroke),
     sequenceEnabled: isLayerSequenceEnabled(stroke),
     sequenceEffect: getLayerSequenceEffect(stroke),
     sequenceTimingStyle: getLayerSequenceTimingStyle(stroke),
@@ -6717,6 +7259,7 @@ function createStampElement(stampData, brush, fallbackTintSettings = null) {
   stamp.style.opacity = String(Number.isFinite(opacity) ? clamp(opacity, 0, 1) : 1);
   stamp.dataset.sequenceBaseOpacity = stamp.style.opacity;
   stamp.dataset.sequenceBaseSrc = brush.url;
+  stamp.dataset.sequenceDisplayedSource = brush.url;
   stamp.style.imageRendering = stampData.imageRendering === "auto" ? "auto" : "pixelated";
   stamp.style.transform = `rotate(${rotation}deg)`;
   const hasSerializedTint =
@@ -6758,12 +7301,24 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
         ? Number(strokeData.layerNumber)
         : strokeId,
       layerType: normalizeStrokeLayerType(strokeData?.layerType),
+      customName: normalizeLayerCustomName(strokeData?.customName),
 	      brushCategoryName:
 	        typeof strokeData?.brushCategoryName === "string" && strokeData.brushCategoryName.trim()
 	          ? strokeData.brushCategoryName.trim()
 	          : "custom",
+	      blendMode: normalizeLayerBlendMode(strokeData?.blendMode),
+	      layerOpacity: Number.isFinite(Number(strokeData?.layerOpacity))
+	        ? normalizeLayerOpacityPercent(strokeData.layerOpacity, 100)
+	        : null,
+	      layerScale: normalizeLayerScaleValue(strokeData?.layerScale),
+	      layerRotation: normalizeLayerRotationDegrees(strokeData?.layerRotation),
 	      animationPaused: Boolean(strokeData?.animationPaused),
 	      sequenceOpen: Boolean(strokeData?.sequenceOpen),
+	      sequenceConfigured:
+	        typeof strokeData?.sequenceConfigured === "boolean"
+	          ? strokeData.sequenceConfigured
+	          : Boolean(strokeData?.sequenceEnabled || strokeData?.sequenceOpen) ||
+	            normalizeExtraLayerSequenceSlots(strokeData?.sequenceEffectSlots).length > 0,
 	      sequenceEnabled:
 	        typeof strokeData?.sequenceEnabled === "boolean"
 	          ? strokeData.sequenceEnabled
@@ -6803,6 +7358,8 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
     }
 
     if (stroke.elements.length) {
+      applyStrokeBlendMode(stroke);
+      applyStrokeLayerVisuals(stroke);
       restored.push(stroke);
     }
   }
@@ -7478,7 +8035,14 @@ function renderBrushGallery() {
   brushGallery.appendChild(fragment);
 }
 
-function getStrokeLayerName(stroke) {
+function normalizeLayerCustomName(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().slice(0, 80);
+}
+
+function getDefaultStrokeLayerName(stroke) {
   const stampCount = Array.isArray(stroke?.elements) ? stroke.elements.length : 0;
   const categoryName = typeof stroke?.brushCategoryName === "string" && stroke.brushCategoryName.trim()
     ? stroke.brushCategoryName.trim()
@@ -7491,6 +8055,55 @@ function getStrokeLayerName(stroke) {
     ? Number(stroke.id)
     : 1;
   return `${categoryName} ${typeLabel} ${layerNumber} (${stampCount})`;
+}
+
+function getStrokeLayerName(stroke) {
+  return normalizeLayerCustomName(stroke?.customName) || getDefaultStrokeLayerName(stroke);
+}
+
+function startLayerNameEdit(stroke, nameElement) {
+  if (!stroke || !nameElement || nameElement.querySelector(".edit-layer-name-input")) {
+    return;
+  }
+
+  const previousName = getStrokeLayerName(stroke);
+  nameElement.textContent = "";
+  nameElement.classList.add("is-editing");
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "edit-layer-name-input";
+  input.value = previousName;
+  input.maxLength = 80;
+  input.setAttribute("aria-label", "Layer name");
+
+  let completed = false;
+  const finish = (cancel) => {
+    if (completed) {
+      return;
+    }
+    completed = true;
+    if (!cancel) {
+      stroke.customName = normalizeLayerCustomName(input.value);
+      scheduleSessionSave();
+    }
+    renderEditLayers();
+  };
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(false);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      finish(true);
+    }
+  });
+  input.addEventListener("blur", () => finish(false));
+
+  nameElement.appendChild(input);
+  input.focus();
+  input.select();
 }
 
 function selectEditLayer(strokeId) {
@@ -7720,6 +8333,60 @@ function resetStrokeSequenceRuntime(stroke) {
   stroke.sequenceRuntime = null;
   stroke.sequenceSlotRuntimes = null;
   delete stroke.sequencePauseStartTime;
+}
+
+function shiftSequenceRuntimeClock(runtime, offsetMs) {
+  if (!runtime || typeof runtime !== "object" || !Number.isFinite(offsetMs) || offsetMs <= 0) {
+    return;
+  }
+  if (Number.isFinite(Number(runtime.pulseBaseTime))) {
+    runtime.pulseBaseTime += offsetMs;
+  }
+  if (Number.isFinite(Number(runtime.baseTime))) {
+    runtime.baseTime += offsetMs;
+  }
+  if (Number.isFinite(Number(runtime.nextTriggerTime))) {
+    runtime.nextTriggerTime += offsetMs;
+  }
+}
+
+function shiftStrokeSequenceClock(stroke, offsetMs) {
+  if (!stroke || !Number.isFinite(offsetMs) || offsetMs <= 0) {
+    return;
+  }
+  shiftSequenceRuntimeClock(stroke.sequenceRuntime, offsetMs);
+  if (Array.isArray(stroke.sequenceSlotRuntimes)) {
+    for (const runtime of stroke.sequenceSlotRuntimes) {
+      shiftSequenceRuntimeClock(runtime, offsetMs);
+    }
+  }
+  for (const stamp of stroke.elements || []) {
+    for (const key of Object.keys(stamp?.dataset || {})) {
+      if (
+        key.endsWith("Start") ||
+        key.endsWith("StartTime") ||
+        key.endsWith("MoveStart") ||
+        key.endsWith("RotateStart") ||
+        key.endsWith("ScaleStart") ||
+        key.endsWith("ColorStart") ||
+        key.endsWith("VisibilityStart")
+      ) {
+        const value = Number(stamp.dataset[key]);
+        if (Number.isFinite(value)) {
+          stamp.dataset[key] = String(value + offsetMs);
+        }
+      }
+    }
+  }
+}
+
+function shiftAllLayerSequenceClocks(offsetMs) {
+  if (!Number.isFinite(offsetMs) || offsetMs <= 0) {
+    return;
+  }
+  for (const stroke of state.strokes) {
+    shiftStrokeSequenceClock(stroke, offsetMs);
+  }
 }
 
 function refreshStrokeSequenceEffect(stroke) {
@@ -7986,6 +8653,10 @@ function ensureStampSequenceBase(stamp) {
   if (!stamp.dataset.sequenceBaseSrc) {
     stamp.dataset.sequenceBaseSrc = stamp.dataset.brushUrl || stamp.getAttribute("src") || "";
   }
+  if (!stamp.dataset.sequenceDisplayedSource) {
+    stamp.dataset.sequenceDisplayedSource =
+      stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "";
+  }
 }
 
 function getStampBaseTintSettings(stamp) {
@@ -7995,11 +8666,29 @@ function getStampBaseTintSettings(stamp) {
   });
 }
 
-function setStampSequenceImage(stamp, src) {
-  if (!src || stamp.getAttribute("src") === src) {
+function getIsolatedSequenceGifSource(stamp, src) {
+  if (!stamp || !isGifUrl(src)) {
+    return src;
+  }
+  const strokeId = String(stamp.dataset.strokeId || "0").replace(/[^a-z0-9_-]/gi, "");
+  const brushId = String(stamp.dataset.brushId || "0").replace(/[^a-z0-9_-]/gi, "");
+  const token = `seq-stamp-${strokeId}-${brushId}-${Array.prototype.indexOf.call(stamp.parentNode?.children || [], stamp)}`;
+  return `${src}${src.includes("#") ? "&" : "#"}${token}`;
+}
+
+function setStampSequenceImage(stamp, src, isolateGifPlayback = false) {
+  if (!src) {
     return;
   }
-  stamp.src = src;
+  if (
+    stamp.dataset.sequenceDisplayedSource === src &&
+    (isolateGifPlayback || stamp.getAttribute("src") === src)
+  ) {
+    return;
+  }
+  const displaySrc = isolateGifPlayback ? getIsolatedSequenceGifSource(stamp, src) : src;
+  stamp.dataset.sequenceDisplayedSource = src;
+  stamp.src = displaySrc;
   markGifPlaybackStart(stamp, src);
   if (!state.sequenceExportActive) {
     applyGifPauseStateToImage(stamp);
@@ -8020,9 +8709,8 @@ function resetStampSequenceStyle(stamp, force = false) {
     return;
   }
   ensureStampSequenceBase(stamp);
-  const baseRotation = Number(stamp.dataset.rotation) || 0;
-  stamp.style.transform = `rotate(${baseRotation}deg)`;
-  stamp.style.opacity = String(clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1));
+  const stroke = getStampLayerStroke(stamp);
+  applyStampLayerVisualStyle(stroke, stamp);
   applyBrushTintStyle(stamp, false, getStampBaseTintSettings(stamp));
   setStampSequenceImage(stamp, stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || "");
   deleteSequenceRuntimeDataset(stamp);
@@ -8400,40 +9088,7 @@ function runLayerSequences(now = performance.now()) {
     }
     if (Number.isFinite(Number(stroke.sequencePauseStartTime))) {
       const pausedDuration = Math.max(0, now - Number(stroke.sequencePauseStartTime));
-      if (Array.isArray(stroke.sequenceSlotRuntimes)) {
-        for (const runtime of stroke.sequenceSlotRuntimes) {
-          if (!runtime || typeof runtime !== "object") {
-            continue;
-          }
-          if (Number.isFinite(Number(runtime.pulseBaseTime))) {
-            runtime.pulseBaseTime += pausedDuration;
-          }
-          if (Number.isFinite(Number(runtime.baseTime))) {
-            runtime.baseTime += pausedDuration;
-          }
-          if (Number.isFinite(Number(runtime.nextTriggerTime))) {
-            runtime.nextTriggerTime += pausedDuration;
-          }
-        }
-      }
-      for (const stamp of stroke.elements) {
-        for (const key of Object.keys(stamp?.dataset || {})) {
-          if (
-            key.endsWith("Start") ||
-            key.endsWith("StartTime") ||
-            key.endsWith("MoveStart") ||
-            key.endsWith("RotateStart") ||
-            key.endsWith("ScaleStart") ||
-            key.endsWith("ColorStart") ||
-            key.endsWith("VisibilityStart")
-          ) {
-            const value = Number(stamp.dataset[key]);
-            if (Number.isFinite(value)) {
-              stamp.dataset[key] = String(value + pausedDuration);
-            }
-          }
-        }
-      }
+      shiftStrokeSequenceClock(stroke, pausedDuration);
       delete stroke.sequencePauseStartTime;
     }
     const slots = getLayerSequenceSlots(stroke).filter((slot) =>
@@ -8454,6 +9109,7 @@ function runLayerSequences(now = performance.now()) {
       continue;
     }
 
+    syncStrokeLayerOpacityBase(stroke);
     const total = stroke.elements.length;
     const visuals = stroke.elements.map((stamp) => {
       ensureStampSequenceBase(stamp);
@@ -8465,7 +9121,8 @@ function runLayerSequences(now = performance.now()) {
         rotationOffset: 0,
         scale: 1,
         tintSettings: getStampBaseTintSettings(stamp),
-        sourceUrl: stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || ""
+        sourceUrl: stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "",
+        imageCycleSource: false
       };
     });
 
@@ -8538,6 +9195,7 @@ function runLayerSequences(now = performance.now()) {
           }
         } else if (effect === "image-cycle") {
           visual.sourceUrl = getCurrentSequenceImageSource(stamp, currentImageCycleSource);
+          visual.imageCycleSource = true;
         }
 
         commitSequenceSlotScratch(stamp, slotIndex);
@@ -8552,20 +9210,40 @@ function runLayerSequences(now = performance.now()) {
       if (!stamp || stamp.parentElement !== world || !visual) {
         continue;
       }
-      const baseRotation = Number(stamp.dataset.rotation) || 0;
-      stamp.style.opacity = String(clamp(visual.opacity, 0, 1));
-      setStampSequenceImage(stamp, visual.sourceUrl);
+      setStampSequenceImage(stamp, visual.sourceUrl, visual.imageCycleSource);
       applyBrushTintStyle(stamp, false, visual.tintSettings);
-      stamp.style.transform =
-        `translate(${visual.moveX}px, ${visual.moveY}px) rotate(${baseRotation + visual.rotationOffset}deg) scale(${visual.scale})`;
+      applyStampLayerVisualStyle(stroke, stamp, visual);
     }
   }
 }
 
 function applyLayerSequences(now = performance.now()) {
+  if (document.visibilityState !== "visible" && !state.sequenceExportActive) {
+    if (!Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
+      state.sequenceVisibilityPauseStart = now;
+    }
+    state.sequenceLastFrameTime = now;
+    state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
+    return;
+  }
+  if (Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
+    const pausedDuration = Math.max(0, now - Number(state.sequenceVisibilityPauseStart));
+    shiftAllLayerSequenceClocks(pausedDuration);
+    state.sequenceVisibilityPauseStart = null;
+    state.sequenceLastFrameTime = now;
+  } else if (Number.isFinite(Number(state.sequenceLastFrameTime))) {
+    const frameGap = Math.max(0, now - Number(state.sequenceLastFrameTime));
+    if (frameGap > SEQUENCE_BACKGROUND_GAP_MS) {
+      shiftAllLayerSequenceClocks(frameGap);
+      state.sequenceLastFrameTime = now;
+    }
+  } else {
+    state.sequenceLastFrameTime = now;
+  }
   if (!state.sequenceExportActive) {
     runLayerSequences(now);
   }
+  state.sequenceLastFrameTime = now;
   state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
 }
 
@@ -8610,12 +9288,13 @@ function renderEditLayers() {
     const name = document.createElement("span");
     name.className = "edit-layer-name";
     name.textContent = getStrokeLayerName(stroke);
+    name.title = "Double-click to rename";
 
     const sequenceButton = document.createElement("button");
     sequenceButton.type = "button";
     sequenceButton.className = "edit-layer-sequence-button";
     sequenceButton.dataset.layerAction = "sequence";
-    sequenceButton.title = stroke.sequenceOpen ? "Hide sequencing controls" : "Show sequencing controls";
+    sequenceButton.title = stroke.sequenceOpen ? "Hide effects controls" : "Show effects controls";
     sequenceButton.setAttribute("aria-label", sequenceButton.title);
     sequenceButton.setAttribute("aria-expanded", String(Boolean(stroke.sequenceOpen)));
     sequenceButton.setAttribute("aria-pressed", String(Boolean(stroke.sequenceOpen)));
@@ -8653,7 +9332,15 @@ function renderEditLayers() {
 
     entry.appendChild(row);
     if (stroke.sequenceOpen) {
+      entry.appendChild(createLayerBlendModeControl(stroke));
+      entry.appendChild(createLayerPropertyControls(stroke));
       const slotCount = getLayerSequenceSlotCount(stroke);
+      if (slotCount <= 0) {
+        const addRow = createLayerSequenceAddRemoveRow(stroke, -1, 0);
+        if (addRow) {
+          entry.appendChild(addRow);
+        }
+      }
       for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
         const sequenceRow = document.createElement("div");
         sequenceRow.className = "edit-layer-sequence-row";
@@ -8879,6 +9566,109 @@ function getStampLayerStroke(element) {
   return Number.isFinite(strokeId) ? state.strokeById.get(strokeId) || null : null;
 }
 
+const stampHitTestCanvas = document.createElement("canvas");
+stampHitTestCanvas.width = 1;
+stampHitTestCanvas.height = 1;
+const stampHitTestContext = stampHitTestCanvas.getContext("2d", { alpha: true, willReadFrequently: true });
+
+function parseTransformOriginComponent(value, size) {
+  const text = String(value || "").trim();
+  if (text.endsWith("%")) {
+    return (parseFloat(text) / 100) * size;
+  }
+  const numericValue = parseFloat(text);
+  return Number.isFinite(numericValue) ? numericValue : size / 2;
+}
+
+function getStampLocalPointFromClient(element, clientX, clientY) {
+  if (!(element instanceof HTMLImageElement)) {
+    return null;
+  }
+  const width = Math.max(0, parseFloat(element.style.width) || element.width || 0);
+  const height = Math.max(0, parseFloat(element.style.height) || element.height || 0);
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  const worldPoint = screenToWorld(clientX, clientY);
+  const left = parseFloat(element.style.left) || 0;
+  const top = parseFloat(element.style.top) || 0;
+  const style = window.getComputedStyle(element);
+  const originParts = String(style.transformOrigin || "50% 50%").split(/\s+/);
+  const originX = parseTransformOriginComponent(originParts[0], width);
+  const originY = parseTransformOriginComponent(originParts[1], height);
+
+  try {
+    const matrix = new DOMMatrix(style.transform && style.transform !== "none" ? style.transform : undefined);
+    const inverse = matrix.inverse();
+    const transformedPoint = new DOMPoint(
+      worldPoint.x - left - originX,
+      worldPoint.y - top - originY
+    ).matrixTransform(inverse);
+    const localX = transformedPoint.x + originX;
+    const localY = transformedPoint.y + originY;
+    return { x: localX, y: localY, width, height };
+  } catch (error) {
+    return {
+      x: worldPoint.x - left,
+      y: worldPoint.y - top,
+      width,
+      height
+    };
+  }
+}
+
+function isStampPixelOpaqueAtClientPoint(element, clientX, clientY) {
+  if (
+    !(element instanceof HTMLImageElement) ||
+    !element.classList.contains("stamp") ||
+    element.classList.contains("is-layer-hidden") ||
+    element.classList.contains("is-culled")
+  ) {
+    return false;
+  }
+
+  const localPoint = getStampLocalPointFromClient(element, clientX, clientY);
+  if (
+    !localPoint ||
+    localPoint.x < 0 ||
+    localPoint.y < 0 ||
+    localPoint.x > localPoint.width ||
+    localPoint.y > localPoint.height
+  ) {
+    return false;
+  }
+
+  if (!stampHitTestContext || !element.complete || !element.naturalWidth || !element.naturalHeight) {
+    return true;
+  }
+
+  const sourceX = clamp(Math.floor((localPoint.x / localPoint.width) * element.naturalWidth), 0, element.naturalWidth - 1);
+  const sourceY = clamp(Math.floor((localPoint.y / localPoint.height) * element.naturalHeight), 0, element.naturalHeight - 1);
+  try {
+    stampHitTestContext.clearRect(0, 0, 1, 1);
+    stampHitTestContext.drawImage(element, sourceX, sourceY, 1, 1, 0, 0, 1, 1);
+    return stampHitTestContext.getImageData(0, 0, 1, 1).data[3] > 8;
+  } catch (error) {
+    return true;
+  }
+}
+
+function getTopOpaqueStampAtClientPoint(clientX, clientY) {
+  const elements = document.elementsFromPoint(clientX, clientY);
+  for (const element of elements) {
+    const stamp = element instanceof Element ? element.closest(".stamp") : null;
+    if (
+      stamp instanceof HTMLImageElement &&
+      stamp.parentElement === world &&
+      isStampPixelOpaqueAtClientPoint(stamp, clientX, clientY)
+    ) {
+      return stamp;
+    }
+  }
+  return null;
+}
+
 function setStampWorldPosition(element, left, top) {
   element.style.left = `${left}px`;
   element.style.top = `${top}px`;
@@ -8893,8 +9683,7 @@ function startEditLayerMove(event) {
     return false;
   }
 
-  const target = event.target;
-  const stamp = target instanceof Element ? target.closest(".stamp") : null;
+  const stamp = getTopOpaqueStampAtClientPoint(event.clientX, event.clientY);
   const stroke = getStampLayerStroke(stamp);
   if (!stroke || stroke.hidden) {
     return false;
@@ -9290,6 +10079,7 @@ function detachStrokeFromWorld(stroke) {
 function appendStrokeToWorld(stroke) {
   const viewportBounds = getViewportWorldBounds();
   const hidden = Boolean(stroke.hidden);
+  applyStrokeBlendMode(stroke);
   for (const element of stroke.elements) {
     if (element.parentElement !== world) {
       state.stampCount += 1;
@@ -9303,6 +10093,7 @@ function appendStrokeToWorld(stroke) {
     applyGifPauseStateToImage(element);
     incrementUrlRef(element.dataset.brushUrl);
   }
+  applyStrokeLayerVisuals(stroke);
   scheduleStampVisibilityRefresh();
 }
 
@@ -9320,6 +10111,8 @@ function pushStroke(stroke) {
     return;
   }
 
+  applyStrokeBlendMode(stroke);
+  applyStrokeLayerVisuals(stroke);
   state.strokes.push(stroke);
   state.strokeById.set(stroke.id, stroke);
   updateRememberedExportSetupForAddedStroke(stroke);
@@ -9647,6 +10440,7 @@ function placeBrush(x, y, stroke) {
   stamp.style.opacity = String(clamp(Number(opacitySlider.value) / 100, 0, 1));
   stamp.dataset.sequenceBaseOpacity = stamp.style.opacity;
   stamp.dataset.sequenceBaseSrc = brush.url;
+  stamp.dataset.sequenceDisplayedSource = brush.url;
   stamp.style.imageRendering = renderModeToggle.checked ? "auto" : "pixelated";
   stamp.style.transform = `rotate(${rotation}deg)`;
   const tintSettings = getCurrentTintSettings();
@@ -9969,7 +10763,9 @@ function rectsIntersect(a, b) {
 
 function getExportSequenceVisualState(element, now = performance.now()) {
   const stroke = getStampLayerStroke(element);
-  const baseOpacity = clamp(Number(element.dataset.sequenceBaseOpacity) || Number(element.style.opacity) || 1, 0, 1);
+  const baseOpacity = stroke
+    ? getLayerOpacityFraction(stroke)
+    : clamp(Number(element.dataset.sequenceBaseOpacity) || Number(element.style.opacity) || 1, 0, 1);
   const currentSource = element.getAttribute("src") || element.currentSrc || "";
   const baseSource = element.dataset.brushUrl || currentSource;
   const visual = {
@@ -10023,6 +10819,7 @@ function getExportSequenceVisualState(element, now = performance.now()) {
 }
 
 function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
+  const stroke = getStampLayerStroke(element);
   const left = parseFloat(element.style.left) || 0;
   const top = parseFloat(element.style.top) || 0;
   const width = Math.max(0, parseFloat(element.style.width) || 0);
@@ -10035,12 +10832,23 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
     ? getExportSequenceVisualState(element, Number.isFinite(Number(sequenceNow)) ? Number(sequenceNow) : performance.now())
     : null;
   const visualScale = Math.max(0.001, Number(sequenceState?.scale) || 1);
-  const visualWidth = width * visualScale;
-  const visualHeight = height * visualScale;
   const rotation = (Number(element.dataset.rotation) || 0) + (Number(sequenceState?.rotationOffset) || 0);
   const moveX = Number(sequenceState?.move?.x) || 0;
   const moveY = Number(sequenceState?.move?.y) || 0;
-  const bounds = getStampWorldBoundsFromLayout(left + moveX, top + moveY, visualWidth, visualHeight, rotation);
+  const layerTransform = getStampLayerTransform(stroke, element);
+  const totalScale = visualScale * layerTransform.scale;
+  const totalWidth = width * totalScale;
+  const totalHeight = height * totalScale;
+  const totalRotation = rotation + layerTransform.rotation;
+  const centerX = left + width / 2 + layerTransform.x + moveX;
+  const centerY = top + height / 2 + layerTransform.y + moveY;
+  const bounds = getStampWorldBoundsFromLayout(
+    centerX - totalWidth / 2,
+    centerY - totalHeight / 2,
+    totalWidth,
+    totalHeight,
+    totalRotation
+  );
   if (!rectsIntersect(bounds, selectionBounds)) {
     return null;
   }
@@ -10048,12 +10856,13 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
   return {
     element,
     sourceUrl: sequenceState?.sourceUrl || element.dataset.brushUrl || element.currentSrc || element.getAttribute("src") || "",
-    centerX: left + width / 2 + moveX,
-    centerY: top + height / 2 + moveY,
-    width: visualWidth,
-    height: visualHeight,
-    rotation,
+    centerX,
+    centerY,
+    width: totalWidth,
+    height: totalHeight,
+    rotation: totalRotation,
     opacity: sequenceState ? sequenceState.opacity : clamp(Number(element.style.opacity) || 1, 0, 1),
+    blendMode: getLayerBlendMode(stroke),
     tintSettings: sequenceState?.tintSettings || getStampBaseTintSettings(element),
     imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated"
   };
@@ -10647,6 +11456,7 @@ function drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAn
 
   ctx.save();
   ctx.globalAlpha = entry.opacity;
+  ctx.globalCompositeOperation = getCanvasCompositeOperationForBlendMode(entry.blendMode);
   ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
   ctx.translate(drawCenterX, drawCenterY);
   ctx.rotate((entry.rotation * Math.PI) / 180);
@@ -11804,6 +12614,7 @@ function startErasing(event) {
     pendingY: NaN,
     rafId: null
   };
+  syncViewportPointerCursorClasses();
   viewport.setPointerCapture(event.pointerId);
 }
 
@@ -11825,6 +12636,7 @@ function stopErasing(pointerId) {
   const changed = erasing.changed;
   const removals = erasing.removalContext.records;
   state.erasing = null;
+  syncViewportPointerCursorClasses();
   if (changed && removals.length) {
     pushEraseAction(removals);
   }
@@ -11860,7 +12672,7 @@ function startDrawing(event) {
     lastPlacedY: point.y,
     limitReached: false
   };
-  viewport.classList.add("is-drawing");
+  syncViewportPointerCursorClasses();
   viewport.setPointerCapture(event.pointerId);
 }
 
@@ -11874,7 +12686,7 @@ function stopDrawing(pointerId) {
     viewport.releasePointerCapture(pointerId);
   }
   state.drawing = null;
-  viewport.classList.remove("is-drawing");
+  syncViewportPointerCursorClasses();
 }
 
 function startShapeDrawing(event) {
@@ -11911,7 +12723,7 @@ function startShapeDrawing(event) {
     };
   }
 
-  viewport.classList.add("is-drawing");
+  syncViewportPointerCursorClasses();
   updateShapePreview(
     state.shapeDraft.mode,
     state.shapeDraft.anchorX,
@@ -11955,18 +12767,19 @@ async function stopShapeDrawing(pointerId) {
     viewport.releasePointerCapture(pointerId);
   }
 
-  viewport.classList.remove("is-drawing");
   if (!draft.dragging && !draft.fromPending) {
     draft.pointerId = null;
     draft.currentX = draft.anchorX;
     draft.currentY = draft.anchorY;
     hideShapePreview();
+    syncViewportPointerCursorClasses();
     return;
   }
 
   const { mode, anchorX, anchorY, currentX, currentY } = draft;
   state.shapeDraft = null;
   hideShapePreview();
+  syncViewportPointerCursorClasses();
   try {
     await commitShapeStroke(mode, anchorX, anchorY, currentX, currentY);
   } catch (error) {
@@ -12405,14 +13218,47 @@ if (editLayerList) {
     const sequenceRow = event.target.closest(".edit-layer-sequence-row");
     const sequenceSettings = event.target.closest(".edit-layer-sequence-settings");
     const sequenceAddRow = event.target.closest(".edit-layer-sequence-add-row");
+    const blendRow = event.target.closest(".edit-layer-blend-row");
+    const layerPropertyControls = event.target.closest(".edit-layer-property-controls");
     const strokeId = Number(
       row?.dataset.strokeId ||
         sequenceRow?.dataset.strokeId ||
         sequenceSettings?.dataset.strokeId ||
-        sequenceAddRow?.dataset.strokeId
+        sequenceAddRow?.dataset.strokeId ||
+        blendRow?.dataset.strokeId ||
+        layerPropertyControls?.dataset.strokeId
     );
-    const stroke = state.strokeById.get(strokeId);
+    const stroke = getStrokeById(strokeId);
     if (!stroke) {
+      return;
+    }
+
+    const blendButton = event.target.closest(".edit-layer-blend-button");
+    if (blendButton) {
+      event.preventDefault();
+      const menu = blendButton.closest(".edit-layer-blend-menu");
+      if (menu?.classList.contains("is-open")) {
+        closeLayerBlendMenu(menu, true);
+      } else {
+        openLayerBlendMenu(menu, stroke);
+      }
+      state.selectedEditLayerId = stroke.id;
+      return;
+    }
+
+    const blendOption = event.target.closest(".edit-layer-blend-option");
+    if (blendOption) {
+      event.preventDefault();
+      const menu = blendOption.closest(".edit-layer-blend-menu");
+      const nextBlendMode = normalizeLayerBlendMode(blendOption.dataset.blendMode);
+      setLayerBlendMode(stroke, nextBlendMode);
+      if (menu) {
+        menu.dataset.originalBlendMode = nextBlendMode;
+        updateLayerBlendMenuSelection(menu, nextBlendMode);
+        closeLayerBlendMenu(menu, false);
+      }
+      state.selectedEditLayerId = stroke.id;
+      scheduleSessionSave();
       return;
     }
 
@@ -12430,11 +13276,7 @@ if (editLayerList) {
     const sequenceButton = event.target.closest(".edit-layer-sequence-button");
     if (sequenceButton) {
       event.preventDefault();
-      const willOpen = !stroke.sequenceOpen;
-      stroke.sequenceOpen = willOpen;
-      if (willOpen && typeof stroke.sequenceEnabled !== "boolean") {
-        stroke.sequenceEnabled = true;
-      }
+      stroke.sequenceOpen = !stroke.sequenceOpen;
       selectEditLayer(stroke.id);
       renderEditLayers();
       scheduleSessionSave();
@@ -12455,15 +13297,7 @@ if (editLayerList) {
     const sequenceAddButton = event.target.closest(".edit-layer-sequence-add-button");
     if (sequenceAddButton) {
       event.preventDefault();
-      const extras = getExtraLayerSequenceSlots(stroke);
-      if (extras.length < MAX_LAYER_SEQUENCE_EFFECTS - 1) {
-        extras.push(normalizeLayerSequenceSlot({
-          effect: "show-hide",
-          timingStyle: "pulse",
-          settings: LAYER_SEQUENCE_DEFAULT_SETTINGS
-        }));
-        setExtraLayerSequenceSlots(stroke, extras);
-        stroke.sequenceEnabled = true;
+      if (addLayerSequenceSlot(stroke)) {
         refreshStrokeSequenceEffect(stroke);
         selectEditLayer(stroke.id);
         renderEditLayers();
@@ -12476,10 +13310,7 @@ if (editLayerList) {
     if (sequenceRemoveButton) {
       event.preventDefault();
       const slotIndex = Math.floor(Number(sequenceRemoveButton.dataset.sequenceSlotIndex));
-      if (slotIndex > 0) {
-        const extras = getExtraLayerSequenceSlots(stroke);
-        extras.splice(slotIndex - 1, 1);
-        setExtraLayerSequenceSlots(stroke, extras);
+      if (removeLayerSequenceSlot(stroke, slotIndex)) {
         refreshStrokeSequenceEffect(stroke);
         selectEditLayer(stroke.id);
         renderEditLayers();
@@ -12501,6 +13332,22 @@ if (editLayerList) {
     if (row) {
       selectEditLayer(stroke.id);
     }
+  });
+
+  editLayerList.addEventListener("dblclick", (event) => {
+    const nameElement = event.target.closest(".edit-layer-name");
+    if (!nameElement || nameElement.querySelector(".edit-layer-name-input")) {
+      return;
+    }
+    const row = nameElement.closest(".edit-layer-row");
+    const stroke = state.strokeById.get(Number(row?.dataset.strokeId));
+    if (!stroke) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    state.selectedEditLayerId = stroke.id;
+    startLayerNameEdit(stroke, nameElement);
   });
 
   editLayerList.addEventListener("change", (event) => {
@@ -12540,6 +13387,7 @@ if (editLayerList) {
       select.value,
       Number(select.dataset.sequenceSlotIndex) || 0
     );
+    stroke.sequenceConfigured = true;
     stroke.sequenceEnabled = true;
     refreshStrokeSequenceEffect(stroke);
     selectEditLayer(stroke.id);
@@ -12548,6 +13396,23 @@ if (editLayerList) {
   });
 
   editLayerList.addEventListener("input", (event) => {
+    const layerInput = event.target.closest(".edit-layer-property-input");
+    if (layerInput) {
+      const panel = layerInput.closest(".edit-layer-property-controls");
+      const stroke = getStrokeById(panel?.dataset.strokeId);
+      if (!stroke) {
+        return;
+      }
+      const key = layerInput.dataset.layerSetting || "";
+      setLayerControlValue(stroke, key, layerInput.value);
+      const valueLabel = layerInput.parentElement?.querySelector(".edit-layer-property-value");
+      if (valueLabel) {
+        valueLabel.textContent = getLayerControlDisplayValue(stroke, key);
+      }
+      scheduleSessionSave();
+      return;
+    }
+
     const settingInput = event.target.closest(".edit-layer-sequence-setting-input");
     if (!settingInput) {
       return;
@@ -12590,6 +13455,24 @@ if (editLayerList) {
     scheduleSessionSave();
   });
 
+  editLayerList.addEventListener("pointerover", (event) => {
+    const blendOption = event.target.closest(".edit-layer-blend-option");
+    if (!blendOption) {
+      return;
+    }
+    const menu = blendOption.closest(".edit-layer-blend-menu");
+    const stroke = getStrokeById(menu?.dataset.strokeId);
+    if (!menu || !stroke || !menu.classList.contains("is-open")) {
+      return;
+    }
+    const nextBlendMode = normalizeLayerBlendMode(blendOption.dataset.blendMode);
+    setLayerBlendMode(stroke, nextBlendMode);
+    for (const option of menu.querySelectorAll(".edit-layer-blend-option.is-preview")) {
+      option.classList.remove("is-preview");
+    }
+    blendOption.classList.add("is-preview");
+  });
+
   editLayerList.addEventListener("pointerdown", (event) => {
 	    if (
 	      event.button !== 0 ||
@@ -12598,6 +13481,10 @@ if (editLayerList) {
       event.target.closest(".edit-layer-sequence-button") ||
       event.target.closest(".edit-layer-sequence-enable-button") ||
       event.target.closest(".edit-layer-sequence-row") ||
+      event.target.closest(".edit-layer-blend-row") ||
+      event.target.closest(".edit-layer-property-controls") ||
+      event.target.closest(".edit-layer-name") ||
+      event.target.closest(".edit-layer-name-input") ||
 	      event.target.closest(".edit-layer-sequence-settings") ||
 	      event.target.closest(".edit-layer-sequence-add-row")
 	    ) {
@@ -12609,6 +13496,11 @@ if (editLayerList) {
     }
   });
 }
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".edit-layer-blend-menu")) {
+    closeAllLayerBlendMenus(null, true);
+  }
+});
 if (stockBrushButtons) {
   stockBrushButtons.addEventListener("click", (event) => {
     const button = event.target.closest(".stock-brush-button");
@@ -13519,7 +14411,13 @@ controlsPanel.addEventListener("scroll", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
+    state.sequenceVisibilityPauseStart = performance.now();
     flushSessionSaveNow();
+  } else if (Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
+    const now = performance.now();
+    shiftAllLayerSequenceClocks(Math.max(0, now - Number(state.sequenceVisibilityPauseStart)));
+    state.sequenceVisibilityPauseStart = null;
+    state.sequenceLastFrameTime = now;
   }
 });
 gifPauseObserver.observe(document.body, { childList: true, subtree: true });

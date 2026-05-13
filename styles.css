@@ -55,11 +55,11 @@ input {
 }
 
 #viewport.is-drawing {
-  cursor: none;
+  cursor: crosshair;
 }
 
 #viewport.is-erasing {
-  cursor: none;
+  cursor: crosshair;
 }
 
 #viewport.is-erasing.is-panning {
@@ -663,9 +663,9 @@ input {
 }
 
 .edit-layer-row {
-  min-height: 74px;
+  min-height: 58px;
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) 22px 24px 28px;
+  grid-template-columns: 48px minmax(0, 1fr) 22px 24px 28px;
   align-items: center;
   gap: 6px;
   border: 1px solid #cfcfcf;
@@ -676,8 +676,8 @@ input {
 }
 
 .edit-layer-preview {
-  width: 64px;
-  height: 64px;
+  width: 48px;
+  height: 48px;
   border: 1px solid #d5d5d5;
   background:
     linear-gradient(45deg, #e3e3e3 25%, transparent 25% 75%, #e3e3e3 75%),
@@ -707,6 +707,25 @@ input {
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
+}
+
+.edit-layer-name.is-editing {
+  overflow: visible;
+}
+
+.edit-layer-name-input {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  border: 1px solid #111;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 1px 3px;
+  outline: none;
 }
 
 .edit-layer-sequence-button,
@@ -783,6 +802,17 @@ input {
   padding: 5px 5px 6px 7px;
 }
 
+.edit-layer-blend-row {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  border: 1px solid #d6d6d6;
+  border-top: 0;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 5px 5px 6px 7px;
+}
+
 .edit-layer-sequence-label {
   font-size: 12px;
   line-height: 1.2;
@@ -801,6 +831,112 @@ input {
   font: inherit;
   font-size: 11px;
   line-height: 1.1;
+}
+
+.edit-layer-blend-menu {
+  position: relative;
+  min-width: 0;
+  font: inherit;
+}
+
+.edit-layer-blend-button {
+  width: 100%;
+  min-height: 20px;
+  padding: 3px 18px 3px 5px;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: left;
+  position: relative;
+}
+
+.edit-layer-blend-button::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #111;
+  transform: translateY(-35%);
+}
+
+.edit-layer-blend-options {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% - 1px);
+  left: 0;
+  right: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid #bcbcbc;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.edit-layer-blend-option {
+  width: 100%;
+  min-height: 20px;
+  padding: 4px 5px;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: left;
+}
+
+.edit-layer-blend-option:hover,
+.edit-layer-blend-option.is-preview {
+  background: #111;
+  color: #fff;
+}
+
+.edit-layer-blend-option.is-selected:not(.is-preview) {
+  background: #e8e8e8;
+}
+
+.edit-layer-property-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid #d6d6d6;
+  border-top: 0;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 6px 6px 7px 7px;
+}
+
+.edit-layer-property-row {
+  min-height: 20px;
+  display: grid;
+  grid-template-columns: minmax(70px, 0.62fr) 46px minmax(94px, 1fr);
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1.1;
+  text-transform: lowercase;
+}
+
+.edit-layer-property-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.edit-layer-property-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
 }
 
 .edit-layer-sequence-enable-button {
@@ -860,6 +996,18 @@ input {
 
 .edit-layer-sequence-add-button {
   font-size: 16px;
+  gap: 6px;
+}
+
+.edit-layer-sequence-add-symbol {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.edit-layer-sequence-add-label {
+  font-size: 11px;
+  line-height: 1;
+  text-transform: lowercase;
 }
 
 .edit-layer-sequence-remove-button img {
@@ -1680,6 +1828,7 @@ input {
   line-height: 1;
   display: grid;
   place-items: center;
+  transform: translateY(-2px);
 }
 
 .favorite-loader-button:disabled {
