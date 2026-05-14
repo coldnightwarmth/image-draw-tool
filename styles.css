@@ -213,7 +213,14 @@ input {
 
 #viewport.is-editing-layers .stamp {
   pointer-events: auto;
+}
+
+#viewport.is-editing-layers.is-edit-layer-clickable {
   cursor: move;
+}
+
+#viewport.is-editing-layers.is-edit-layer-clickable.is-panning {
+  cursor: grabbing;
 }
 
 .stamp.is-layer-hidden {
@@ -352,22 +359,35 @@ input {
   transform: translateY(0.5px) rotate(45deg);
 }
 
-#controls.is-collapsed {
+#controls.is-collapsed,
+#controls.is-collapsed[data-sidebar-mode] {
   width: 28px;
   height: 28px;
   max-height: 28px;
   overflow: hidden;
   padding: 0;
+  border-color: transparent;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  pointer-events: none;
 }
 
-#controls.is-collapsed > :not(#sidebarToggleButton) {
+#controls.is-collapsed > :not(#sidebarToggleButton),
+#controls.is-collapsed[data-sidebar-mode] > :not(#sidebarToggleButton) {
   display: none;
 }
 
-#controls.is-collapsed #sidebarToggleButton {
+#controls.is-collapsed #sidebarToggleButton,
+#controls.is-collapsed[data-sidebar-mode] #sidebarToggleButton {
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
   border-color: transparent;
   background: transparent;
   opacity: 0.62;
+  pointer-events: auto;
 }
 
 #mainModeBar {
@@ -700,6 +720,14 @@ input {
   cursor: grabbing;
 }
 
+.edit-layer-entry.is-layer-dragging {
+  opacity: 0.62;
+}
+
+.edit-layer-row.is-renaming {
+  cursor: text;
+}
+
 .edit-layer-name {
   overflow: hidden;
   white-space: nowrap;
@@ -707,6 +735,7 @@ input {
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
+  cursor: text;
 }
 
 .edit-layer-name.is-editing {

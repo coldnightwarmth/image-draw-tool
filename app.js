@@ -337,6 +337,7 @@ const ERASER_SAMPLE_GRID_SIZE = 5;
 const ERASER_PATH_STEP_FACTOR = 0.6;
 const ERASER_PATH_MIN_STEP = 6;
 const ERASER_MAX_SAMPLES_PER_FRAME = 24;
+const EDIT_LAYER_OPAQUE_HIT_BUFFER_PX = 5;
 const SPRAY_MIN_STAMPS = 3;
 const SPRAY_MAX_STAMPS = 34;
 const DEFAULT_SPRAY_SPREAD = 256;
@@ -645,6 +646,8 @@ let suppressNextTintInputClick = false;
 let suppressNextCanvasBgInputClick = false;
 const tintFilterCache = new Map();
 let exportTintScratchCanvas = null;
+let exportLayerScratchCanvas = null;
+const exportSourceImageCache = new Map();
 const exportBackgroundImageCache = new Map();
 const exportBackgroundAnimationCache = new Map();
 const exportBackgroundStillPreviewCache = new Map();
@@ -3616,6 +3619,9 @@ function updateSidebarTabUI() {
   state.sidebarTab = activeTab;
   controlsPanel.dataset.sidebarMode = activeTab;
   viewport.classList.toggle("is-editing-layers", activeTab === "edit");
+  if (activeTab !== "edit") {
+    viewport.classList.remove("is-edit-layer-clickable");
+  }
   updateBrushDataControlPlacement(activeTab);
 
   for (const panel of sidebarPanels) {
@@ -3801,7 +3807,12 @@ function setStampViewportRendered(stamp, rendered) {
     if (isViewportCulledStamp(stamp)) {
       delete stamp.dataset.viewportCulled;
       stamp.classList.remove("is-culled");
-      const source = stamp.dataset.brushUrl || stamp.dataset.gifPausedSrc || "";
+      const source =
+        stamp.dataset.sequenceDisplayedSource ||
+        stamp.dataset.sequenceBaseSrc ||
+        stamp.dataset.brushUrl ||
+        stamp.dataset.gifPausedSrc ||
+        "";
       if (source && stamp.getAttribute("src") !== source) {
         stamp.src = source;
       }
@@ -4957,6 +4968,9 @@ function syncViewportPointerCursorClasses() {
   viewport.classList.toggle("is-drawing", Boolean(state.drawing || (state.shapeDraft && state.shapeDraft.pointerId !== null)));
   viewport.classList.toggle("is-erasing", Boolean(state.eraseMode));
   viewport.classList.toggle("is-panning", Boolean(state.panning || state.touchGesture));
+  if (state.sidebarTab !== "edit" || state.panning || state.touchGesture) {
+    viewport.classList.remove("is-edit-layer-clickable");
+  }
 }
 
 function isGifBrush(brush) {
@@ -5766,7 +5780,11 @@ function setExtraLayerSequenceSlots(stroke, slots) {
 }
 
 function hasLayerSequenceEffectSlots(stroke) {
-  return Boolean(stroke?.sequenceConfigured || getExtraLayerSequenceSlots(stroke).length);
+  return Boolean(
+    stroke?.sequenceConfigured ||
+    stroke?.sequenceEnabled === true ||
+    getExtraLayerSequenceSlots(stroke).length
+  );
 }
 
 function getLayerSequenceSlotCount(stroke) {
@@ -5836,7 +5854,10 @@ function getLayerSequenceTimingStyle(stroke, slotIndex = 0) {
 }
 
 function isLayerSequenceEnabled(stroke) {
-  return stroke ? stroke.sequenceEnabled !== false && stroke.sequenceEnabled === true : false;
+  if (!stroke || stroke.sequenceUserDisabled === true) {
+    return false;
+  }
+  return stroke.sequenceEnabled === true || hasLayerSequenceEffectSlots(stroke);
 }
 
 function setLayerSequenceValue(stroke, group, value, slotIndex = 0) {
@@ -5927,6 +5948,9 @@ function setLayerSequenceSetting(stroke, key, rawValue, slotIndex = 0) {
   if (!stroke || !(key in LAYER_SEQUENCE_DEFAULT_SETTINGS)) {
     return;
   }
+  stroke.sequenceConfigured = true;
+  stroke.sequenceEnabled = true;
+  stroke.sequenceUserDisabled = false;
   const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
   const nextSettings = getLayerSequenceSettings(stroke, safeSlotIndex);
   if (typeof LAYER_SEQUENCE_DEFAULT_SETTINGS[key] === "boolean") {
@@ -6686,6 +6710,7 @@ function addLayerSequenceSlot(stroke) {
   if (slotCount <= 0) {
     stroke.sequenceConfigured = true;
     stroke.sequenceEnabled = true;
+    stroke.sequenceUserDisabled = false;
     stroke.sequenceEffect = "show-hide";
     stroke.sequenceTimingStyle = "pulse";
     stroke.sequenceSettings = normalizeLayerSequenceSettings(LAYER_SEQUENCE_DEFAULT_SETTINGS);
@@ -6701,6 +6726,7 @@ function addLayerSequenceSlot(stroke) {
   setExtraLayerSequenceSlots(stroke, extras);
   stroke.sequenceConfigured = true;
   stroke.sequenceEnabled = true;
+  stroke.sequenceUserDisabled = false;
   return true;
 }
 
@@ -6723,9 +6749,11 @@ function removeLayerSequenceSlot(stroke, slotIndex) {
       stroke.sequenceSettings = normalizeLayerSequenceSettings(nextSlot.settings);
       setExtraLayerSequenceSlots(stroke, extras);
       stroke.sequenceEnabled = true;
+      stroke.sequenceUserDisabled = false;
     } else {
       stroke.sequenceConfigured = false;
       stroke.sequenceEnabled = false;
+      stroke.sequenceUserDisabled = false;
       setExtraLayerSequenceSlots(stroke, []);
     }
     return true;
@@ -6752,6 +6780,7 @@ function serializeStrokeList(strokes) {
     sequenceOpen: Boolean(stroke.sequenceOpen),
     sequenceConfigured: hasLayerSequenceEffectSlots(stroke),
     sequenceEnabled: isLayerSequenceEnabled(stroke),
+    sequenceUserDisabled: Boolean(stroke.sequenceUserDisabled),
     sequenceEffect: getLayerSequenceEffect(stroke),
     sequenceTimingStyle: getLayerSequenceTimingStyle(stroke),
     sequenceSettings: normalizeLayerSequenceSettings(stroke.sequenceSettings),
@@ -6951,6 +6980,7 @@ async function createSavedCompositionThumbnail() {
   restoreAllCulledStampSources();
   const bounds = fitBoundsToAspect(computeInitialExportSelectionBounds(), outputWidth / outputHeight);
   const entries = await collectExportStampEntries(bounds);
+  await loadExportStampSourceImages(entries);
   const canvas = document.createElement("canvas");
   canvas.width = outputWidth;
   canvas.height = outputHeight;
@@ -7323,6 +7353,7 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
 	        typeof strokeData?.sequenceEnabled === "boolean"
 	          ? strokeData.sequenceEnabled
 	          : Boolean(strokeData?.sequenceOpen),
+	      sequenceUserDisabled: Boolean(strokeData?.sequenceUserDisabled),
 	      sequenceEffect: normalizeLayerSequenceValue(
 	        strokeData?.sequenceEffect || strokeData?.sequenceEffects,
 	        LAYER_SEQUENCE_EFFECT_OPTIONS
@@ -7335,6 +7366,9 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
 	      sequenceEffectSlots: normalizeExtraLayerSequenceSlots(strokeData?.sequenceEffectSlots),
 	      elements: []
 	    };
+    if (stroke.sequenceConfigured && !stroke.sequenceUserDisabled) {
+      stroke.sequenceEnabled = true;
+    }
     if (strokeId >= state.nextStrokeId) {
       state.nextStrokeId = strokeId + 1;
     }
@@ -8067,8 +8101,13 @@ function startLayerNameEdit(stroke, nameElement) {
   }
 
   const previousName = getStrokeLayerName(stroke);
+  const previousCustomName = normalizeLayerCustomName(stroke.customName);
+  const row = nameElement.closest(".edit-layer-row");
   nameElement.textContent = "";
   nameElement.classList.add("is-editing");
+  if (row) {
+    row.classList.add("is-renaming");
+  }
 
   const input = document.createElement("input");
   input.type = "text";
@@ -8083,13 +8122,24 @@ function startLayerNameEdit(stroke, nameElement) {
       return;
     }
     completed = true;
-    if (!cancel) {
+    if (cancel) {
+      stroke.customName = previousCustomName;
+    } else {
       stroke.customName = normalizeLayerCustomName(input.value);
       scheduleSessionSave();
+    }
+    if (row) {
+      row.classList.remove("is-renaming");
     }
     renderEditLayers();
   };
 
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("dblclick", (event) => event.stopPropagation());
+  input.addEventListener("input", () => {
+    stroke.customName = normalizeLayerCustomName(input.value);
+  });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -8102,8 +8152,10 @@ function startLayerNameEdit(stroke, nameElement) {
   input.addEventListener("blur", () => finish(false));
 
   nameElement.appendChild(input);
-  input.focus();
-  input.select();
+  window.requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
 }
 
 function selectEditLayer(strokeId) {
@@ -8397,6 +8449,7 @@ function refreshStrokeSequenceEffect(stroke) {
   for (const stamp of stroke.elements || []) {
     resetStampSequenceStyle(stamp, true);
   }
+  startLayerSequenceLoop();
 }
 
 function sequenceHash(seed, index) {
@@ -8709,11 +8762,20 @@ function resetStampSequenceStyle(stamp, force = false) {
     return;
   }
   ensureStampSequenceBase(stamp);
+  const baseOpacity = stamp.dataset.sequenceBaseOpacity;
+  const baseSource = stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "";
+  deleteSequenceRuntimeDataset(stamp);
+  if (baseOpacity) {
+    stamp.dataset.sequenceBaseOpacity = baseOpacity;
+  }
+  if (baseSource) {
+    stamp.dataset.sequenceBaseSrc = baseSource;
+    stamp.dataset.sequenceDisplayedSource = baseSource;
+  }
   const stroke = getStampLayerStroke(stamp);
   applyStampLayerVisualStyle(stroke, stamp);
   applyBrushTintStyle(stamp, false, getStampBaseTintSettings(stamp));
-  setStampSequenceImage(stamp, stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || "");
-  deleteSequenceRuntimeDataset(stamp);
+  setStampSequenceImage(stamp, baseSource);
 }
 
 function triggerImageCycleSequence(stamp, trigger, settings, pool, index, currentSource = "") {
@@ -9077,68 +9139,136 @@ function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, inde
 function runLayerSequences(now = performance.now()) {
   const imageCyclePool = getSequenceBrushPool();
   for (const stroke of state.strokes) {
-    if (!stroke || !Array.isArray(stroke.elements)) {
-      continue;
-    }
-    if (isStrokeSequencePaused(stroke)) {
-      if (!Number.isFinite(Number(stroke.sequencePauseStartTime))) {
-        stroke.sequencePauseStartTime = now;
+    try {
+      if (!stroke || !Array.isArray(stroke.elements)) {
+        continue;
       }
-      continue;
-    }
-    if (Number.isFinite(Number(stroke.sequencePauseStartTime))) {
-      const pausedDuration = Math.max(0, now - Number(stroke.sequencePauseStartTime));
-      shiftStrokeSequenceClock(stroke, pausedDuration);
-      delete stroke.sequencePauseStartTime;
-    }
-    const slots = getLayerSequenceSlots(stroke).filter((slot) =>
-      isImplementedLayerSequenceEffect(slot.effect)
-    );
-    if (!isLayerSequenceEnabled(stroke) || !slots.length) {
-      resetStrokeSequenceRuntime(stroke);
-      for (const stamp of stroke.elements) {
-        resetStampSequenceStyle(stamp);
+      if (isStrokeSequencePaused(stroke)) {
+        if (!Number.isFinite(Number(stroke.sequencePauseStartTime))) {
+          stroke.sequencePauseStartTime = now;
+        }
+        continue;
       }
-      continue;
-    }
-    if (stroke.hidden) {
-      resetStrokeSequenceRuntime(stroke);
-      for (const stamp of stroke.elements) {
-        resetStampSequenceStyle(stamp);
+      if (Number.isFinite(Number(stroke.sequencePauseStartTime))) {
+        const pausedDuration = Math.max(0, now - Number(stroke.sequencePauseStartTime));
+        shiftStrokeSequenceClock(stroke, pausedDuration);
+        delete stroke.sequencePauseStartTime;
       }
-      continue;
-    }
+      const slots = getLayerSequenceSlots(stroke).filter((slot) =>
+        isImplementedLayerSequenceEffect(slot.effect)
+      );
+      if (!isLayerSequenceEnabled(stroke) || !slots.length) {
+        resetStrokeSequenceRuntime(stroke);
+        for (const stamp of stroke.elements) {
+          resetStampSequenceStyle(stamp);
+        }
+        continue;
+      }
+      if (stroke.hidden) {
+        resetStrokeSequenceRuntime(stroke);
+        for (const stamp of stroke.elements) {
+          resetStampSequenceStyle(stamp);
+        }
+        continue;
+      }
 
-    syncStrokeLayerOpacityBase(stroke);
-    const total = stroke.elements.length;
-    const visuals = stroke.elements.map((stamp) => {
-      ensureStampSequenceBase(stamp);
-      stamp.dataset.sequenceActive = "1";
-      return {
-        opacity: clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1),
-        moveX: 0,
-        moveY: 0,
-        rotationOffset: 0,
-        scale: 1,
-        tintSettings: getStampBaseTintSettings(stamp),
-        sourceUrl: stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "",
-        imageCycleSource: false
-      };
-    });
+      const layerBaseOpacity = getLayerOpacityFraction(stroke);
+      const total = stroke.elements.length;
+      const visuals = stroke.elements.map((stamp) => {
+        if (!(stamp instanceof HTMLImageElement)) {
+          return null;
+        }
+        ensureStampSequenceBase(stamp);
+        stamp.dataset.sequenceActive = "1";
+        return {
+          opacity: layerBaseOpacity,
+          moveX: 0,
+          moveY: 0,
+          rotationOffset: 0,
+          scale: 1,
+          tintSettings: getStampBaseTintSettings(stamp),
+          sourceUrl: stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "",
+          imageCycleSource: false
+        };
+      });
 
-    if (!Array.isArray(stroke.sequenceSlotRuntimes)) {
-      stroke.sequenceSlotRuntimes = [];
-    }
+      if (!Array.isArray(stroke.sequenceSlotRuntimes)) {
+        stroke.sequenceSlotRuntimes = [];
+      }
 
-    for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
-      const slot = slots[slotIndex];
-      const effect = slot.effect;
-      const timingStyle = slot.timingStyle;
-      const settings = normalizeLayerSequenceSettings(slot.settings);
-      const effectDuration = getSequenceEffectDuration(effect, settings);
-      const runtimeHost = {
-        sequenceRuntime: cloneSequenceRuntime(stroke.sequenceSlotRuntimes[slotIndex])
-      };
+      for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
+        const slot = slots[slotIndex];
+        const effect = slot.effect;
+        const timingStyle = slot.timingStyle;
+        const settings = normalizeLayerSequenceSettings(slot.settings);
+        const effectDuration = getSequenceEffectDuration(effect, settings);
+        const runtimeHost = {
+          sequenceRuntime: cloneSequenceRuntime(stroke.sequenceSlotRuntimes[slotIndex])
+        };
+
+        for (let index = 0; index < total; index += 1) {
+          const stamp = stroke.elements[index];
+          const visual = visuals[index];
+          if (!stamp || stamp.parentElement !== world || !visual) {
+            continue;
+          }
+          loadSequenceSlotScratch(stamp, slotIndex);
+          const currentImageCycleSource = effect === "image-cycle"
+            ? getCurrentSequenceImageSource(stamp, visual.sourceUrl)
+            : visual.sourceUrl;
+
+          const trigger = getLayerSequenceTrigger(
+            stroke,
+            index,
+            total,
+            timingStyle,
+            settings,
+            now,
+            effectDuration,
+            runtimeHost
+          );
+          triggerStampSequenceEffect(
+            stamp,
+            effect,
+            trigger,
+            settings,
+            imageCyclePool,
+            index,
+            now,
+            currentImageCycleSource
+          );
+
+          if (effect === "show-hide") {
+            const baseOpacity = layerBaseOpacity;
+            const currentOpacity = clamp(getCurrentSequenceOpacity(stamp, settings, now), 0, 1);
+            const opacityFactor = baseOpacity > 0 ? currentOpacity / baseOpacity : currentOpacity;
+            visual.opacity *= clamp(opacityFactor, 0, 1);
+          } else if (effect === "move") {
+            const move = getCurrentSequenceMove(stamp, settings, now);
+            visual.moveX += move.x;
+            visual.moveY += move.y;
+          } else if (effect === "rotate") {
+            visual.rotationOffset += getCurrentSequenceRotation(stamp, settings, now);
+          } else if (effect === "scale") {
+            visual.scale *= getCurrentSequenceScale(stamp, settings, now);
+          } else if (effect === "color-cycle") {
+            const amount = getCurrentSequenceColorAmount(stamp, settings, now);
+            if (amount > 0) {
+              visual.tintSettings = createLayeredTintSettings(visual.tintSettings, {
+                color: settings.colorCycleColor,
+                amountPercent: amount
+              });
+            }
+          } else if (effect === "image-cycle") {
+            visual.sourceUrl = getCurrentSequenceImageSource(stamp, currentImageCycleSource);
+            visual.imageCycleSource = true;
+          }
+
+          commitSequenceSlotScratch(stamp, slotIndex);
+        }
+
+        stroke.sequenceSlotRuntimes[slotIndex] = cloneSequenceRuntime(runtimeHost.sequenceRuntime);
+      }
 
       for (let index = 0; index < total; index += 1) {
         const stamp = stroke.elements[index];
@@ -9146,105 +9276,54 @@ function runLayerSequences(now = performance.now()) {
         if (!stamp || stamp.parentElement !== world || !visual) {
           continue;
         }
-        loadSequenceSlotScratch(stamp, slotIndex);
-        const currentImageCycleSource = effect === "image-cycle"
-          ? getCurrentSequenceImageSource(stamp, visual.sourceUrl)
-          : visual.sourceUrl;
-
-        const trigger = getLayerSequenceTrigger(
-          stroke,
-          index,
-          total,
-          timingStyle,
-          settings,
-          now,
-          effectDuration,
-          runtimeHost
-        );
-        triggerStampSequenceEffect(
-          stamp,
-          effect,
-          trigger,
-          settings,
-          imageCyclePool,
-          index,
-          now,
-          currentImageCycleSource
-        );
-
-        if (effect === "show-hide") {
-          const baseOpacity = clamp(Number(stamp.dataset.sequenceBaseOpacity) || 1, 0, 1);
-          const currentOpacity = clamp(getCurrentSequenceOpacity(stamp, settings, now), 0, 1);
-          const opacityFactor = baseOpacity > 0 ? currentOpacity / baseOpacity : currentOpacity;
-          visual.opacity *= clamp(opacityFactor, 0, 1);
-        } else if (effect === "move") {
-          const move = getCurrentSequenceMove(stamp, settings, now);
-          visual.moveX += move.x;
-          visual.moveY += move.y;
-        } else if (effect === "rotate") {
-          visual.rotationOffset += getCurrentSequenceRotation(stamp, settings, now);
-        } else if (effect === "scale") {
-          visual.scale *= getCurrentSequenceScale(stamp, settings, now);
-        } else if (effect === "color-cycle") {
-          const amount = getCurrentSequenceColorAmount(stamp, settings, now);
-          if (amount > 0) {
-            visual.tintSettings = createLayeredTintSettings(visual.tintSettings, {
-              color: settings.colorCycleColor,
-              amountPercent: amount
-            });
-          }
-        } else if (effect === "image-cycle") {
-          visual.sourceUrl = getCurrentSequenceImageSource(stamp, currentImageCycleSource);
-          visual.imageCycleSource = true;
-        }
-
-        commitSequenceSlotScratch(stamp, slotIndex);
+        setStampSequenceImage(stamp, visual.sourceUrl, visual.imageCycleSource);
+        applyBrushTintStyle(stamp, false, visual.tintSettings);
+        const layerTransform = getStampLayerTransform(stroke, stamp);
+        const baseRotation = Number(stamp.dataset.rotation) || 0;
+        const moveX = layerTransform.x + visual.moveX;
+        const moveY = layerTransform.y + visual.moveY;
+        const rotation = baseRotation + layerTransform.rotation + visual.rotationOffset;
+        const scale = layerTransform.scale * visual.scale;
+        stamp.style.opacity = String(clamp(visual.opacity, 0, 1));
+        stamp.style.transform =
+          `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`;
       }
-
-      stroke.sequenceSlotRuntimes[slotIndex] = cloneSequenceRuntime(runtimeHost.sequenceRuntime);
-    }
-
-    for (let index = 0; index < total; index += 1) {
-      const stamp = stroke.elements[index];
-      const visual = visuals[index];
-      if (!stamp || stamp.parentElement !== world || !visual) {
-        continue;
-      }
-      setStampSequenceImage(stamp, visual.sourceUrl, visual.imageCycleSource);
-      applyBrushTintStyle(stamp, false, visual.tintSettings);
-      applyStampLayerVisualStyle(stroke, stamp, visual);
+    } catch (error) {
+      console.warn("Layer sequence skipped for stroke.", error);
+      resetStrokeSequenceRuntime(stroke);
     }
   }
 }
 
 function applyLayerSequences(now = performance.now()) {
-  if (document.visibilityState !== "visible" && !state.sequenceExportActive) {
-    if (!Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
-      state.sequenceVisibilityPauseStart = now;
+  state.sequenceRafId = null;
+  try {
+    if (state.sequenceExportActive && !state.exportTask) {
+      state.sequenceExportActive = false;
     }
-    state.sequenceLastFrameTime = now;
-    state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
-    return;
-  }
-  if (Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
-    const pausedDuration = Math.max(0, now - Number(state.sequenceVisibilityPauseStart));
-    shiftAllLayerSequenceClocks(pausedDuration);
-    state.sequenceVisibilityPauseStart = null;
-    state.sequenceLastFrameTime = now;
-  } else if (Number.isFinite(Number(state.sequenceLastFrameTime))) {
-    const frameGap = Math.max(0, now - Number(state.sequenceLastFrameTime));
-    if (frameGap > SEQUENCE_BACKGROUND_GAP_MS) {
-      shiftAllLayerSequenceClocks(frameGap);
+    if (Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
+      const pausedDuration = Math.max(0, now - Number(state.sequenceVisibilityPauseStart));
+      shiftAllLayerSequenceClocks(pausedDuration);
+      state.sequenceVisibilityPauseStart = null;
+      state.sequenceLastFrameTime = now;
+    } else if (Number.isFinite(Number(state.sequenceLastFrameTime))) {
+      const frameGap = Math.max(0, now - Number(state.sequenceLastFrameTime));
+      if (frameGap > SEQUENCE_BACKGROUND_GAP_MS) {
+        shiftAllLayerSequenceClocks(frameGap);
+        state.sequenceLastFrameTime = now;
+      }
+    } else {
       state.sequenceLastFrameTime = now;
     }
-  } else {
+    if (!state.sequenceExportActive) {
+      runLayerSequences(now);
+    }
     state.sequenceLastFrameTime = now;
+  } catch (error) {
+    console.warn("Layer sequence frame skipped.", error);
+  } finally {
+    state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
   }
-  if (!state.sequenceExportActive) {
-    runLayerSequences(now);
-  }
-  state.sequenceLastFrameTime = now;
-  state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
 }
 
 function startLayerSequenceLoop() {
@@ -9289,6 +9368,7 @@ function renderEditLayers() {
     name.className = "edit-layer-name";
     name.textContent = getStrokeLayerName(stroke);
     name.title = "Double-click to rename";
+    name.dataset.layerAction = "rename";
 
     const sequenceButton = document.createElement("button");
     sequenceButton.type = "button";
@@ -9393,7 +9473,7 @@ function renderEditLayers() {
   editLayerList.appendChild(fragment);
 }
 
-function reflowStrokeDomOrder() {
+function reflowStrokeDomOrder(save = true) {
   for (const stroke of state.strokes) {
     if (!stroke || !Array.isArray(stroke.elements)) {
       continue;
@@ -9404,24 +9484,37 @@ function reflowStrokeDomOrder() {
       }
     }
   }
-  scheduleSessionSave();
+  if (save) {
+    scheduleSessionSave();
+  }
 }
 
-function moveStrokeToVisualIndex(stroke, visualIndex) {
+function moveStrokeToVisualIndex(stroke, visualIndex, options = {}) {
   const currentIndex = state.strokes.indexOf(stroke);
   if (currentIndex < 0) {
     return false;
   }
 
+  const render = options.render !== false;
+  const save = options.save !== false;
   state.strokes.splice(currentIndex, 1);
   const targetStateIndex = Math.max(
     0,
     Math.min(state.strokes.length, state.strokes.length - Math.max(0, visualIndex))
   );
   state.strokes.splice(targetStateIndex, 0, stroke);
-  reflowStrokeDomOrder();
-  renderEditLayers();
+  reflowStrokeDomOrder(save);
+  if (render) {
+    renderEditLayers();
+  }
   return true;
+}
+
+function getEditLayerEntries() {
+  if (!editLayerList) {
+    return [];
+  }
+  return Array.from(editLayerList.querySelectorAll(".edit-layer-entry"));
 }
 
 function getEditLayerVisualIndexAt(clientY) {
@@ -9429,18 +9522,29 @@ function getEditLayerVisualIndexAt(clientY) {
     return -1;
   }
 
-  const rows = Array.from(editLayerList.querySelectorAll(".edit-layer-row"));
-  if (!rows.length) {
+  const entries = getEditLayerEntries();
+  if (!entries.length) {
     return -1;
   }
 
-  for (let index = 0; index < rows.length; index += 1) {
-    const rect = rows[index].getBoundingClientRect();
+  for (let index = 0; index < entries.length; index += 1) {
+    const row = entries[index].querySelector(".edit-layer-row");
+    const rect = (row || entries[index]).getBoundingClientRect();
     if (clientY < rect.top + rect.height / 2) {
       return index;
     }
   }
-  return rows.length - 1;
+  return entries.length - 1;
+}
+
+function moveEditLayerEntryToVisualIndex(entry, visualIndex) {
+  if (!editLayerList || !entry) {
+    return;
+  }
+  const entries = getEditLayerEntries().filter((candidate) => candidate !== entry);
+  const targetIndex = clamp(Math.round(Number(visualIndex)) || 0, 0, entries.length);
+  const beforeNode = entries[targetIndex] || null;
+  editLayerList.insertBefore(entry, beforeNode);
 }
 
 function setEditLayerDeleteDropzoneState(visible, hovered = false) {
@@ -9503,14 +9607,24 @@ function startEditLayerRowDrag(row, event) {
 
   event.preventDefault();
   selectEditLayer(stroke.id);
+  const entry = row.closest(".edit-layer-entry");
+  const visualIndex = getEditLayerEntries().indexOf(entry);
   state.editLayerDrag = {
     pointerId: event.pointerId,
     stroke,
+    entry,
+    row,
     startY: event.clientY,
+    targetVisualIndex: visualIndex >= 0 ? visualIndex : getEditLayerVisualIndexAt(event.clientY),
     dragging: false,
     overDelete: false
   };
-  setEditLayerDeleteDropzoneState(true, false);
+  try {
+    row.setPointerCapture(event.pointerId);
+    state.editLayerDrag.captureElement = row;
+  } catch (error) {
+    // Pointer capture can fail if the pointer ended before the browser processed it.
+  }
   row.classList.add("is-dragging");
 }
 
@@ -9525,8 +9639,11 @@ function updateEditLayerRowDrag(event) {
     drag.dragging = true;
   }
   if (!drag.dragging) {
-    setEditLayerDeleteDropzoneState(true, false);
+    setEditLayerDeleteDropzoneState(false, false);
     return;
+  }
+  if (drag.entry) {
+    drag.entry.classList.add("is-layer-dragging");
   }
 
   updateEditLayerDeleteDropzonePosition();
@@ -9537,8 +9654,10 @@ function updateEditLayerRowDrag(event) {
   }
 
   const visualIndex = getEditLayerVisualIndexAt(event.clientY);
-  if (visualIndex >= 0) {
-    moveStrokeToVisualIndex(drag.stroke, visualIndex);
+  if (visualIndex >= 0 && visualIndex !== drag.targetVisualIndex) {
+    drag.targetVisualIndex = visualIndex;
+    moveEditLayerEntryToVisualIndex(drag.entry, visualIndex);
+    moveStrokeToVisualIndex(drag.stroke, visualIndex, { render: false, save: false });
   }
 }
 
@@ -9550,10 +9669,26 @@ function stopEditLayerRowDrag(pointerId, event = null) {
   const shouldDelete =
     drag.dragging &&
     (drag.overDelete || (event ? isPointerOverEditLayerDeleteDropzone(event) : false));
+  if (
+    drag.captureElement &&
+    typeof drag.captureElement.hasPointerCapture === "function" &&
+    drag.captureElement.hasPointerCapture(pointerId)
+  ) {
+    drag.captureElement.releasePointerCapture(pointerId);
+  }
+  if (drag.entry) {
+    drag.entry.classList.remove("is-layer-dragging");
+  }
+  if (drag.row) {
+    drag.row.classList.remove("is-dragging");
+  }
   state.editLayerDrag = null;
   setEditLayerDeleteDropzoneState(false, false);
   if (shouldDelete && pushLayerDeleteAction(drag.stroke)) {
     return;
+  }
+  if (drag.dragging && Number.isFinite(Number(drag.targetVisualIndex))) {
+    moveStrokeToVisualIndex(drag.stroke, Number(drag.targetVisualIndex), { render: false, save: true });
   }
   renderEditLayers();
 }
@@ -9654,19 +9789,62 @@ function isStampPixelOpaqueAtClientPoint(element, clientX, clientY) {
   }
 }
 
+function getBufferedHitTestOffsets(radiusPx) {
+  const radius = Math.max(0, Math.round(Number(radiusPx) || 0));
+  const offsets = [{ x: 0, y: 0, distanceSquared: 0 }];
+  for (let y = -radius; y <= radius; y += 1) {
+    for (let x = -radius; x <= radius; x += 1) {
+      if (x === 0 && y === 0) {
+        continue;
+      }
+      const distanceSquared = x * x + y * y;
+      if (distanceSquared <= radius * radius) {
+        offsets.push({ x, y, distanceSquared });
+      }
+    }
+  }
+  offsets.sort((left, right) => left.distanceSquared - right.distanceSquared);
+  return offsets;
+}
+
 function getTopOpaqueStampAtClientPoint(clientX, clientY) {
-  const elements = document.elementsFromPoint(clientX, clientY);
-  for (const element of elements) {
-    const stamp = element instanceof Element ? element.closest(".stamp") : null;
-    if (
-      stamp instanceof HTMLImageElement &&
-      stamp.parentElement === world &&
-      isStampPixelOpaqueAtClientPoint(stamp, clientX, clientY)
-    ) {
-      return stamp;
+  const offsets = getBufferedHitTestOffsets(EDIT_LAYER_OPAQUE_HIT_BUFFER_PX);
+  for (const offset of offsets) {
+    const sampleX = clientX + offset.x;
+    const sampleY = clientY + offset.y;
+    const elements = document.elementsFromPoint(sampleX, sampleY);
+    for (const element of elements) {
+      const stamp = element instanceof Element ? element.closest(".stamp") : null;
+      if (!(stamp instanceof HTMLImageElement) || stamp.parentElement !== world) {
+        continue;
+      }
+      if (isStampPixelOpaqueAtClientPoint(stamp, sampleX, sampleY)) {
+        return stamp;
+      }
     }
   }
   return null;
+}
+
+function updateEditLayerHoverCursor(clientX = state.lastPointerClientX, clientY = state.lastPointerClientY) {
+  if (
+    state.sidebarTab !== "edit" ||
+    state.exportMode ||
+    state.placementTask ||
+    state.editLayerMove ||
+    state.panning ||
+    state.touchGesture ||
+    !state.pointerInViewport ||
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY)
+  ) {
+    viewport.classList.remove("is-edit-layer-clickable");
+    return;
+  }
+
+  const stamp = getTopOpaqueStampAtClientPoint(clientX, clientY);
+  const stroke = getStampLayerStroke(stamp);
+  viewport.classList.toggle("is-edit-layer-clickable", Boolean(stamp && stroke && !stroke.hidden));
 }
 
 function setStampWorldPosition(element, left, top) {
@@ -9691,6 +9869,7 @@ function startEditLayerMove(event) {
 
   event.preventDefault();
   hideBrushCursorPreview();
+  viewport.classList.remove("is-edit-layer-clickable");
   selectEditLayer(stroke.id);
 
   const startPoint = screenToWorld(event.clientX, event.clientY);
@@ -9766,6 +9945,7 @@ function stopEditLayerMove(pointerId) {
   }
 
   state.editLayerMove = null;
+  updateEditLayerHoverCursor();
   scheduleStampVisibilityRefresh();
   scheduleSessionSave();
 }
@@ -10862,6 +11042,7 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
     height: totalHeight,
     rotation: totalRotation,
     opacity: sequenceState ? sequenceState.opacity : clamp(Number(element.style.opacity) || 1, 0, 1),
+    strokeId: stroke && Number.isFinite(Number(stroke.id)) ? Number(stroke.id) : null,
     blendMode: getLayerBlendMode(stroke),
     tintSettings: sequenceState?.tintSettings || getStampBaseTintSettings(element),
     imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated"
@@ -10897,6 +11078,7 @@ function refreshExportSequenceEntries(entries, selectionBounds, sequenceNow) {
   for (const entry of entries) {
     const nextEntry = createExportStampEntry(entry.element, selectionBounds, sequenceNow);
     if (nextEntry) {
+      nextEntry.imageElement = entry.sourceUrl === nextEntry.sourceUrl ? entry.imageElement : null;
       Object.assign(entry, nextEntry);
     }
   }
@@ -11241,6 +11423,71 @@ function loadExportBackgroundImageElement(url) {
   return exportBackgroundImageCache.get(url);
 }
 
+function loadExportSourceImageElement(url) {
+  if (!url || url === TRANSPARENT_STAMP_SRC) {
+    return Promise.resolve(null);
+  }
+  if (!exportSourceImageCache.has(url)) {
+    exportSourceImageCache.set(
+      url,
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = async () => {
+          try {
+            if (typeof image.decode === "function") {
+              await image.decode();
+            }
+          } catch (error) {
+            // Some browsers reject decode for already-loaded animated sources.
+          }
+          resolve(image);
+        };
+        image.onerror = () => reject(new Error("Could not load export source image."));
+        image.src = url;
+      }).catch((error) => {
+        exportSourceImageCache.delete(url);
+        throw error;
+      })
+    );
+  }
+  return exportSourceImageCache.get(url);
+}
+
+async function loadExportStampSourceImages(entries, task = null) {
+  if (!Array.isArray(entries) || !entries.length) {
+    return;
+  }
+
+  const urls = Array.from(new Set(
+    entries
+      .map((entry) => entry?.sourceUrl || "")
+      .filter((url) => url && url !== TRANSPARENT_STAMP_SRC)
+  ));
+  const loadedImages = new Map();
+  await mapWithConcurrency(urls, 8, async (url, index) => {
+    throwIfTaskCancelled(task);
+    try {
+      const image = await loadExportSourceImageElement(url);
+      if (image) {
+        loadedImages.set(url, image);
+      }
+    } catch (error) {
+      if (isCancellationError(error)) {
+        throw error;
+      }
+    }
+    if (index > 0 && index % EXPORT_CANCEL_CHECK_INTERVAL === 0) {
+      await yieldToMainThread(task);
+    }
+  });
+
+  for (const entry of entries) {
+    if (entry && loadedImages.has(entry.sourceUrl)) {
+      entry.imageElement = loadedImages.get(entry.sourceUrl);
+    }
+  }
+}
+
 function loadExportBackgroundAnimation(url) {
   if (!isGifUrl(url)) {
     return Promise.resolve(null);
@@ -11364,25 +11611,15 @@ function getStaticExportBackgroundCanvas(selectionBounds, outputWidth, outputHei
   return canvas;
 }
 
-function prepareExportFrame(
-  ctx,
-  selectionBounds,
-  outputWidth,
-  outputHeight,
-  options = {}
-) {
+function drawExportFrameBackground(ctx, selectionBounds, outputWidth, outputHeight, options = {}) {
   const includeBackground = options.includeBackground !== false;
   const backgroundColor = normalizeHexColor(options.backgroundColor, "#ffffff");
   const matteColor = typeof options.matteColor === "string" ? options.matteColor : "";
-  const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
-  const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
-  const scaleX = outputWidth / selectionWidth;
-  const scaleY = outputHeight / selectionHeight;
 
-  ctx.clearRect(0, 0, outputWidth, outputHeight);
   if (includeBackground || matteColor) {
     ctx.save();
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
     ctx.fillStyle = includeBackground ? backgroundColor : matteColor;
     ctx.fillRect(0, 0, outputWidth, outputHeight);
     ctx.restore();
@@ -11392,6 +11629,24 @@ function prepareExportFrame(
     ctx.drawImage(staticBackgroundCanvas, 0, 0);
   } else {
     drawExportBackgroundImage(ctx, selectionBounds, outputWidth, outputHeight, options);
+  }
+}
+
+function prepareExportFrame(
+  ctx,
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  options = {}
+) {
+  const selectionWidth = Math.max(1, selectionBounds.right - selectionBounds.left);
+  const selectionHeight = Math.max(1, selectionBounds.bottom - selectionBounds.top);
+  const scaleX = outputWidth / selectionWidth;
+  const scaleY = outputHeight / selectionHeight;
+
+  ctx.clearRect(0, 0, outputWidth, outputHeight);
+  if (!options.skipBackground) {
+    drawExportFrameBackground(ctx, selectionBounds, outputWidth, outputHeight, options);
   }
 
   return { scaleX, scaleY };
@@ -11439,8 +11694,45 @@ function drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, imageR
   ctx.drawImage(exportTintScratchCanvas, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
 }
 
-function drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAnimationMap = null, timeMs = 0) {
-  let frameSource = entry.element;
+function setCanvasBlendOperation(ctx, blendMode) {
+  const operation = getCanvasCompositeOperationForBlendMode(blendMode);
+  ctx.globalCompositeOperation = operation;
+  if (ctx.globalCompositeOperation !== operation) {
+    ctx.globalCompositeOperation = "source-over";
+  }
+}
+
+function getExportLayerScratchContext(outputWidth, outputHeight) {
+  if (!exportLayerScratchCanvas) {
+    exportLayerScratchCanvas = document.createElement("canvas");
+  }
+  if (exportLayerScratchCanvas.width !== outputWidth) {
+    exportLayerScratchCanvas.width = outputWidth;
+  }
+  if (exportLayerScratchCanvas.height !== outputHeight) {
+    exportLayerScratchCanvas.height = outputHeight;
+  }
+  const layerCtx = exportLayerScratchCanvas.getContext("2d", { alpha: true });
+  if (!layerCtx) {
+    return null;
+  }
+  layerCtx.clearRect(0, 0, outputWidth, outputHeight);
+  layerCtx.globalAlpha = 1;
+  layerCtx.globalCompositeOperation = "source-over";
+  return layerCtx;
+}
+
+function drawExportStampEntry(
+  ctx,
+  selectionBounds,
+  scaleX,
+  scaleY,
+  entry,
+  gifAnimationMap = null,
+  timeMs = 0,
+  options = {}
+) {
+  let frameSource = entry.imageElement || entry.element;
   if (gifAnimationMap && isGifUrl(entry.sourceUrl)) {
     const animation = gifAnimationMap.get(entry.sourceUrl);
     const animatedSource = resolveGifFrameSource(animation, timeMs);
@@ -11456,12 +11748,81 @@ function drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAn
 
   ctx.save();
   ctx.globalAlpha = entry.opacity;
-  ctx.globalCompositeOperation = getCanvasCompositeOperationForBlendMode(entry.blendMode);
+  setCanvasBlendOperation(ctx, options.blendMode || entry.blendMode);
   ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
   ctx.translate(drawCenterX, drawCenterY);
   ctx.rotate((entry.rotation * Math.PI) / 180);
   drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, entry.imageRendering, entry.tintSettings);
   ctx.restore();
+}
+
+function getExportEntryGroupKey(entry) {
+  return `${Number.isFinite(Number(entry?.strokeId)) ? Number(entry.strokeId) : "loose"}:${normalizeLayerBlendMode(entry?.blendMode)}`;
+}
+
+function drawExportEntryGroup(
+  ctx,
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  scaleX,
+  scaleY,
+  entries,
+  startIndex,
+  endIndex,
+  gifAnimationMap = null,
+  timeMs = 0
+) {
+  const blendMode = normalizeLayerBlendMode(entries[startIndex]?.blendMode);
+  if (blendMode === "normal") {
+    for (let index = startIndex; index < endIndex; index += 1) {
+      drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entries[index], gifAnimationMap, timeMs);
+    }
+    return;
+  }
+
+  const layerCtx = getExportLayerScratchContext(outputWidth, outputHeight);
+  if (!layerCtx) {
+    for (let index = startIndex; index < endIndex; index += 1) {
+      drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entries[index], gifAnimationMap, timeMs);
+    }
+    return;
+  }
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    drawExportStampEntry(
+      layerCtx,
+      selectionBounds,
+      scaleX,
+      scaleY,
+      entries[index],
+      gifAnimationMap,
+      timeMs,
+      { blendMode: "normal" }
+    );
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 1;
+  setCanvasBlendOperation(ctx, blendMode);
+  ctx.drawImage(exportLayerScratchCanvas, 0, 0);
+  ctx.restore();
+}
+
+function drawExportEntries(
+  ctx,
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  scaleX,
+  scaleY,
+  entries,
+  gifAnimationMap = null,
+  timeMs = 0
+) {
+  for (const entry of entries) {
+    drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAnimationMap, timeMs);
+  }
 }
 
 function drawExportFrame(
@@ -11478,15 +11839,39 @@ function drawExportFrame(
     runLayerSequences(Number(options.sequenceTimeMs));
     refreshExportSequenceEntries(entries, selectionBounds, Number(options.sequenceTimeMs));
   }
+  const artworkCtx = getExportLayerScratchContext(outputWidth, outputHeight);
+  const drawCtx = artworkCtx || ctx;
   const { scaleX, scaleY } = prepareExportFrame(
-    ctx,
+    drawCtx,
     selectionBounds,
     outputWidth,
     outputHeight,
-    { ...options, backgroundImageTimeMs: timeMs }
+    { ...options, backgroundImageTimeMs: timeMs, skipBackground: Boolean(artworkCtx) }
   );
-  for (const entry of entries) {
-    drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entry, gifAnimationMap, timeMs);
+  drawExportEntries(
+    drawCtx,
+    selectionBounds,
+    outputWidth,
+    outputHeight,
+    scaleX,
+    scaleY,
+    entries,
+    gifAnimationMap,
+    timeMs
+  );
+  if (artworkCtx) {
+    prepareExportFrame(
+      ctx,
+      selectionBounds,
+      outputWidth,
+      outputHeight,
+      { ...options, backgroundImageTimeMs: timeMs }
+    );
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(exportLayerScratchCanvas, 0, 0);
+    ctx.restore();
   }
 }
 
@@ -11506,23 +11891,39 @@ async function drawExportFrameAsync(
     runLayerSequences(Number(options.sequenceTimeMs));
     refreshExportSequenceEntries(entries, selectionBounds, Number(options.sequenceTimeMs));
   }
+  const artworkCtx = getExportLayerScratchContext(outputWidth, outputHeight);
+  const drawCtx = artworkCtx || ctx;
   const { scaleX, scaleY } = prepareExportFrame(
-    ctx,
+    drawCtx,
     selectionBounds,
     outputWidth,
     outputHeight,
-    { ...options, backgroundImageTimeMs: timeMs }
+    { ...options, backgroundImageTimeMs: timeMs, skipBackground: Boolean(artworkCtx) }
   );
   const total = Math.max(1, entries.length);
   for (let index = 0; index < entries.length; index += 1) {
     throwIfTaskCancelled(task);
-    drawExportStampEntry(ctx, selectionBounds, scaleX, scaleY, entries[index], gifAnimationMap, timeMs);
+    drawExportStampEntry(drawCtx, selectionBounds, scaleX, scaleY, entries[index], gifAnimationMap, timeMs);
     if (progress && (index === entries.length - 1 || index % EXPORT_CANCEL_CHECK_INTERVAL === 0)) {
       progress((index + 1) / total);
     }
     if (index > 0 && index % EXPORT_CANCEL_CHECK_INTERVAL === 0) {
       await yieldToMainThread(task);
     }
+  }
+  if (artworkCtx) {
+    prepareExportFrame(
+      ctx,
+      selectionBounds,
+      outputWidth,
+      outputHeight,
+      { ...options, backgroundImageTimeMs: timeMs }
+    );
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(exportLayerScratchCanvas, 0, 0);
+    ctx.restore();
   }
 }
 
@@ -11567,6 +11968,8 @@ async function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, e
   if (!ctx) {
     throw new Error("Could not create export canvas.");
   }
+  await loadExportStampSourceImages(entries, task);
+  throwIfTaskCancelled(task);
   await drawExportFrameAsync(
     ctx,
     selectionBounds,
@@ -11625,6 +12028,8 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     ),
     getSequenceExportSourceUrls()
   );
+  throwIfTaskCancelled(task);
+  await loadExportStampSourceImages(entries, task);
   throwIfTaskCancelled(task);
   const frameDelays = getExportGifFrameDelays(gifAnimationMap, options);
 
@@ -11764,6 +12169,8 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
     ),
     getSequenceExportSourceUrls()
   );
+  throwIfTaskCancelled(task);
+  await loadExportStampSourceImages(entries, task);
   throwIfTaskCancelled(task);
 
   const durationMs = getExportVideoDurationMs(gifAnimationMap, options);
@@ -12898,6 +13305,7 @@ function onPointerMove(event) {
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
   updateBrushCursorPreview();
+  updateEditLayerHoverCursor(event.clientX, event.clientY);
 
   if (state.editLayerMove && state.editLayerMove.pointerId === event.pointerId) {
     updateEditLayerMove(event);
@@ -13214,6 +13622,19 @@ brushGallery.addEventListener("dragstart", onBrushGalleryDragStart);
 brushGallery.addEventListener("dragend", onBrushGalleryDragEnd);
 if (editLayerList) {
   editLayerList.addEventListener("click", (event) => {
+    const clickedNameElement = event.target.closest(".edit-layer-name");
+    if (clickedNameElement && event.detail >= 2) {
+      const nameRow = clickedNameElement.closest(".edit-layer-row");
+      const nameStroke = getStrokeById(nameRow?.dataset.strokeId);
+      if (nameStroke) {
+        event.preventDefault();
+        event.stopPropagation();
+        state.selectedEditLayerId = nameStroke.id;
+        startLayerNameEdit(nameStroke, clickedNameElement);
+      }
+      return;
+    }
+
     const row = event.target.closest(".edit-layer-row");
     const sequenceRow = event.target.closest(".edit-layer-sequence-row");
     const sequenceSettings = event.target.closest(".edit-layer-sequence-settings");
@@ -13286,7 +13707,9 @@ if (editLayerList) {
     const sequenceEnabledButton = event.target.closest(".edit-layer-sequence-enable-button");
     if (sequenceEnabledButton) {
       event.preventDefault();
-      stroke.sequenceEnabled = !isLayerSequenceEnabled(stroke);
+      const nextEnabled = !isLayerSequenceEnabled(stroke);
+      stroke.sequenceUserDisabled = !nextEnabled;
+      stroke.sequenceEnabled = nextEnabled;
       refreshStrokeSequenceEffect(stroke);
       selectEditLayer(stroke.id);
       renderEditLayers();
@@ -13389,6 +13812,7 @@ if (editLayerList) {
     );
     stroke.sequenceConfigured = true;
     stroke.sequenceEnabled = true;
+    stroke.sequenceUserDisabled = false;
     refreshStrokeSequenceEffect(stroke);
     selectEditLayer(stroke.id);
     renderEditLayers();
@@ -13474,6 +13898,18 @@ if (editLayerList) {
   });
 
   editLayerList.addEventListener("pointerdown", (event) => {
+    const nameElement = event.target.closest(".edit-layer-name");
+    if (nameElement && event.button === 0 && event.detail >= 2) {
+      const row = nameElement.closest(".edit-layer-row");
+      const stroke = getStrokeById(row?.dataset.strokeId);
+      if (stroke) {
+        event.preventDefault();
+        event.stopPropagation();
+        state.selectedEditLayerId = stroke.id;
+        startLayerNameEdit(stroke, nameElement);
+      }
+      return;
+    }
 	    if (
 	      event.button !== 0 ||
       event.target.closest(".edit-layer-eye-button") ||
@@ -13483,7 +13919,6 @@ if (editLayerList) {
       event.target.closest(".edit-layer-sequence-row") ||
       event.target.closest(".edit-layer-blend-row") ||
       event.target.closest(".edit-layer-property-controls") ||
-      event.target.closest(".edit-layer-name") ||
       event.target.closest(".edit-layer-name-input") ||
 	      event.target.closest(".edit-layer-sequence-settings") ||
 	      event.target.closest(".edit-layer-sequence-add-row")
@@ -14372,12 +14807,14 @@ viewport.addEventListener("pointerenter", (event) => {
   updateEraseCursorPosition(event.clientX, event.clientY);
   updateEraseCursorVisibility();
   updateBrushCursorPreview();
+  updateEditLayerHoverCursor(event.clientX, event.clientY);
 });
 viewport.addEventListener("pointerleave", () => {
   state.pointerInViewport = false;
   resetCursorTrailAnchor();
   updateEraseCursorVisibility();
   hideBrushCursorPreview();
+  viewport.classList.remove("is-edit-layer-clickable");
 });
 viewport.addEventListener("wheel", onWheel, { passive: false });
 window.addEventListener("wheel", (event) => {
@@ -14418,6 +14855,7 @@ document.addEventListener("visibilitychange", () => {
     shiftAllLayerSequenceClocks(Math.max(0, now - Number(state.sequenceVisibilityPauseStart)));
     state.sequenceVisibilityPauseStart = null;
     state.sequenceLastFrameTime = now;
+    startLayerSequenceLoop();
   }
 });
 gifPauseObserver.observe(document.body, { childList: true, subtree: true });
