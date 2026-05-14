@@ -32,7 +32,9 @@ const LAYER_SEQUENCE_EFFECT_OPTIONS = [
   { value: "rotate", label: "Rotate" },
   { value: "scale", label: "Scale" },
   { value: "color-cycle", label: "Color Cycle" },
-  { value: "image-cycle", label: "Image Cycle" }
+  { value: "image-cycle", label: "Image Cycle" },
+  { value: "pixelate", label: "Pixelate" },
+  { value: "blur", label: "Blur" }
 ];
 const LAYER_SEQUENCE_TIMING_OPTIONS = [
   { value: "pulse", label: "Pulse" },
@@ -86,12 +88,17 @@ const LAYER_SEQUENCE_DEFAULT_SETTINGS = {
   scaleAmount: 50,
   imageCycleRandom: false,
   imageCycleSpeed: 50,
+  pixelateAmount: 16,
+  pixelateSpeed: 45,
+  blurAmount: 8,
+  blurSpeed: 45,
   pulseSpeed: 35,
   pulseRate: 35,
   waveSpeed: 45,
   waveReverse: false,
   stepLength: 350,
   stepAmount: 1,
+  stepRate: 350,
   randomSpeed: 45
 };
 const SESSION_STORAGE_KEY = "random-brush-drawer-session-v1";
@@ -280,6 +287,7 @@ const exportAnimationSecondsButtons = exportAnimationSecondsButtonsGroup
   ? Array.from(exportAnimationSecondsButtonsGroup.querySelectorAll(".export-animation-seconds-button"))
   : [];
 const exportFrameCountInput = document.getElementById("exportFrameCountInput");
+const exportGifSizeLimitToggle = document.getElementById("exportGifSizeLimitToggle");
 const exportVideoDurationLabel = document.getElementById("exportVideoDurationLabel");
 const exportVideoAutoToggle = document.getElementById("exportVideoAutoToggle");
 const exportVideoLengthRow = document.getElementById("exportVideoLengthRow");
@@ -315,6 +323,10 @@ const EXPORT_MIN_SIZE = 24;
 const EXPORT_GIF_DURATION_MS = 2000;
 const EXPORT_GIF_FRAME_DELAY_MS = 50;
 const EXPORT_MAX_FRAME_COUNT = 512;
+const EXPORT_GIF_MAX_SIZE_BYTES = 15 * 1000 * 1000;
+const EXPORT_GIF_SIZE_TARGET_BYTES = Math.floor(EXPORT_GIF_MAX_SIZE_BYTES * 0.985);
+const EXPORT_GIF_SIZE_LIMIT_MAX_ATTEMPTS = 8;
+const EXPORT_GIF_SIZE_LIMIT_MIN_FRAMES = 4;
 const EXPORT_MANUAL_SECONDS_PRESETS = [0.5, 1, 2, 3, 4, 5];
 const EXPORT_VIDEO_MAX_DIMENSION = 1600;
 const EXPORT_VIDEO_MAX_SECONDS = 300;
@@ -361,6 +373,7 @@ const SEQUENCE_DATASET_KEYS = [
   "sequenceActive",
   "sequenceBaseOpacity",
   "sequenceBaseSrc",
+  "sequenceBaseImageRendering",
   "sequenceImageCycleKey",
   "sequenceImageCycleSrc",
   "sequenceTriggerKey",
@@ -395,12 +408,25 @@ const SEQUENCE_DATASET_KEYS = [
   "sequenceColorTo",
   "sequenceColorDuration",
   "sequenceColorTarget",
-  "sequenceColorShifted"
+  "sequenceColorShifted",
+  "sequencePixelateStart",
+  "sequencePixelateFrom",
+  "sequencePixelateTo",
+  "sequencePixelateDuration",
+  "sequencePixelateTarget",
+  "sequencePixelated",
+  "sequenceBlurStart",
+  "sequenceBlurFrom",
+  "sequenceBlurTo",
+  "sequenceBlurDuration",
+  "sequenceBlurTarget",
+  "sequenceBlurred"
 ];
 const SEQUENCE_BASE_DATASET_KEYS = [
   "sequenceActive",
   "sequenceBaseOpacity",
-  "sequenceBaseSrc"
+  "sequenceBaseSrc",
+  "sequenceBaseImageRendering"
 ];
 const SEQUENCE_SLOT_STATE_KEYS = SEQUENCE_DATASET_KEYS.filter(
   (key) => !SEQUENCE_BASE_DATASET_KEYS.includes(key)
@@ -489,6 +515,7 @@ const state = {
   exportAnimationSeconds: 3,
   exportAnimationFrameCount: "",
   exportSequencePrewarmSeconds: 0,
+  exportGifSizeLimitEnabled: false,
   exportVideoAuto: true,
   exportVideoSeconds: 3,
   exportSelectionBounds: null,
@@ -664,8 +691,11 @@ function cancelExportTask() {
 let suppressNextTintInputClick = false;
 let suppressNextCanvasBgInputClick = false;
 const tintFilterCache = new Map();
+const pixelateFilterCache = new Map();
+const sequencePixelateProxyMap = new WeakMap();
 let exportTintScratchCanvas = null;
 let exportLayerScratchCanvas = null;
+let exportPixelateScratchCanvas = null;
 const exportSourceImageCache = new Map();
 const exportBackgroundImageCache = new Map();
 const exportBackgroundAnimationCache = new Map();
@@ -922,16 +952,197 @@ function getBrushTintCssFilter(disabled = false, tintSettings = null) {
   return disabled ? `grayscale(0.75) ${tintFilter}` : tintFilter;
 }
 
-function applyBrushTintStyle(element, disabled = false, tintSettings = null) {
+function getPixelateFilterId(amount) {
+  const pixelSize = clamp(Math.round(Number(amount) || 0), 1, 80);
+  if (pixelateFilterCache.has(pixelSize)) {
+    return pixelateFilterCache.get(pixelSize);
+  }
+
+  const filterId = `sequencePixelateFilter-${pixelSize}`;
+  const existingFilter = document.getElementById(filterId);
+  if (existingFilter) {
+    pixelateFilterCache.set(pixelSize, filterId);
+    return filterId;
+  }
+
+  const defs = filterDefs ? filterDefs.querySelector("defs") : null;
+  if (!defs) {
+    return "";
+  }
+
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const filterElement = document.createElementNS(svgNamespace, "filter");
+  filterElement.setAttribute("id", filterId);
+  filterElement.setAttribute("x", "-10%");
+  filterElement.setAttribute("y", "-10%");
+  filterElement.setAttribute("width", "120%");
+  filterElement.setAttribute("height", "120%");
+  filterElement.setAttribute("primitiveUnits", "userSpaceOnUse");
+  filterElement.setAttribute("color-interpolation-filters", "sRGB");
+
+  const dotSize = 1;
+  const radius = Math.max(1, Math.floor(pixelSize / 2));
+
+  const flood = document.createElementNS(svgNamespace, "feFlood");
+  flood.setAttribute("x", String(Math.max(0, Math.round(pixelSize / 2 - dotSize / 2))));
+  flood.setAttribute("y", String(Math.max(0, Math.round(pixelSize / 2 - dotSize / 2))));
+  flood.setAttribute("width", String(dotSize));
+  flood.setAttribute("height", String(dotSize));
+  flood.setAttribute("flood-color", "#000");
+  flood.setAttribute("result", "pixelSeed");
+
+  const seed = document.createElementNS(svgNamespace, "feComposite");
+  seed.setAttribute("in", "pixelSeed");
+  seed.setAttribute("in2", "SourceGraphic");
+  seed.setAttribute("operator", "in");
+  seed.setAttribute("x", "0");
+  seed.setAttribute("y", "0");
+  seed.setAttribute("width", String(pixelSize));
+  seed.setAttribute("height", String(pixelSize));
+  seed.setAttribute("result", "sampledPixel");
+
+  const tile = document.createElementNS(svgNamespace, "feTile");
+  tile.setAttribute("in", "sampledPixel");
+  tile.setAttribute("result", "pixelGrid");
+
+  const masked = document.createElementNS(svgNamespace, "feComposite");
+  masked.setAttribute("in", "SourceGraphic");
+  masked.setAttribute("in2", "pixelGrid");
+  masked.setAttribute("operator", "in");
+  masked.setAttribute("result", "sampledSource");
+
+  const morphology = document.createElementNS(svgNamespace, "feMorphology");
+  morphology.setAttribute("in", "sampledSource");
+  morphology.setAttribute("operator", "dilate");
+  morphology.setAttribute("radius", String(radius));
+  morphology.setAttribute("result", "pixelated");
+
+  filterElement.appendChild(flood);
+  filterElement.appendChild(seed);
+  filterElement.appendChild(tile);
+  filterElement.appendChild(masked);
+  filterElement.appendChild(morphology);
+  defs.appendChild(filterElement);
+  pixelateFilterCache.set(pixelSize, filterId);
+  return filterId;
+}
+
+function getSequenceEffectCssFilter(effects = null) {
+  if (!effects || typeof effects !== "object") {
+    return "";
+  }
+  const parts = [];
+  const useSvgPixelate = effects.livePixelateSvg === true;
+  const pixelateAmount = useSvgPixelate
+    ? clamp(Math.round(Number(effects.pixelateAmount) || 0), 0, 64)
+    : 0;
+  if (useSvgPixelate && pixelateAmount > 0) {
+    const pixelateFilterId = getPixelateFilterId(pixelateAmount);
+    if (pixelateFilterId) {
+      parts.push(`url(#${pixelateFilterId})`);
+    }
+  }
+  const blurAmount = clamp(Number(effects.blurAmount) || 0, 0, 64);
+  if (blurAmount > 0) {
+    parts.push(`blur(${Math.max(0, blurAmount).toFixed(2)}px)`);
+  }
+  return parts.join(" ");
+}
+
+function applyBrushTintStyle(element, disabled = false, tintSettings = null, effects = null) {
   if (!element) {
     return;
   }
-  const filterValue = getBrushTintCssFilter(disabled, tintSettings);
+  const filterValue = [getBrushTintCssFilter(disabled, tintSettings), getSequenceEffectCssFilter(effects)]
+    .filter(Boolean)
+    .join(" ");
   if (filterValue) {
     element.style.filter = filterValue;
   } else {
     element.style.removeProperty("filter");
   }
+}
+
+function getSequencePixelateProxy(stamp) {
+  if (!(stamp instanceof HTMLImageElement)) {
+    return null;
+  }
+  let proxy = sequencePixelateProxyMap.get(stamp);
+  if (proxy && proxy.parentElement) {
+    return proxy;
+  }
+  proxy = document.createElement("canvas");
+  proxy.className = "sequence-pixelate-proxy";
+  proxy.setAttribute("aria-hidden", "true");
+  sequencePixelateProxyMap.set(stamp, proxy);
+  if (stamp.parentElement) {
+    stamp.after(proxy);
+  }
+  return proxy;
+}
+
+function removeSequencePixelateProxy(stamp) {
+  const proxy = sequencePixelateProxyMap.get(stamp);
+  if (proxy) {
+    proxy.remove();
+    sequencePixelateProxyMap.delete(stamp);
+  }
+  if (stamp instanceof HTMLElement) {
+    stamp.classList.remove("has-sequence-pixelate-proxy");
+  }
+}
+
+function syncSequencePixelateProxy(stamp, visual) {
+  const pixelateAmount = clamp(Math.round(Number(visual?.pixelateAmount) || 0), 0, 64);
+  if (!(stamp instanceof HTMLImageElement) || pixelateAmount <= 0) {
+    removeSequencePixelateProxy(stamp);
+    return false;
+  }
+  const width = Math.max(1, Math.ceil(parseFloat(stamp.style.width) || stamp.naturalWidth || 1));
+  const height = Math.max(1, Math.ceil(parseFloat(stamp.style.height) || stamp.naturalHeight || 1));
+  const proxy = getSequencePixelateProxy(stamp);
+  if (!proxy) {
+    return false;
+  }
+  const pixelWidth = Math.max(1, Math.ceil(width / pixelateAmount));
+  const pixelHeight = Math.max(1, Math.ceil(height / pixelateAmount));
+  if (proxy.width !== pixelWidth) {
+    proxy.width = pixelWidth;
+  }
+  if (proxy.height !== pixelHeight) {
+    proxy.height = pixelHeight;
+  }
+
+  const proxyCtx = proxy.getContext("2d", { alpha: true });
+  if (!proxyCtx) {
+    removeSequencePixelateProxy(stamp);
+    return false;
+  }
+  try {
+    proxyCtx.clearRect(0, 0, pixelWidth, pixelHeight);
+    proxyCtx.globalAlpha = 1;
+    proxyCtx.globalCompositeOperation = "source-over";
+    proxyCtx.imageSmoothingEnabled = false;
+    proxyCtx.drawImage(stamp, 0, 0, pixelWidth, pixelHeight);
+  } catch (error) {
+    removeSequencePixelateProxy(stamp);
+    return false;
+  }
+
+  proxy.style.left = stamp.style.left;
+  proxy.style.top = stamp.style.top;
+  proxy.style.width = stamp.style.width;
+  proxy.style.height = stamp.style.height;
+  proxy.style.transform = stamp.style.transform;
+  proxy.style.mixBlendMode = stamp.style.mixBlendMode;
+  proxy.style.opacity = String(clamp(Number(visual?.opacity) || 0, 0, 1));
+  proxy.classList.toggle("is-culled", stamp.classList.contains("is-culled"));
+  proxy.classList.toggle("is-layer-hidden", stamp.classList.contains("is-layer-hidden"));
+  applyBrushTintStyle(proxy, false, visual?.tintSettings || NO_TINT_SETTINGS, {
+    blurAmount: Number(visual?.blurAmount) || 0
+  });
+  stamp.classList.add("has-sequence-pixelate-proxy");
+  return true;
 }
 
 function setElementTintData(element, tintSettings) {
@@ -1323,6 +1534,12 @@ function applyGifPauseStateToNode(node) {
 function updateGifPauseButtonUI() {
   gifPauseButton.hidden = state.showGifPauseButton === false;
   gifPauseButton.classList.toggle("is-paused", state.gifAnimationsPaused);
+  gifPauseButton.classList.toggle(
+    "has-light-outline",
+    state.showGifPauseButton !== false &&
+      ((state.exportMode && state.exportSeeBeyondEnabled === false) ||
+        isNearlyBlackHexColor(state.canvasBackgroundColor))
+  );
   gifPauseButton.setAttribute("aria-pressed", String(state.gifAnimationsPaused));
   gifPauseButton.setAttribute(
     "aria-label",
@@ -3454,6 +3671,7 @@ function applyCanvasBackgroundColor(nextColor) {
   if (state.exportMode) {
     updateExportResolutionLockButtonsUI();
   }
+  updateGifPauseButtonUI();
 }
 
 function revokeExportBackgroundImageUrl() {
@@ -4676,6 +4894,10 @@ function updateExportAnimationUI() {
     exportSequencePrewarmInput.value = String(state.exportSequencePrewarmSeconds ?? 0);
     exportSequencePrewarmInput.disabled = Boolean(state.exportTask);
   }
+  if (exportGifSizeLimitToggle) {
+    exportGifSizeLimitToggle.checked = Boolean(state.exportGifSizeLimitEnabled);
+    exportGifSizeLimitToggle.disabled = Boolean(state.exportTask);
+  }
 
   const videoAuto = state.exportVideoAuto !== false;
   if (exportVideoDurationLabel) {
@@ -4935,6 +5157,7 @@ function updateExportModeUI() {
     exportSidebarHeightInput.disabled = Boolean(state.exportTask);
   }
   updateExportResolutionLockButtonsUI();
+  updateGifPauseButtonUI();
   updateExportScaleButtonsUI();
   updateExportAnimationUI();
   if (isOpen) {
@@ -5638,6 +5861,7 @@ function cancelDrawingForGesture() {
   const drawing = state.drawing;
   for (const element of drawing.stroke.elements) {
     decrementUrlRef(element.dataset.brushUrl);
+    removeSequencePixelateProxy(element);
     element.remove();
   }
   if (viewport.hasPointerCapture(drawing.pointerId)) {
@@ -5896,6 +6120,7 @@ function removeStampElementFromState(element, removalContext = null) {
   if (element.parentElement === world) {
     unregisterStampSpatialCells(element);
     decrementUrlRef(element.dataset.brushUrl);
+    removeSequencePixelateProxy(element);
     element.remove();
     state.stampCount = Math.max(0, state.stampCount - 1);
   }
@@ -6100,7 +6325,8 @@ function createSequenceExportSnapshot() {
         src: element.getAttribute("src") || "",
         opacity: element.style.opacity,
         transform: element.style.transform,
-        filter: element.style.filter
+        filter: element.style.filter,
+        imageRendering: element.style.imageRendering
       };
     })
   }));
@@ -6132,6 +6358,7 @@ function restoreSequenceExportSnapshot(snapshot) {
       element.style.opacity = elementSnapshot.opacity;
       element.style.transform = elementSnapshot.transform;
       element.style.filter = elementSnapshot.filter || "";
+      element.style.imageRendering = elementSnapshot.imageRendering || "";
     }
   }
 }
@@ -6304,7 +6531,9 @@ function isImplementedLayerSequenceEffect(effect) {
     effect === "rotate" ||
     effect === "scale" ||
     effect === "color-cycle" ||
-    effect === "image-cycle"
+    effect === "image-cycle" ||
+    effect === "pixelate" ||
+    effect === "blur"
   );
 }
 
@@ -6416,6 +6645,14 @@ function normalizeLayerSequenceSettings(settings) {
     : 70;
   normalized.colorCycleInstant = Boolean(normalized.colorCycleInstant);
   normalized.colorCycleSpeed = normalizeSequenceSpeedSliderValue(normalized.colorCycleSpeed, 5000, 50, 45);
+  normalized.pixelateAmount = Number.isFinite(Number(normalized.pixelateAmount))
+    ? clamp(Math.round(Number(normalized.pixelateAmount)), 0, 64)
+    : 16;
+  normalized.pixelateSpeed = normalizeSequenceSpeedSliderValue(normalized.pixelateSpeed, 5000, 50, 45);
+  normalized.blurAmount = Number.isFinite(Number(normalized.blurAmount))
+    ? clamp(Math.round(Number(normalized.blurAmount)), 0, 64)
+    : 8;
+  normalized.blurSpeed = normalizeSequenceSpeedSliderValue(normalized.blurSpeed, 5000, 50, 45);
   normalized.rotateSpeed = Number.isFinite(Number(normalized.rotateSpeed))
     ? clamp(Math.round(Number(normalized.rotateSpeed)), 1, 100)
     : 45;
@@ -6434,6 +6671,7 @@ function normalizeLayerSequenceSettings(settings) {
   normalized.waveReverse = Boolean(normalized.waveReverse);
   normalized.stepLength = clamp(Math.round(Number(normalized.stepLength) || 350), 50, 4000);
   normalized.stepAmount = clamp(Math.round(Number(normalized.stepAmount) || 1), 1, 200);
+  normalized.stepRate = clamp(Math.round(Number(normalized.stepRate) || 350), 50, 4000);
   normalized.randomSpeed = normalizeSequenceSpeedSliderValue(normalized.randomSpeed, 4000, 50, 45);
   return normalized;
 }
@@ -7112,6 +7350,20 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
       }
     }
     panel.appendChild(colorSpeedControl);
+  } else if (effect === "pixelate") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "pixelateAmount", "amount", 0, 64, 1, "px", slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "pixelateSpeed", "speed", 1, 100, 1, "", slotIndex)
+    );
+  } else if (effect === "blur") {
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "blurAmount", "amount", 0, 64, 1, "px", slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "blurSpeed", "speed", 1, 100, 1, "", slotIndex)
+    );
   }
 
   if (timingStyle === "pulse") {
@@ -7132,6 +7384,9 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
     );
     panel.appendChild(
       createLayerSequenceRangeControl(stroke, "stepAmount", "step amount", 1, 200, 1, "", slotIndex)
+    );
+    panel.appendChild(
+      createLayerSequenceRangeControl(stroke, "stepRate", "step rate", 50, 4000, 50, "ms", slotIndex)
     );
   } else if (timingStyle === "random") {
     panel.appendChild(
@@ -7407,6 +7662,7 @@ function buildSessionSnapshot() {
       exportAnimationSeconds: Number(state.exportAnimationSeconds) || 1,
       exportAnimationFrameCount: String(state.exportAnimationFrameCount || ""),
       exportSequencePrewarmSeconds: clamp(Number(state.exportSequencePrewarmSeconds) || 0, 0, 300),
+      exportGifSizeLimitEnabled: Boolean(state.exportGifSizeLimitEnabled),
       exportVideoAuto: state.exportVideoAuto !== false,
       exportVideoSeconds: Number(state.exportVideoSeconds) || 3,
       showGifCountIndicator: state.showGifCountIndicator !== false,
@@ -8169,6 +8425,7 @@ async function restoreSessionState(rawSnapshot = null) {
     state.exportSequencePrewarmSeconds = Number.isFinite(Number(controls.exportSequencePrewarmSeconds))
       ? clamp(Number(controls.exportSequencePrewarmSeconds), 0, 300)
       : 0;
+    state.exportGifSizeLimitEnabled = Boolean(controls.exportGifSizeLimitEnabled);
     state.exportVideoAuto = controls.exportVideoAuto !== false;
     state.exportVideoSeconds = Number.isFinite(Number(controls.exportVideoSeconds))
       ? clamp(Number(controls.exportVideoSeconds), 0, EXPORT_VIDEO_MAX_SECONDS)
@@ -8881,6 +9138,12 @@ function getSequenceEffectDuration(effect, settings) {
   if (effect === "image-cycle") {
     return getImageCycleDurationMs(settings);
   }
+  if (effect === "pixelate") {
+    return getPixelateDurationMs(settings);
+  }
+  if (effect === "blur") {
+    return getBlurDurationMs(settings);
+  }
   if (effect === "move") {
     return getMoveDurationMs(settings);
   }
@@ -8940,6 +9203,14 @@ function getMoveDurationMs(settings) {
 
 function getColorCycleDurationMs(settings) {
   return mapSequenceSlider(settings.colorCycleSpeed, 5000, 50);
+}
+
+function getPixelateDurationMs(settings) {
+  return mapSequenceSlider(settings.pixelateSpeed, 5000, 50);
+}
+
+function getBlurDurationMs(settings) {
+  return mapSequenceSlider(settings.blurSpeed, 5000, 50);
 }
 
 function getImageCycleDurationMs(settings) {
@@ -9248,14 +9519,16 @@ function getLayerSequenceTrigger(stroke, index, total, style, settings, now, eff
     }
     const runtime = runtimeHost.sequenceRuntime;
     const stepLength = Math.max(50, settings.stepLength);
+    const stepRate = Math.max(50, settings.stepRate);
     const stepAmount = Math.max(1, Math.round(settings.stepAmount));
     const baseTime = getSequenceRuntimeBaseTime(runtime, now);
     const elapsed = Math.max(0, now - baseTime);
-    const tick = Math.floor(elapsed / stepLength);
+    const tick = Math.floor(elapsed / stepRate);
+    const tickElapsed = elapsed - tick * stepRate;
     const start = (tick * stepAmount) % safeTotal;
     const offset = (index - start + safeTotal) % safeTotal;
-    const active = offset < Math.min(stepAmount, safeTotal);
-    const startTime = baseTime + tick * stepLength;
+    const active = tickElapsed <= stepLength && offset < Math.min(stepAmount, safeTotal);
+    const startTime = baseTime + tick * stepRate;
     return {
       active,
       key: `${style}:${tick}`,
@@ -9309,6 +9582,9 @@ function ensureStampSequenceBase(stamp) {
   }
   if (!stamp.dataset.sequenceBaseSrc) {
     stamp.dataset.sequenceBaseSrc = stamp.dataset.brushUrl || stamp.getAttribute("src") || "";
+  }
+  if (!stamp.dataset.sequenceBaseImageRendering) {
+    stamp.dataset.sequenceBaseImageRendering = stamp.style.imageRendering || "pixelated";
   }
   if (!stamp.dataset.sequenceDisplayedSource) {
     stamp.dataset.sequenceDisplayedSource =
@@ -9368,6 +9644,7 @@ function resetStampSequenceStyle(stamp, force = false) {
   ensureStampSequenceBase(stamp);
   const baseOpacity = stamp.dataset.sequenceBaseOpacity;
   const baseSource = stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "";
+  const baseImageRendering = stamp.dataset.sequenceBaseImageRendering || stamp.style.imageRendering || "pixelated";
   deleteSequenceRuntimeDataset(stamp);
   if (baseOpacity) {
     stamp.dataset.sequenceBaseOpacity = baseOpacity;
@@ -9376,6 +9653,11 @@ function resetStampSequenceStyle(stamp, force = false) {
     stamp.dataset.sequenceBaseSrc = baseSource;
     stamp.dataset.sequenceDisplayedSource = baseSource;
   }
+  if (baseImageRendering) {
+    stamp.dataset.sequenceBaseImageRendering = baseImageRendering;
+    stamp.style.imageRendering = baseImageRendering;
+  }
+  removeSequencePixelateProxy(stamp);
   const stroke = getStampLayerStroke(stamp);
   applyStampLayerVisualStyle(stroke, stamp);
   applyBrushTintStyle(stamp, false, getStampBaseTintSettings(stamp));
@@ -9563,6 +9845,41 @@ function getCurrentSequenceColorAmount(stamp, settings, now) {
   return clamp(from + (to - from) * eased, 0, 100);
 }
 
+function getCurrentSequenceScalarAmount(stamp, prefix, durationMs, now, maxValue) {
+  const target = Number(stamp.dataset[`${prefix}To`]);
+  const startTime = Number(stamp.dataset[`${prefix}Start`]);
+  const from = Number(stamp.dataset[`${prefix}From`]);
+  const to = Number(stamp.dataset[`${prefix}To`]);
+  if (!Number.isFinite(startTime) || !Number.isFinite(from) || !Number.isFinite(to)) {
+    return Number.isFinite(target) ? clamp(target, 0, maxValue) : 0;
+  }
+  const duration = Number.isFinite(Number(stamp.dataset[`${prefix}Duration`]))
+    ? Math.max(1, Number(stamp.dataset[`${prefix}Duration`]))
+    : Math.max(1, durationMs);
+  const progress = clamp((now - startTime) / duration, 0, 1);
+  const eased = progress < 0.5
+    ? 2 * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  const amount = from + (to - from) * eased;
+  if (progress >= 1) {
+    stamp.dataset[`${prefix}From`] = String(to);
+    stamp.dataset[`${prefix}To`] = String(to);
+    stamp.dataset[`${prefix}Target`] = String(to);
+    delete stamp.dataset[`${prefix}Start`];
+    delete stamp.dataset[`${prefix}Duration`];
+    return clamp(to, 0, maxValue);
+  }
+  return clamp(amount, 0, maxValue);
+}
+
+function getCurrentSequencePixelateAmount(stamp, settings, now) {
+  return getCurrentSequenceScalarAmount(stamp, "sequencePixelate", getPixelateDurationMs(settings), now, 64);
+}
+
+function getCurrentSequenceBlurAmount(stamp, settings, now) {
+  return getCurrentSequenceScalarAmount(stamp, "sequenceBlur", getBlurDurationMs(settings), now, 64);
+}
+
 function applySequenceColorStyle(stamp, settings, amountPercent) {
   const amount = clamp(Number(amountPercent) || 0, 0, 100);
   if (amount <= 0) {
@@ -9735,6 +10052,26 @@ function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, inde
     stamp.dataset.sequenceColorTarget = String(targetAmount);
     stamp.dataset.sequenceColorDuration = String(isInstant ? 1 : getColorCycleDurationMs(settings));
     stamp.dataset.sequenceColorShifted = nextShifted ? "1" : "0";
+  } else if (effect === "pixelate") {
+    const currentAmount = getCurrentSequencePixelateAmount(stamp, settings, now);
+    const nextPixelated = stamp.dataset.sequencePixelated !== "1";
+    const targetAmount = nextPixelated ? settings.pixelateAmount : 0;
+    stamp.dataset.sequencePixelateStart = String(triggerStartTime);
+    stamp.dataset.sequencePixelateFrom = String(currentAmount);
+    stamp.dataset.sequencePixelateTo = String(targetAmount);
+    stamp.dataset.sequencePixelateTarget = String(targetAmount);
+    stamp.dataset.sequencePixelateDuration = String(getPixelateDurationMs(settings));
+    stamp.dataset.sequencePixelated = nextPixelated ? "1" : "0";
+  } else if (effect === "blur") {
+    const currentAmount = getCurrentSequenceBlurAmount(stamp, settings, now);
+    const nextBlurred = stamp.dataset.sequenceBlurred !== "1";
+    const targetAmount = nextBlurred ? settings.blurAmount : 0;
+    stamp.dataset.sequenceBlurStart = String(triggerStartTime);
+    stamp.dataset.sequenceBlurFrom = String(currentAmount);
+    stamp.dataset.sequenceBlurTo = String(targetAmount);
+    stamp.dataset.sequenceBlurTarget = String(targetAmount);
+    stamp.dataset.sequenceBlurDuration = String(getBlurDurationMs(settings));
+    stamp.dataset.sequenceBlurred = nextBlurred ? "1" : "0";
   } else if (effect === "image-cycle") {
     triggerImageCycleSequence(stamp, trigger, settings, pool, index, currentSource);
   }
@@ -9791,6 +10128,9 @@ function runLayerSequences(now = performance.now()) {
           rotationOffset: 0,
           scale: 1,
           tintSettings: getStampBaseTintSettings(stamp),
+          pixelateAmount: 0,
+          blurAmount: 0,
+          baseImageRendering: stamp.dataset.sequenceBaseImageRendering || stamp.style.imageRendering || "pixelated",
           sourceUrl: stamp.dataset.sequenceBaseSrc || stamp.dataset.brushUrl || stamp.getAttribute("src") || "",
           imageCycleSource: false
         };
@@ -9863,6 +10203,13 @@ function runLayerSequences(now = performance.now()) {
                 amountPercent: amount
               });
             }
+          } else if (effect === "pixelate") {
+            visual.pixelateAmount = Math.max(
+              visual.pixelateAmount,
+              Math.round(getCurrentSequencePixelateAmount(stamp, settings, now))
+            );
+          } else if (effect === "blur") {
+            visual.blurAmount += getCurrentSequenceBlurAmount(stamp, settings, now);
           } else if (effect === "image-cycle") {
             visual.sourceUrl = getCurrentSequenceImageSource(stamp, currentImageCycleSource);
             visual.imageCycleSource = true;
@@ -9881,16 +10228,20 @@ function runLayerSequences(now = performance.now()) {
           continue;
         }
         setStampSequenceImage(stamp, visual.sourceUrl, visual.imageCycleSource);
-        applyBrushTintStyle(stamp, false, visual.tintSettings);
+        stamp.style.imageRendering = visual.pixelateAmount > 0 ? "pixelated" : visual.baseImageRendering;
         const layerTransform = getStampLayerTransform(stroke, stamp);
         const baseRotation = Number(stamp.dataset.rotation) || 0;
         const moveX = layerTransform.x + visual.moveX;
         const moveY = layerTransform.y + visual.moveY;
         const rotation = baseRotation + layerTransform.rotation + visual.rotationOffset;
         const scale = layerTransform.scale * visual.scale;
-        stamp.style.opacity = String(clamp(visual.opacity, 0, 1));
         stamp.style.transform =
           `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`;
+        const usingPixelateProxy = syncSequencePixelateProxy(stamp, visual);
+        applyBrushTintStyle(stamp, false, visual.tintSettings, {
+          blurAmount: usingPixelateProxy ? 0 : visual.blurAmount
+        });
+        stamp.style.opacity = usingPixelateProxy ? "0" : String(clamp(visual.opacity, 0, 1));
       }
     } catch (error) {
       console.warn("Layer sequence skipped for stroke.", error);
@@ -10883,6 +11234,7 @@ function detachStrokeFromWorld(stroke) {
     unregisterStampSpatialCells(element);
     decrementUrlRef(element.dataset.brushUrl);
     if (element.parentElement === world) {
+      removeSequencePixelateProxy(element);
       element.remove();
       state.stampCount = Math.max(0, state.stampCount - 1);
     }
@@ -11588,6 +11940,8 @@ function getExportSequenceVisualState(element, now = performance.now()) {
     rotationOffset: 0,
     scale: 1,
     tintSettings: getStampBaseTintSettings(element),
+    pixelateAmount: 0,
+    blurAmount: 0,
     sourceUrl: baseSource
   };
   if (!stroke || !isLayerSequenceEnabled(stroke)) {
@@ -11621,6 +11975,13 @@ function getExportSequenceVisualState(element, now = performance.now()) {
           amountPercent: colorCycleAmount
         });
       }
+    } else if (effect === "pixelate") {
+      visual.pixelateAmount = Math.max(
+        visual.pixelateAmount,
+        Math.round(getCurrentSequencePixelateAmount(element, settings, now))
+      );
+    } else if (effect === "blur") {
+      visual.blurAmount += getCurrentSequenceBlurAmount(element, settings, now);
     } else if (effect === "image-cycle") {
       const sequenceSource = getCurrentSequenceImageSource(element, visual.sourceUrl);
       if (sequenceSource && sequenceSource !== TRANSPARENT_STAMP_SRC) {
@@ -11679,7 +12040,13 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
     strokeId: stroke && Number.isFinite(Number(stroke.id)) ? Number(stroke.id) : null,
     blendMode: getLayerBlendMode(stroke),
     tintSettings: sequenceState?.tintSettings || getStampBaseTintSettings(element),
-    imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated"
+    pixelateAmount: Number(sequenceState?.pixelateAmount) || 0,
+    blurAmount: Number(sequenceState?.blurAmount) || 0,
+    imageRendering: Number(sequenceState?.pixelateAmount) > 0
+      ? "pixelated"
+      : element.style.imageRendering === "auto"
+      ? "auto"
+      : "pixelated"
   };
 }
 
@@ -11966,7 +12333,76 @@ function createExportFrameDelays(durationMs, frameCountOverride = null) {
   return delays;
 }
 
+function createExportFrameDelaysForCount(durationMs, frameCount) {
+  const duration = Math.max(EXPORT_GIF_FRAME_DELAY_MS, Math.round(Number(durationMs) || EXPORT_GIF_DURATION_MS));
+  const maxCountForDuration = Math.max(1, Math.floor(duration / 20));
+  const safeFrameCount = clamp(
+    Math.round(Number(frameCount) || 1),
+    1,
+    Math.min(EXPORT_MAX_FRAME_COUNT, maxCountForDuration)
+  );
+  if (safeFrameCount <= 1) {
+    return [duration];
+  }
+
+  let remainingDuration = duration;
+  const delays = [];
+  for (let index = 0; index < safeFrameCount; index += 1) {
+    const remainingFrames = safeFrameCount - index;
+    const delay = Math.max(20, Math.round(remainingDuration / remainingFrames));
+    delays.push(delay);
+    remainingDuration -= delay;
+  }
+  return delays;
+}
+
+function normalizeFrameDelays(frameDelays) {
+  return Array.isArray(frameDelays)
+    ? frameDelays
+        .map((delay) => Math.max(20, Math.round(Number(delay) || EXPORT_GIF_FRAME_DELAY_MS)))
+        .filter((delay) => delay > 0)
+    : [];
+}
+
+function getFrameDelaysDuration(frameDelays) {
+  return normalizeFrameDelays(frameDelays).reduce((sum, delay) => sum + delay, 0);
+}
+
+function getExportGifDurationMs(gifAnimationMap, options = {}) {
+  const frameCountOverride = Number(options.frameCountOverride);
+  if (Number.isFinite(frameCountOverride) && frameCountOverride > 0) {
+    const nativeFrameDelays = getNativeGifFrameDelaysForCount(gifAnimationMap, frameCountOverride);
+    if (nativeFrameDelays) {
+      return getFrameDelaysDuration(nativeFrameDelays);
+    }
+    return Math.max(
+      EXPORT_GIF_FRAME_DELAY_MS,
+      clamp(Math.floor(frameCountOverride), 1, EXPORT_MAX_FRAME_COUNT) * EXPORT_GIF_FRAME_DELAY_MS
+    );
+  }
+
+  if (options.animationAuto !== false) {
+    return Math.max(
+      getLongestGifAnimationDuration(gifAnimationMap),
+      getBackgroundAnimationDuration(options),
+      EXPORT_GIF_DURATION_MS
+    );
+  }
+
+  const manualSeconds = EXPORT_MANUAL_SECONDS_PRESETS.includes(Number(options.animationSeconds))
+    ? Number(options.animationSeconds)
+    : 1;
+  return Math.max(EXPORT_GIF_FRAME_DELAY_MS, Math.round(manualSeconds * 1000));
+}
+
 function getExportGifFrameDelays(gifAnimationMap, options = {}) {
+  if (Number.isFinite(Number(options.sizeLimitFrameCount)) && Number(options.sizeLimitFrameCount) > 0) {
+    return createExportFrameDelaysForCount(
+      getExportGifDurationMs(gifAnimationMap, options),
+      options.sizeLimitFrameCount
+    );
+  }
+
   const frameCountOverride = Number(options.frameCountOverride);
   if (Number.isFinite(frameCountOverride) && frameCountOverride > 0) {
     const nativeFrameDelays = getNativeGifFrameDelaysForCount(gifAnimationMap, frameCountOverride);
@@ -11991,6 +12427,9 @@ function getExportGifFrameDelays(gifAnimationMap, options = {}) {
 }
 
 function getExportVideoDurationMs(gifAnimationMap, options = {}) {
+  if (Number.isFinite(Number(options.videoDurationMs)) && Number(options.videoDurationMs) > 0) {
+    return Math.max(100, Math.round(Number(options.videoDurationMs)));
+  }
   if (options.videoAuto !== false) {
     return Math.max(
       100,
@@ -12002,6 +12441,17 @@ function getExportVideoDurationMs(gifAnimationMap, options = {}) {
     100,
     Math.round(clamp(Number(options.videoSeconds) || 0, 0, EXPORT_VIDEO_MAX_SECONDS) * 1000)
   );
+}
+
+function getManualExportVideoDurationMs() {
+  const inputValue = exportVideoLengthInput ? String(exportVideoLengthInput.value || "").trim() : "";
+  const sourceValue = inputValue === "" ? state.exportVideoSeconds : Number(inputValue);
+  const seconds = clamp(Number(sourceValue) || 0, 0, EXPORT_VIDEO_MAX_SECONDS);
+  state.exportVideoSeconds = seconds;
+  if (exportVideoLengthInput && inputValue !== "" && Number(exportVideoLengthInput.value) !== seconds) {
+    exportVideoLengthInput.value = String(seconds);
+  }
+  return Math.max(100, Math.round(seconds * 1000));
 }
 
 function getVideoScaledResolution(resolution) {
@@ -12286,9 +12736,90 @@ function prepareExportFrame(
   return { scaleX, scaleY };
 }
 
-function drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, imageRendering, tintSettings) {
+function applyCanvasPixelation(scratchCtx, scratchWidth, scratchHeight, pixelSize) {
+  const blockSize = clamp(Math.round(Number(pixelSize) || 0), 1, 64);
+  if (blockSize <= 1 || scratchWidth <= 1 || scratchHeight <= 1) {
+    return;
+  }
+  if (!exportPixelateScratchCanvas) {
+    exportPixelateScratchCanvas = document.createElement("canvas");
+  }
+  const reducedWidth = Math.max(1, Math.ceil(scratchWidth / blockSize));
+  const reducedHeight = Math.max(1, Math.ceil(scratchHeight / blockSize));
+  if (exportPixelateScratchCanvas.width !== reducedWidth) {
+    exportPixelateScratchCanvas.width = reducedWidth;
+  }
+  if (exportPixelateScratchCanvas.height !== reducedHeight) {
+    exportPixelateScratchCanvas.height = reducedHeight;
+  }
+  const pixelCtx = exportPixelateScratchCanvas.getContext("2d", { alpha: true });
+  if (!pixelCtx) {
+    return;
+  }
+
+  try {
+    const sourceData = scratchCtx.getImageData(0, 0, scratchWidth, scratchHeight).data;
+    const reducedImage = pixelCtx.createImageData(reducedWidth, reducedHeight);
+    const targetData = reducedImage.data;
+    for (let y = 0; y < reducedHeight; y += 1) {
+      const sampleY = Math.min(scratchHeight - 1, Math.floor(y * blockSize + blockSize / 2));
+      for (let x = 0; x < reducedWidth; x += 1) {
+        const sampleX = Math.min(scratchWidth - 1, Math.floor(x * blockSize + blockSize / 2));
+        const sourceOffset = (sampleY * scratchWidth + sampleX) * 4;
+        const targetOffset = (y * reducedWidth + x) * 4;
+        targetData[targetOffset] = sourceData[sourceOffset];
+        targetData[targetOffset + 1] = sourceData[sourceOffset + 1];
+        targetData[targetOffset + 2] = sourceData[sourceOffset + 2];
+        targetData[targetOffset + 3] = sourceData[sourceOffset + 3];
+      }
+    }
+    pixelCtx.putImageData(reducedImage, 0, 0);
+  } catch (error) {
+    pixelCtx.clearRect(0, 0, reducedWidth, reducedHeight);
+    pixelCtx.imageSmoothingEnabled = false;
+    pixelCtx.drawImage(
+      exportTintScratchCanvas,
+      0,
+      0,
+      scratchWidth,
+      scratchHeight,
+      0,
+      0,
+      reducedWidth,
+      reducedHeight
+    );
+  }
+
+  scratchCtx.clearRect(0, 0, scratchWidth, scratchHeight);
+  scratchCtx.globalAlpha = 1;
+  scratchCtx.globalCompositeOperation = "source-over";
+  scratchCtx.imageSmoothingEnabled = false;
+  scratchCtx.drawImage(
+    exportPixelateScratchCanvas,
+    0,
+    0,
+    reducedWidth,
+    reducedHeight,
+    0,
+    0,
+    scratchWidth,
+    scratchHeight
+  );
+}
+
+function drawExportImageWithTint(
+  ctx,
+  frameSource,
+  drawWidth,
+  drawHeight,
+  imageRendering,
+  tintSettings,
+  effects = {}
+) {
   const tintLayers = getTintLayerList(tintSettings);
-  if (!tintLayers.length) {
+  const pixelateAmount = clamp(Math.round(Number(effects.pixelateAmount) || 0), 0, 64);
+  const blurAmount = clamp(Number(effects.blurAmount) || 0, 0, 64);
+  if (!tintLayers.length && pixelateAmount <= 0 && blurAmount <= 0) {
     ctx.drawImage(frameSource, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     return;
   }
@@ -12324,8 +12855,19 @@ function drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, imageR
   }
   scratchCtx.globalAlpha = 1;
   scratchCtx.globalCompositeOperation = "source-over";
+  scratchCtx.filter = "none";
 
+  if (pixelateAmount > 0) {
+    applyCanvasPixelation(scratchCtx, scratchWidth, scratchHeight, pixelateAmount);
+  }
+
+  ctx.save();
+  if (blurAmount > 0) {
+    ctx.filter = `blur(${blurAmount.toFixed(2)}px)`;
+  }
+  ctx.imageSmoothingEnabled = pixelateAmount > 0 ? false : imageRendering === "auto";
   ctx.drawImage(exportTintScratchCanvas, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  ctx.restore();
 }
 
 function setCanvasBlendOperation(ctx, blendMode) {
@@ -12386,7 +12928,10 @@ function drawExportStampEntry(
   ctx.imageSmoothingEnabled = entry.imageRendering === "auto";
   ctx.translate(drawCenterX, drawCenterY);
   ctx.rotate((entry.rotation * Math.PI) / 180);
-  drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, entry.imageRendering, entry.tintSettings);
+  drawExportImageWithTint(ctx, frameSource, drawWidth, drawHeight, entry.imageRendering, entry.tintSettings, {
+    pixelateAmount: entry.pixelateAmount,
+    blurAmount: entry.blurAmount
+  });
   ctx.restore();
 }
 
@@ -12625,6 +13170,186 @@ async function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, e
   return canvasToPngBlob(canvas);
 }
 
+async function prepareExportGifRenderAssets(entries, options = {}, task = null) {
+  const gifAnimationMap = await buildGifAnimationMap(
+    entries,
+    task,
+    (ratio) => updateExportProgress(
+      task,
+      EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DECODE_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
+      "Decoding"
+    ),
+    getSequenceExportSourceUrls()
+  );
+  throwIfTaskCancelled(task);
+  await loadExportStampSourceImages(entries, task);
+  throwIfTaskCancelled(task);
+  return gifAnimationMap;
+}
+
+function formatExportByteSize(bytes) {
+  const value = Math.max(0, Number(bytes) || 0);
+  return `${(value / 1000000).toFixed(value >= 10000000 ? 1 : 2)}mb`;
+}
+
+function estimateGifExportBytes(width, height, frameCount, entries) {
+  const pixels = Math.max(1, Number(width) || 1) *
+    Math.max(1, Number(height) || 1) *
+    Math.max(1, Number(frameCount) || 1);
+  const stampFactor = clamp((Array.isArray(entries) ? entries.length : 0) / 1200, 0, 0.08);
+  return 65000 + Math.max(1, Number(frameCount) || 1) * 4200 + pixels * (0.045 + stampFactor);
+}
+
+function getGifSizeLimitPriority(options = {}) {
+  return options.animationAuto !== false ? "frames" : "resolution";
+}
+
+function normalizeGifSizeLimitPlan(plan) {
+  return {
+    width: Math.max(1, Math.round(Number(plan?.width) || 1)),
+    height: Math.max(1, Math.round(Number(plan?.height) || 1)),
+    frameCount: clamp(
+      Math.round(Number(plan?.frameCount) || 1),
+      1,
+      EXPORT_MAX_FRAME_COUNT
+    )
+  };
+}
+
+function gifSizeLimitPlansMatch(left, right) {
+  return Boolean(
+    left &&
+      right &&
+      left.width === right.width &&
+      left.height === right.height &&
+      left.frameCount === right.frameCount
+  );
+}
+
+function reduceGifSizeLimitPlan(plan, ratio, priority) {
+  const safePlan = normalizeGifSizeLimitPlan(plan);
+  const safeRatio = clamp(Number(ratio) || 0.5, 0.04, 0.96);
+  const minFrames = Math.min(safePlan.frameCount, EXPORT_GIF_SIZE_LIMIT_MIN_FRAMES);
+  const reduceFrames = () => {
+    if (safePlan.frameCount <= minFrames) {
+      return null;
+    }
+    let frameCount = Math.max(minFrames, Math.floor(safePlan.frameCount * safeRatio));
+    if (frameCount >= safePlan.frameCount) {
+      frameCount = safePlan.frameCount - 1;
+    }
+    return { ...safePlan, frameCount };
+  };
+  const reduceResolution = () => {
+    if (safePlan.width <= 1 && safePlan.height <= 1) {
+      return null;
+    }
+    const scale = Math.sqrt(safeRatio);
+    const width = Math.max(1, Math.floor(safePlan.width * scale));
+    const height = Math.max(1, Math.floor(safePlan.height * scale));
+    if (width === safePlan.width && height === safePlan.height) {
+      return null;
+    }
+    return { ...safePlan, width, height };
+  };
+
+  return normalizeGifSizeLimitPlan(
+    priority === "frames"
+      ? reduceFrames() || reduceResolution() || { ...safePlan, frameCount: 1 }
+      : reduceResolution() || reduceFrames() || { width: 1, height: 1, frameCount: safePlan.frameCount }
+  );
+}
+
+function createInitialGifSizeLimitPlan(width, height, frameDelays, entries, options = {}) {
+  const plan = normalizeGifSizeLimitPlan({
+    width,
+    height,
+    frameCount: Math.max(1, normalizeFrameDelays(frameDelays).length)
+  });
+  const estimate = estimateGifExportBytes(plan.width, plan.height, plan.frameCount, entries);
+  if (estimate <= EXPORT_GIF_MAX_SIZE_BYTES * 1.35) {
+    return plan;
+  }
+  return reduceGifSizeLimitPlan(
+    plan,
+    EXPORT_GIF_SIZE_TARGET_BYTES / estimate,
+    getGifSizeLimitPriority(options)
+  );
+}
+
+async function renderExportGifBlobWithSizeLimit(
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  options = {},
+  task = null
+) {
+  const gifAnimationMap = await prepareExportGifRenderAssets(entries, options, task);
+  const baseFrameDelays = getExportGifFrameDelays(gifAnimationMap, options);
+  const durationMs = getExportGifDurationMs(gifAnimationMap, options);
+  let plan = createInitialGifSizeLimitPlan(
+    outputWidth,
+    outputHeight,
+    baseFrameDelays,
+    entries,
+    options
+  );
+  const priority = getGifSizeLimitPriority(options);
+  let lastBlob = null;
+
+  for (let attempt = 0; attempt < EXPORT_GIF_SIZE_LIMIT_MAX_ATTEMPTS; attempt += 1) {
+    throwIfTaskCancelled(task);
+    const frameDelays = plan.frameCount === baseFrameDelays.length
+      ? baseFrameDelays
+      : createExportFrameDelaysForCount(durationMs, plan.frameCount);
+    const blob = await renderExportGifBlob(
+      selectionBounds,
+      plan.width,
+      plan.height,
+      entries,
+      {
+        ...options,
+        gifAnimationMap,
+        sourceImagesLoaded: true,
+        frameDelaysOverride: frameDelays
+      },
+      task
+    );
+    lastBlob = blob;
+    throwIfTaskCancelled(task);
+    if (blob.size <= EXPORT_GIF_MAX_SIZE_BYTES) {
+      if (attempt > 0 || plan.width !== outputWidth || plan.height !== outputHeight || plan.frameCount !== baseFrameDelays.length) {
+        updateBrushStatus(
+          `GIF sized to ${formatExportByteSize(blob.size)} (${plan.width}x${plan.height}, ${frameDelays.length} frames).`
+        );
+      }
+      return blob;
+    }
+
+    updateBrushStatus(
+      `GIF was ${formatExportByteSize(blob.size)}; reducing toward 15mb...`
+    );
+    updateExportProgress(task, EXPORT_PROGRESS_DRAW_END, "Sizing");
+    const nextPlan = reduceGifSizeLimitPlan(
+      plan,
+      EXPORT_GIF_SIZE_TARGET_BYTES / Math.max(1, blob.size),
+      priority
+    );
+    if (gifSizeLimitPlansMatch(nextPlan, plan)) {
+      plan = reduceGifSizeLimitPlan(plan, 0.65, priority === "frames" ? "resolution" : "frames");
+    } else {
+      plan = nextPlan;
+    }
+    await yieldToMainThread(task);
+  }
+
+  if (lastBlob && lastBlob.size <= EXPORT_GIF_MAX_SIZE_BYTES) {
+    return lastBlob;
+  }
+  throw new Error("Could not reduce GIF below 15mb.");
+}
+
 async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
   await loadGifLibrary();
   throwIfTaskCancelled(task);
@@ -12652,20 +13377,21 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     frameCtx.fillRect(0, 0, outputWidth, outputHeight);
     frameCtx.globalCompositeOperation = "source-over";
   }
-  const gifAnimationMap = await buildGifAnimationMap(
-    entries,
-    task,
-    (ratio) => updateExportProgress(
-      task,
-      EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DECODE_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
-      "Decoding"
-    ),
-    getSequenceExportSourceUrls()
-  );
-  throwIfTaskCancelled(task);
-  await loadExportStampSourceImages(entries, task);
-  throwIfTaskCancelled(task);
-  const frameDelays = getExportGifFrameDelays(gifAnimationMap, options);
+  let sourceImagesLoaded = options.sourceImagesLoaded === true;
+  const gifAnimationMap = options.gifAnimationMap instanceof Map
+    ? options.gifAnimationMap
+    : await prepareExportGifRenderAssets(entries, options, task);
+  if (!(options.gifAnimationMap instanceof Map)) {
+    sourceImagesLoaded = true;
+  }
+  if (!sourceImagesLoaded) {
+    await loadExportStampSourceImages(entries, task);
+    throwIfTaskCancelled(task);
+  }
+  const overrideFrameDelays = normalizeFrameDelays(options.frameDelaysOverride);
+  const frameDelays = overrideFrameDelays.length
+    ? overrideFrameDelays
+    : getExportGifFrameDelays(gifAnimationMap, options);
 
   const gif = new window.GIF({
     workers: 2,
@@ -12771,6 +13497,16 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
   }
 
   const stream = recordCanvas.captureStream(EXPORT_VIDEO_FPS);
+  const videoTrack = stream.getVideoTracks()[0] || null;
+  const requestVideoFrame = () => {
+    if (videoTrack && typeof videoTrack.requestFrame === "function") {
+      try {
+        videoTrack.requestFrame();
+      } catch (error) {
+        // Some browsers expose requestFrame but reject it while recording starts/stops.
+      }
+    }
+  };
   const chunks = [];
   const recorder = new MediaRecorder(stream, {
     mimeType,
@@ -12829,8 +13565,9 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
   );
   recordCtx.clearRect(0, 0, outputWidth, outputHeight);
   recordCtx.drawImage(renderCanvas, 0, 0);
+  requestVideoFrame();
 
-  recorder.start();
+  recorder.start(250);
   const recordingStartTime = performance.now();
   let recorderStopTimerId = null;
   const stopRecorderIfActive = () => {
@@ -12883,6 +13620,7 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
       );
       recordCtx.clearRect(0, 0, outputWidth, outputHeight);
       recordCtx.drawImage(renderCanvas, 0, 0);
+      requestVideoFrame();
 
       const renderElapsedMs = Math.max(0, performance.now() - renderStartTime);
       estimatedRenderMs = estimatedRenderMs * 0.8 + renderElapsedMs * 0.2;
@@ -12915,6 +13653,7 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
     }
     updateExportProgress(task, EXPORT_PROGRESS_ENCODE_END, "Encoding");
     throwIfTaskCancelled(task);
+    requestVideoFrame();
     stopRecorderIfActive();
     return await recordedBlobPromise;
   } finally {
@@ -12970,6 +13709,7 @@ async function confirmExport() {
     animationSeconds: state.exportAnimationSeconds,
     frameCountOverride: state.exportAnimationAuto === false ? getExportFrameCountOverride() : null,
     sequencePrewarmMs: getExportSequencePrewarmMs(),
+    gifSizeLimitEnabled: Boolean(state.exportGifSizeLimitEnabled),
     sequenceExportActive: hasActiveSequenceEffectOnCanvas()
   };
   const sequenceSnapshot = exportOptions.sequenceExportActive ? createSequenceExportSnapshot() : null;
@@ -12996,7 +13736,9 @@ async function confirmExport() {
     throwIfTaskCancelled(task);
     const hasGif = hasGifStampOnCanvas() || exportOptions.sequenceExportActive;
     const blob = hasGif
-      ? await renderExportGifBlob(normalized, resolution.width, resolution.height, entries, exportOptions, task)
+      ? exportOptions.gifSizeLimitEnabled
+        ? await renderExportGifBlobWithSizeLimit(normalized, resolution.width, resolution.height, entries, exportOptions, task)
+        : await renderExportGifBlob(normalized, resolution.width, resolution.height, entries, exportOptions, task)
       : await renderExportPngBlob(normalized, resolution.width, resolution.height, entries, exportOptions, task);
     throwIfTaskCancelled(task);
     const extension = hasGif ? "gif" : "png";
@@ -13055,11 +13797,14 @@ async function confirmVideoExport() {
   restoreAllCulledStampSources();
   updateBrushCursorPreview();
   const timestamp = Date.now();
+  state.exportVideoAuto = exportVideoAutoToggle ? exportVideoAutoToggle.checked : state.exportVideoAuto !== false;
+  const manualVideoDurationMs = state.exportVideoAuto === false ? getManualExportVideoDurationMs() : null;
   const exportOptions = {
     includeBackground: Boolean(state.exportBackgroundEnabled),
     backgroundColor: state.canvasBackgroundColor,
     videoAuto: state.exportVideoAuto !== false,
     videoSeconds: state.exportVideoSeconds,
+    videoDurationMs: manualVideoDurationMs,
     sequencePrewarmMs: getExportSequencePrewarmMs(),
     sequenceExportActive: hasActiveSequenceEffectOnCanvas()
   };
@@ -14685,6 +15430,8 @@ if (editLayerList) {
         ? "ms"
         : valueLabel.textContent.endsWith("%")
         ? "%"
+        : valueLabel.textContent.endsWith("px")
+        ? "px"
         : "";
       valueLabel.textContent = `${getSequenceSettingInputValue(settingInput)}${suffix}`;
     }
@@ -15201,6 +15948,7 @@ exportBackgroundToggle.addEventListener("change", () => {
 if (exportSeeBeyondToggle) {
   exportSeeBeyondToggle.addEventListener("change", () => {
     state.exportSeeBeyondEnabled = exportSeeBeyondToggle.checked;
+    updateGifPauseButtonUI();
     updateExportOverlayGeometry();
     scheduleSessionSave();
   });
@@ -15462,6 +16210,13 @@ if (exportSequencePrewarmInput) {
     if (value && Number(exportSequencePrewarmInput.value) !== state.exportSequencePrewarmSeconds) {
       exportSequencePrewarmInput.value = String(state.exportSequencePrewarmSeconds);
     }
+    updateExportAnimationUI();
+    scheduleSessionSave();
+  });
+}
+if (exportGifSizeLimitToggle) {
+  exportGifSizeLimitToggle.addEventListener("change", () => {
+    state.exportGifSizeLimitEnabled = exportGifSizeLimitToggle.checked;
     updateExportAnimationUI();
     scheduleSessionSave();
   });

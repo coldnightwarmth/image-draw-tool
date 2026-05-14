@@ -211,6 +211,15 @@ input {
   contain: layout paint style;
 }
 
+.sequence-pixelate-proxy {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  image-rendering: pixelated;
+  contain: layout paint style;
+}
+
 #viewport.is-editing-layers .stamp {
   pointer-events: auto;
 }
@@ -228,6 +237,11 @@ input {
 }
 
 .stamp.is-culled {
+  visibility: hidden;
+}
+
+.sequence-pixelate-proxy.is-culled,
+.sequence-pixelate-proxy.is-layer-hidden {
   visibility: hidden;
 }
 
@@ -2585,10 +2599,10 @@ input[type="range"] + .value-text {
 #gifPauseButton {
   position: fixed;
   left: 14px;
-  bottom: 20px;
+  bottom: 21px;
   z-index: 19;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -2610,8 +2624,16 @@ input[type="range"] + .value-text {
 .gif-pause-symbol {
   position: relative;
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
+}
+
+#gifPauseButton.has-light-outline .gif-pause-symbol {
+  filter:
+    drop-shadow(1px 0 #fff)
+    drop-shadow(-1px 0 #fff)
+    drop-shadow(0 1px #fff)
+    drop-shadow(0 -1px #fff);
 }
 
 .gif-pause-symbol::before,
@@ -2619,27 +2641,28 @@ input[type="range"] + .value-text {
   content: "";
   position: absolute;
   top: 2px;
-  width: 5px;
-  height: 14px;
+  width: 4.25px;
+  height: 13px;
   background: #111;
 }
 
 .gif-pause-symbol::before {
-  left: 3px;
+  left: 2.25px;
 }
 
 .gif-pause-symbol::after {
-  right: 3px;
+  left: 10.5px;
+  right: auto;
 }
 
 #gifPauseButton.is-paused .gif-pause-symbol::before {
   left: 4px;
-  top: 1px;
+  top: 1.5px;
   width: 0;
   height: 0;
-  border-top: 8px solid transparent;
-  border-bottom: 8px solid transparent;
-  border-left: 12px solid #111;
+  border-top: 7.5px solid transparent;
+  border-bottom: 7.5px solid transparent;
+  border-left: 11.5px solid #111;
   background: transparent;
 }
 

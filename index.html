@@ -450,6 +450,13 @@
             <input id="exportFrameCountInput" type="number" min="1" max="512" step="1" inputmode="numeric" aria-label="Set export frame count">
           </label>
         </div>
+        <div class="settings-row export-settings-row">
+          <label id="exportGifSizeLimitLabel" for="exportGifSizeLimitToggle" class="control-label inline-label">15mb max?</label>
+          <label class="ios-switch" for="exportGifSizeLimitToggle">
+            <input id="exportGifSizeLimitToggle" type="checkbox">
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
       </div>
       <div id="exportSidebarActions">
         <button id="exportButton" type="button" disabled>Render GIF</button>
