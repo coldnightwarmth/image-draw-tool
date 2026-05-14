@@ -51,6 +51,12 @@
 	      </div>
 	      <div id="drawingBrushDataSlot"></div>
 	      <div id="drawingFavoritesRow" class="favorites-loader-row">
+	        <button id="brushImagePickerButton" class="brush-image-picker-button" type="button" aria-label="Pick brush image from canvas" aria-pressed="false" title="Pick brush image from canvas">
+	          <svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+	            <path d="M11.9 2.1 16 6.2l-2 2-1-1-5.9 5.9-3.5.9.9-3.5 5.9-5.9-1-1 2.5-2.5z"/>
+	            <path d="M5.1 10.9 7.1 12.9"/>
+	          </svg>
+	        </button>
 	        <div id="drawingBrushPresetButtons" class="custom-brush-preset-buttons" aria-label="Custom brush presets"></div>
 	        <button id="loadFavoriteBrushesButton" class="favorite-loader-button" type="button" aria-label="Load favorite brushes" title="Load favorite brushes">★</button>
 	      </div>
@@ -196,6 +202,11 @@
       <div id="consistentSizeGroup" hidden>
         <input id="consistentSizeSlider" type="range" min="8" max="1000" value="96" step="1" disabled>
       </div>
+      <div id="randomSizeGroup" class="random-size-group" hidden>
+        <span id="randomSizeRangeFill" class="random-size-range-fill" aria-hidden="true"></span>
+        <input id="randomSizeMinSlider" class="random-size-slider random-size-slider-min" type="range" min="10" max="1000" value="75" step="1" disabled aria-label="Minimum randomized size">
+        <input id="randomSizeMaxSlider" class="random-size-slider random-size-slider-max" type="range" min="10" max="1000" value="125" step="1" disabled aria-label="Maximum randomized size">
+      </div>
     </div>
 
     <div class="control-group" id="consistentControlGroup">
@@ -203,6 +214,16 @@
         <label for="consistentToggle" class="control-label inline-label">consistent?</label>
         <label class="ios-switch" for="consistentToggle">
           <input id="consistentToggle" type="checkbox">
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="control-group" id="randomSizeControlGroup">
+      <div class="toggle-row">
+        <label for="randomSizeToggle" class="control-label inline-label">randomize?</label>
+        <label class="ios-switch" for="randomSizeToggle">
+          <input id="randomSizeToggle" type="checkbox">
           <span class="ios-switch-slider" aria-hidden="true"></span>
         </label>
       </div>
@@ -680,6 +701,6 @@
   </div>
 
   <script src="stock-brushes.js?v=20260513-stock"></script>
-  <script src="app.js?v=20260513-sequence-reenable-fix"></script>
+  <script src="app.js?v=20260514-picker-random-size"></script>
 </body>
 </html>

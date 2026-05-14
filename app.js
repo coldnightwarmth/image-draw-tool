@@ -136,6 +136,7 @@ const brushSortSelect = document.getElementById("brushSortSelect");
 const loadAllStockBrushesButton = document.getElementById("loadAllStockBrushesButton");
 const loadFavoriteBrushesButton = document.getElementById("loadFavoriteBrushesButton");
 const loadFavoriteBrushesFullButton = document.getElementById("loadFavoriteBrushesFullButton");
+const brushImagePickerButton = document.getElementById("brushImagePickerButton");
 const drawingBrushPresetButtons = document.getElementById("drawingBrushPresetButtons");
 const brushesBrushPresetButtons = document.getElementById("brushesBrushPresetButtons");
 const brushInput = document.getElementById("brushInput");
@@ -151,6 +152,11 @@ const consistentSizeSlider = document.getElementById("consistentSizeSlider");
 const consistentSizeValue = document.getElementById("consistentSizeValue");
 const sizePercentValueText = document.getElementById("sizePercentValueText");
 const consistentSizeValueText = document.getElementById("consistentSizeValueText");
+const randomSizeToggle = document.getElementById("randomSizeToggle");
+const randomSizeGroup = document.getElementById("randomSizeGroup");
+const randomSizeMinSlider = document.getElementById("randomSizeMinSlider");
+const randomSizeMaxSlider = document.getElementById("randomSizeMaxSlider");
+const randomSizeRangeFill = document.getElementById("randomSizeRangeFill");
 const spacingSlider = document.getElementById("spacingSlider");
 const spacingValue = document.getElementById("spacingValue");
 const rotationSlider = document.getElementById("rotationSlider");
@@ -331,6 +337,7 @@ const GIF_TRANSPARENT_MATTE = "#00ff01";
 const GIF_TRANSPARENT_MATTE_HEX = 0x00ff01;
 const STAMP_INDEX_CELL_SIZE = 256;
 const STAMP_VIEWPORT_CULL_MARGIN_PX = 640;
+const STAMP_VIEWPORT_HIDE_MARGIN_PX = 1800;
 const TRANSPARENT_STAMP_SRC =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 const ERASER_SAMPLE_GRID_SIZE = 5;
@@ -347,7 +354,6 @@ const EXPORT_CANCEL_CHECK_INTERVAL = 40;
 const BRUSH_FRAME_COUNT_DECODE_CONCURRENCY = 2;
 const SEQUENCE_INTERRUPT_TWEEN_MS = 160;
 const SEQUENCE_TRIGGER_PRIME_MS = 16;
-const SEQUENCE_BACKGROUND_GAP_MS = 750;
 const SEQUENCE_DATASET_KEYS = [
   "sequenceActive",
   "sequenceBaseOpacity",
@@ -416,7 +422,6 @@ const state = {
   editLayerMove: null,
   sequenceRafId: null,
   sequenceLastFrameTime: null,
-  sequenceVisibilityPauseStart: null,
   selectedEditLayerId: null,
   strokeById: new Map(),
   stampSpatialBuckets: new Map(),
@@ -429,6 +434,8 @@ const state = {
   saveTimerId: null,
   soloBrushId: null,
   selectedBrushIds: new Set(),
+  brushPickMode: false,
+  pendingBrushGallerySelectionScroll: false,
   favoriteBrushSources: new Set(),
   favoriteReturnState: null,
   customBrushPresetSources: Array.from({ length: 5 }, () => new Set()),
@@ -459,6 +466,11 @@ const state = {
   showGifPauseButton: true,
   showDrawBackgroundColorControl: false,
   brushPreviewEnabled: true,
+  randomSizeEnabled: false,
+  randomSizePercentMin: 75,
+  randomSizePercentMax: 125,
+  randomSizeFixedMin: 72,
+  randomSizeFixedMax: 120,
   eraseMode: false,
   pointerInViewport: false,
   lastPointerClientX: 0,
@@ -2815,15 +2827,157 @@ function setSoloBrushId(brushId) {
   state.soloBrushId = Number.isFinite(Number(brushId)) ? Number(brushId) : null;
 }
 
+function updateBrushImagePickerButton() {
+  if (!brushImagePickerButton) {
+    return;
+  }
+  brushImagePickerButton.classList.toggle("is-active", Boolean(state.brushPickMode));
+  brushImagePickerButton.setAttribute("aria-pressed", String(Boolean(state.brushPickMode)));
+}
+
+function setBrushPickMode(active) {
+  state.brushPickMode = Boolean(active) && state.sidebarTab === "draw";
+  if (state.brushPickMode) {
+    if (state.eraseMode) {
+      setEraseMode(false);
+    }
+    cancelShapeDraft();
+    hideBrushCursorPreview();
+  }
+  updateBrushImagePickerButton();
+}
+
 function updateSliderText() {
-  sizeValue.textContent = String(sizeSlider.value);
-  consistentSizeValue.textContent = String(consistentSizeSlider.value);
+  if (isRandomSizeEnabled()) {
+    const range = getActiveRandomSizeRange();
+    const rangeText = `${Math.round(range.min)}-${Math.round(range.max)}`;
+    sizeValue.textContent = rangeText;
+    consistentSizeValue.textContent = rangeText;
+  } else {
+    sizeValue.textContent = String(sizeSlider.value);
+    consistentSizeValue.textContent = String(consistentSizeSlider.value);
+  }
   spacingValue.textContent = String(getSpacingValue());
   rotationValue.textContent = String(rotationSlider.value);
   opacityValue.textContent = String(opacitySlider.value);
   cursorTrailCountValue.textContent = String(cursorTrailCountSlider.value);
   spraySpreadValue.textContent = String(spraySpreadSlider.value);
   tintAmountValue.textContent = String(tintAmountSlider.value);
+  updateRandomSizeRangeFill();
+}
+
+function isRandomSizeEnabled() {
+  return Boolean(randomSizeToggle && randomSizeToggle.checked);
+}
+
+function getRandomSizeLimits(isConsistentMode = consistentToggle.checked) {
+  return isConsistentMode
+    ? {
+        min: Number(consistentSizeSlider.min) || 8,
+        max: Number(consistentSizeSlider.max) || 1000
+      }
+    : {
+        min: Number(sizeSlider.min) || 10,
+        max: Number(sizeSlider.max) || 1000
+      };
+}
+
+function getRandomSizeStateKeys(isConsistentMode = consistentToggle.checked) {
+  return isConsistentMode
+    ? { min: "randomSizeFixedMin", max: "randomSizeFixedMax" }
+    : { min: "randomSizePercentMin", max: "randomSizePercentMax" };
+}
+
+function normalizeRandomSizeRange(minValue, maxValue, isConsistentMode = consistentToggle.checked) {
+  const limits = getRandomSizeLimits(isConsistentMode);
+  const rawMin = Number(minValue);
+  const rawMax = Number(maxValue);
+  const min = clamp(
+    Number.isFinite(rawMin) ? rawMin : limits.min,
+    limits.min,
+    limits.max
+  );
+  const max = clamp(
+    Number.isFinite(rawMax) ? rawMax : limits.max,
+    limits.min,
+    limits.max
+  );
+  return {
+    min: Math.min(min, max),
+    max: Math.max(min, max)
+  };
+}
+
+function getRandomSizeRangeForMode(isConsistentMode = consistentToggle.checked) {
+  const keys = getRandomSizeStateKeys(isConsistentMode);
+  return normalizeRandomSizeRange(state[keys.min], state[keys.max], isConsistentMode);
+}
+
+function setRandomSizeRangeForMode(minValue, maxValue, isConsistentMode = consistentToggle.checked) {
+  const keys = getRandomSizeStateKeys(isConsistentMode);
+  const range = normalizeRandomSizeRange(minValue, maxValue, isConsistentMode);
+  state[keys.min] = range.min;
+  state[keys.max] = range.max;
+  return range;
+}
+
+function getActiveRandomSizeRange() {
+  return getRandomSizeRangeForMode(consistentToggle.checked);
+}
+
+function initializeRandomSizeRangeFromCurrent() {
+  const isConsistentMode = consistentToggle.checked;
+  const limits = getRandomSizeLimits(isConsistentMode);
+  const current = isConsistentMode
+    ? parseNumericInputValue(consistentSizeSlider, 96)
+    : parseNumericInputValue(sizeSlider, 100);
+  const spread = Math.max(1, Math.round(current * 0.25));
+  setRandomSizeRangeForMode(
+    clamp(current - spread, limits.min, limits.max),
+    clamp(current + spread, limits.min, limits.max),
+    isConsistentMode
+  );
+}
+
+function syncRandomSizeSlidersFromState() {
+  if (!randomSizeMinSlider || !randomSizeMaxSlider) {
+    return;
+  }
+  const limits = getRandomSizeLimits();
+  const range = getActiveRandomSizeRange();
+  for (const slider of [randomSizeMinSlider, randomSizeMaxSlider]) {
+    slider.min = String(limits.min);
+    slider.max = String(limits.max);
+    slider.step = "1";
+    slider.disabled = !isRandomSizeEnabled();
+  }
+  randomSizeMinSlider.value = String(Math.round(range.min));
+  randomSizeMaxSlider.value = String(Math.round(range.max));
+}
+
+function updateRandomSizeRangeFill() {
+  if (!randomSizeRangeFill || !randomSizeMinSlider || !randomSizeMaxSlider) {
+    return;
+  }
+  const limits = getRandomSizeLimits();
+  const range = getActiveRandomSizeRange();
+  const span = Math.max(1, limits.max - limits.min);
+  const left = ((range.min - limits.min) / span) * 100;
+  const right = ((range.max - limits.min) / span) * 100;
+  randomSizeRangeFill.style.left = `${clamp(left, 0, 100)}%`;
+  randomSizeRangeFill.style.width = `${clamp(right - left, 0, 100)}%`;
+}
+
+function readRandomSizeSliders() {
+  if (!randomSizeMinSlider || !randomSizeMaxSlider) {
+    return;
+  }
+  setRandomSizeRangeForMode(randomSizeMinSlider.value, randomSizeMaxSlider.value);
+  syncRandomSizeSlidersFromState();
+  updateSliderText();
+  updateEraseCursorGeometry();
+  updateBrushCursorPreview();
+  scheduleSessionSave();
 }
 
 function mapSpacingSliderToValue(value) {
@@ -2949,13 +3103,23 @@ function initializeSliderGroupToggles() {
 
 function updateConsistentModeUI() {
   const isConsistentMode = consistentToggle.checked;
-  sizeSlider.disabled = isConsistentMode;
+  const randomSizeEnabled = isRandomSizeEnabled();
+  state.randomSizeEnabled = randomSizeEnabled;
+  sizeSlider.disabled = isConsistentMode || randomSizeEnabled;
   sizeScaleGroup.classList.toggle("is-consistent-size", isConsistentMode);
+  sizeScaleGroup.classList.toggle("is-random-size", randomSizeEnabled);
   if (sizeControlLabel) {
     sizeControlLabel.textContent = isConsistentMode ? "size (consistent)" : "size";
   }
   if (sizeControlLabel) {
-    sizeControlLabel.setAttribute("for", isConsistentMode ? "consistentSizeSlider" : "sizeSlider");
+    sizeControlLabel.setAttribute(
+      "for",
+      randomSizeEnabled
+        ? "randomSizeMinSlider"
+        : isConsistentMode
+        ? "consistentSizeSlider"
+        : "sizeSlider"
+    );
   }
   if (sizePercentValueText) {
     sizePercentValueText.hidden = isConsistentMode;
@@ -2964,10 +3128,15 @@ function updateConsistentModeUI() {
     consistentSizeValueText.hidden = !isConsistentMode;
   }
   if (sizePercentGroup) {
-    sizePercentGroup.hidden = isConsistentMode;
+    sizePercentGroup.hidden = isConsistentMode || randomSizeEnabled;
   }
-  consistentSizeGroup.hidden = !isConsistentMode;
-  consistentSizeSlider.disabled = !isConsistentMode;
+  consistentSizeGroup.hidden = !isConsistentMode || randomSizeEnabled;
+  consistentSizeSlider.disabled = !isConsistentMode || randomSizeEnabled;
+  if (randomSizeGroup) {
+    randomSizeGroup.hidden = !randomSizeEnabled;
+  }
+  syncRandomSizeSlidersFromState();
+  updateSliderText();
 }
 
 function updateRenderModeUI() {
@@ -3592,9 +3761,14 @@ function setSidebarTab(tab, options = {}) {
   }
 
   state.sidebarTab = nextTab;
+  if (nextTab !== "draw") {
+    setBrushPickMode(false);
+  }
   if (nextTab !== "draw" && nextTab !== "brushes") {
     cancelShapeDraft();
     clearCursorTrail();
+  } else {
+    state.pendingBrushGallerySelectionScroll = true;
   }
   updateSidebarTabUI();
   renderBrushGallery();
@@ -3652,6 +3826,7 @@ function updateSidebarTabUI() {
   if (activeTab !== "draw") {
     setTintPopoverOpen(false);
   }
+  updateBrushImagePickerButton();
   if (activeTab === "community" && !state.savedCompositionsLoaded) {
     void loadSavedCompositions();
   }
@@ -3782,6 +3957,13 @@ function getViewportWorldBounds(marginPx = STAMP_VIEWPORT_CULL_MARGIN_PX) {
   };
 }
 
+function getViewportVisibilityBounds() {
+  return {
+    show: getViewportWorldBounds(STAMP_VIEWPORT_CULL_MARGIN_PX),
+    hide: getViewportWorldBounds(STAMP_VIEWPORT_HIDE_MARGIN_PX)
+  };
+}
+
 function getCachedStampWorldBounds(element) {
   const left = Number(element.dataset.worldLeft);
   const top = Number(element.dataset.worldTop);
@@ -3830,17 +4012,29 @@ function setStampViewportRendered(stamp, rendered) {
   stamp.src = TRANSPARENT_STAMP_SRC;
 }
 
-function updateStampViewportVisibility(stamp, viewportBounds = getViewportWorldBounds()) {
+function normalizeViewportVisibilityBounds(viewportBounds) {
+  if (viewportBounds && viewportBounds.show && viewportBounds.hide) {
+    return viewportBounds;
+  }
+  return {
+    show: viewportBounds || getViewportWorldBounds(STAMP_VIEWPORT_CULL_MARGIN_PX),
+    hide: getViewportWorldBounds(STAMP_VIEWPORT_HIDE_MARGIN_PX)
+  };
+}
+
+function updateStampViewportVisibility(stamp, viewportBounds = getViewportVisibilityBounds()) {
   if (!(stamp instanceof HTMLImageElement) || !stamp.classList.contains("stamp")) {
     return;
   }
 
   const bounds = getCachedStampWorldBounds(stamp);
-  setStampViewportRendered(stamp, rectsIntersect(bounds, viewportBounds));
+  const visibilityBounds = normalizeViewportVisibilityBounds(viewportBounds);
+  const targetBounds = isViewportCulledStamp(stamp) ? visibilityBounds.show : visibilityBounds.hide;
+  setStampViewportRendered(stamp, rectsIntersect(bounds, targetBounds));
 }
 
 function refreshStampViewportVisibility() {
-  const viewportBounds = getViewportWorldBounds();
+  const viewportBounds = getViewportVisibilityBounds();
   const stamps = world.getElementsByClassName("stamp");
   for (let index = 0; index < stamps.length; index += 1) {
     updateStampViewportVisibility(stamps[index], viewportBounds);
@@ -4884,18 +5078,35 @@ function getShortcutPreviewBrush() {
   return fallbackBrush;
 }
 
-function getBrushPlacementSize(brush) {
+function getBrushPlacementSize(brush, options = {}) {
   if (!brush) {
     return { width: 0, height: 0 };
   }
 
   let width = 0;
   let height = 0;
+  const useRandomSize = options.randomize === true && isRandomSizeEnabled();
   if (consistentToggle.checked) {
-    width = Math.max(4, Number(consistentSizeSlider.value));
+    if (isRandomSizeEnabled()) {
+      const range = getActiveRandomSizeRange();
+      const size = useRandomSize
+        ? range.min + Math.random() * Math.max(0, range.max - range.min)
+        : (range.min + range.max) / 2;
+      width = Math.max(4, size);
+    } else {
+      width = Math.max(4, Number(consistentSizeSlider.value));
+    }
     height = Math.max(4, width * (brush.height / brush.width));
   } else {
-    const scale = Number(sizeSlider.value) / 100;
+    const sizePercent = isRandomSizeEnabled()
+      ? (() => {
+          const range = getActiveRandomSizeRange();
+          return useRandomSize
+            ? range.min + Math.random() * Math.max(0, range.max - range.min)
+            : (range.min + range.max) / 2;
+        })()
+      : Number(sizeSlider.value);
+    const scale = sizePercent / 100;
     width = Math.max(4, brush.width * scale);
     height = Math.max(4, brush.height * scale);
   }
@@ -6023,6 +6234,9 @@ function getCompressedSequenceSliderConfig(key) {
   if (key === "imageCycleSpeed") {
     return { min: 1, knee: 75, max: 100, kneePosition: 50 };
   }
+  if (key === "randomSpeed") {
+    return { min: 1, knee: 75, max: 100, kneePosition: 50 };
+  }
   if (key === "pulseSpeed") {
     return { min: 1, knee: 100, max: 500, kneePosition: 67 };
   }
@@ -6870,6 +7084,11 @@ function buildSessionSnapshot() {
       size: parseNumericInputValue(sizeSlider, 100),
       consistent: consistentToggle.checked,
       consistentSize: parseNumericInputValue(consistentSizeSlider, 96),
+      randomSizeEnabled: isRandomSizeEnabled(),
+      randomSizePercentMin: Math.round(getRandomSizeRangeForMode(false).min),
+      randomSizePercentMax: Math.round(getRandomSizeRangeForMode(false).max),
+      randomSizeFixedMin: Math.round(getRandomSizeRangeForMode(true).min),
+      randomSizeFixedMax: Math.round(getRandomSizeRangeForMode(true).max),
       spacing: getSpacingValue(),
       rotation: parseNumericInputValue(rotationSlider, 0),
       opacity: parseNumericInputValue(opacitySlider, 100),
@@ -7400,7 +7619,7 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
 
   if (appendToWorld && restoredStampRefs.length) {
     world.appendChild(fragment);
-    const viewportBounds = getViewportWorldBounds();
+    const viewportBounds = getViewportVisibilityBounds();
     for (const stamp of restoredStampRefs) {
       updateStampViewportVisibility(stamp, viewportBounds);
     }
@@ -7588,6 +7807,12 @@ async function restoreSessionState(rawSnapshot = null) {
     setInputNumericValue(sizeSlider, controls.size);
     consistentToggle.checked = Boolean(controls.consistent);
     setInputNumericValue(consistentSizeSlider, controls.consistentSize);
+    state.randomSizeEnabled = Boolean(controls.randomSizeEnabled);
+    if (randomSizeToggle) {
+      randomSizeToggle.checked = state.randomSizeEnabled;
+    }
+    setRandomSizeRangeForMode(controls.randomSizePercentMin, controls.randomSizePercentMax, false);
+    setRandomSizeRangeForMode(controls.randomSizeFixedMin, controls.randomSizeFixedMax, true);
     setInputNumericValue(spacingSlider, mapSpacingValueToSlider(controls.spacing));
     setInputNumericValue(rotationSlider, controls.rotation);
     setInputNumericValue(opacitySlider, controls.opacity);
@@ -8067,6 +8292,34 @@ function renderBrushGallery() {
   }
 
   brushGallery.appendChild(fragment);
+  scrollBrushGalleryToPendingSingleSelection();
+}
+
+function getSingleSelectedBrushIdForScroll() {
+  const soloBrush = getSoloBrush();
+  if (soloBrush) {
+    return soloBrush.id;
+  }
+  const selectedBrushes = getSelectedBrushes();
+  return selectedBrushes.length === 1 ? selectedBrushes[0].id : null;
+}
+
+function scrollBrushGalleryToPendingSingleSelection() {
+  if (!state.pendingBrushGallerySelectionScroll || !brushGallery || brushGallery.hidden) {
+    return;
+  }
+  state.pendingBrushGallerySelectionScroll = false;
+  const brushId = getSingleSelectedBrushIdForScroll();
+  if (!Number.isFinite(Number(brushId))) {
+    return;
+  }
+  const item = brushGallery.querySelector(`.brush-item[data-brush-id="${Number(brushId)}"]`);
+  if (!item) {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    item.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
 }
 
 function normalizeLayerCustomName(value) {
@@ -8225,7 +8478,7 @@ function applyStrokeVisibility(stroke) {
 
   const hidden = Boolean(stroke.hidden);
   resetStrokeSequenceRuntime(stroke);
-  const viewportBounds = getViewportWorldBounds();
+  const viewportBounds = getViewportVisibilityBounds();
   for (const element of stroke.elements) {
     resetStampSequenceStyle(element);
     element.classList.toggle("is-layer-hidden", hidden);
@@ -8375,7 +8628,7 @@ function getWaveSpacingMs(settings) {
 }
 
 function getRandomIntervalMs(settings) {
-  return mapSequenceSlider(settings.randomSpeed, 4000, 50);
+  return mapCompressedSequenceSlider("randomSpeed", settings.randomSpeed, 4000, 50);
 }
 
 function resetStrokeSequenceRuntime(stroke) {
@@ -8445,11 +8698,18 @@ function refreshStrokeSequenceEffect(stroke) {
   if (!stroke) {
     return;
   }
+  resetStrokeSequenceEffect(stroke);
+  startLayerSequenceLoop();
+}
+
+function resetStrokeSequenceEffect(stroke) {
+  if (!stroke) {
+    return;
+  }
   resetStrokeSequenceRuntime(stroke);
   for (const stamp of stroke.elements || []) {
     resetStampSequenceStyle(stamp, true);
   }
-  startLayerSequenceLoop();
 }
 
 function sequenceHash(seed, index) {
@@ -8471,7 +8731,14 @@ function sequenceKeyNumber(key) {
 
 function getSequenceRuntimeBaseTime(runtime, now) {
   const baseTime = Number(runtime?.baseTime);
-  return Number.isFinite(baseTime) ? baseTime : now;
+  if (!Number.isFinite(baseTime)) {
+    return now;
+  }
+  if (baseTime > now) {
+    runtime.baseTime = now;
+    return now;
+  }
+  return baseTime;
 }
 
 function getLayerSequenceTrigger(stroke, index, total, style, settings, now, effectDuration, runtimeHost = stroke) {
@@ -8497,6 +8764,9 @@ function getLayerSequenceTrigger(stroke, index, total, style, settings, now, eff
     if (runtime.frameTime !== now) {
       runtime.frameTime = now;
       runtime.triggeredPulseIdsThisFrame = new Set();
+    }
+    if (Number(runtime.pulseBaseTime) > now) {
+      runtime.pulseBaseTime = now;
     }
     const spacing = getPulseSpacingMs(settings);
     const interval = Math.max(16, getPulseIntervalMs(settings));
@@ -8583,6 +8853,9 @@ function getLayerSequenceTrigger(stroke, index, total, style, settings, now, eff
       runtime.triggeredThisFrame = false;
     }
     const spacing = getWaveSpacingMs(settings);
+    if (Number(runtime.nextTriggerTime) > now + spacing * 2) {
+      runtime.nextTriggerTime = now;
+    }
     if (runtime.triggeredThisFrame || now < runtime.nextTriggerTime || index !== runtime.nextIndex) {
       return { active: false, key: "", startTime: 0, endTime: 0 };
     }
@@ -9301,20 +9574,7 @@ function applyLayerSequences(now = performance.now()) {
     if (state.sequenceExportActive && !state.exportTask) {
       state.sequenceExportActive = false;
     }
-    if (Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
-      const pausedDuration = Math.max(0, now - Number(state.sequenceVisibilityPauseStart));
-      shiftAllLayerSequenceClocks(pausedDuration);
-      state.sequenceVisibilityPauseStart = null;
-      state.sequenceLastFrameTime = now;
-    } else if (Number.isFinite(Number(state.sequenceLastFrameTime))) {
-      const frameGap = Math.max(0, now - Number(state.sequenceLastFrameTime));
-      if (frameGap > SEQUENCE_BACKGROUND_GAP_MS) {
-        shiftAllLayerSequenceClocks(frameGap);
-        state.sequenceLastFrameTime = now;
-      }
-    } else {
-      state.sequenceLastFrameTime = now;
-    }
+    state.sequenceLastFrameTime = now;
     if (!state.sequenceExportActive) {
       runLayerSequences(now);
     }
@@ -9934,7 +10194,7 @@ function stopEditLayerMove(pointerId) {
     viewport.releasePointerCapture(pointerId);
   }
 
-  const viewportBounds = getViewportWorldBounds();
+  const viewportBounds = getViewportVisibilityBounds();
   for (const original of move.originals) {
     unregisterStampSpatialCells(original.element);
     setStampWorldPosition(original.element, original.left + move.dx, original.top + move.dy);
@@ -10257,7 +10517,7 @@ function detachStrokeFromWorld(stroke) {
 }
 
 function appendStrokeToWorld(stroke) {
-  const viewportBounds = getViewportWorldBounds();
+  const viewportBounds = getViewportVisibilityBounds();
   const hidden = Boolean(stroke.hidden);
   applyStrokeBlendMode(stroke);
   for (const element of stroke.elements) {
@@ -10598,7 +10858,7 @@ function placeBrush(x, y, stroke) {
     return false;
   }
 
-  const { width, height } = getBrushPlacementSize(brush);
+  const { width, height } = getBrushPlacementSize(brush, { randomize: true });
   const stamp = document.createElement("img");
 
   stamp.className = "stamp";
@@ -12648,6 +12908,81 @@ async function loadBrushSourceData(sources) {
   return loadedBrushData.filter(Boolean);
 }
 
+function getBrushPickSourceFromStamp(stamp) {
+  if (!(stamp instanceof HTMLImageElement) || !stamp.classList.contains("stamp")) {
+    return "";
+  }
+  const source =
+    stamp.dataset.sequenceDisplayedSource ||
+    stamp.dataset.sequenceImageCycleSrc ||
+    stamp.dataset.sequenceBaseSrc ||
+    stamp.dataset.brushUrl ||
+    stamp.currentSrc ||
+    stamp.getAttribute("src") ||
+    "";
+  return source && source !== TRANSPARENT_STAMP_SRC ? normalizeFavoriteBrushSource(source) : "";
+}
+
+async function loadSingleBrushFromStamp(stamp) {
+  const source = getBrushPickSourceFromStamp(stamp);
+  if (!source) {
+    updateBrushStatus("No canvas image picked.");
+    return false;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  const loaded = await loadBrushSourceData([source]);
+  if (!loaded.length) {
+    updateBrushStatus("Could not load picked image.");
+    return false;
+  }
+
+  const previousBrushUrls = state.brushes.map((brush) => brush.url);
+  const brush = {
+    id: state.nextBrushId,
+    ...loaded[0],
+    enabled: true
+  };
+  state.nextBrushId += 1;
+  state.favoriteReturnState = null;
+  state.brushes = [brush];
+  clearBrushFrameCountJobs();
+  setSoloBrushId(brush.id);
+  state.activeStockBrushFolderId = null;
+  clearActiveCustomBrushPreset();
+  state.brushCursorPreview.brushId = null;
+  resetBrushCursorPreviewSource();
+  for (const oldUrl of previousBrushUrls) {
+    maybeReleaseObjectUrl(oldUrl);
+  }
+  if (state.eraseMode) {
+    setEraseMode(false);
+  }
+
+  brushInput.value = "";
+  state.pendingBrushGallerySelectionScroll = true;
+  updateBrushStatus(`Picked ${brush.name}.`);
+  renderBrushGallery();
+  renderStockBrushButtons();
+  updateEraseCursorGeometry();
+  updateBrushCursorPreview();
+  scheduleSessionSave();
+  return true;
+}
+
+async function handleBrushImagePick(event) {
+  const stamp = getTopOpaqueStampAtClientPoint(event.clientX, event.clientY);
+  setBrushPickMode(false);
+  if (!stamp) {
+    updateBrushStatus();
+    return;
+  }
+  await loadSingleBrushFromStamp(stamp);
+}
+
 async function loadFavoriteBrushes() {
   if (state.stockBrushLoadingFolderId) {
     return;
@@ -13263,6 +13598,11 @@ function onPointerDown(event) {
   }
 
   event.preventDefault();
+  if (state.brushPickMode) {
+    void handleBrushImagePick(event);
+    return;
+  }
+
   if (startEditLayerMove(event)) {
     return;
   }
@@ -13960,6 +14300,12 @@ for (const favoriteLoaderButton of [loadFavoriteBrushesButton, loadFavoriteBrush
     });
   }
 }
+if (brushImagePickerButton) {
+  brushImagePickerButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    setBrushPickMode(!state.brushPickMode);
+  });
+}
 for (const presetContainer of [drawingBrushPresetButtons, brushesBrushPresetButtons]) {
   if (presetContainer) {
     presetContainer.addEventListener("click", onCustomBrushPresetClick);
@@ -14039,6 +14385,24 @@ consistentSizeSlider.addEventListener("input", () => {
   updateBrushCursorPreview();
   scheduleSessionSave();
 });
+if (randomSizeToggle) {
+  randomSizeToggle.addEventListener("change", () => {
+    state.randomSizeEnabled = randomSizeToggle.checked;
+    if (state.randomSizeEnabled) {
+      initializeRandomSizeRangeFromCurrent();
+    }
+    updateConsistentModeUI();
+    updateEraseCursorGeometry();
+    updateBrushCursorPreview();
+    scheduleSessionSave();
+  });
+}
+if (randomSizeMinSlider) {
+  randomSizeMinSlider.addEventListener("input", readRandomSizeSliders);
+}
+if (randomSizeMaxSlider) {
+  randomSizeMaxSlider.addEventListener("input", readRandomSizeSliders);
+}
 spacingSlider.addEventListener("input", () => {
   updateSliderText();
   scheduleSessionSave();
@@ -14848,14 +15212,7 @@ controlsPanel.addEventListener("scroll", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
-    state.sequenceVisibilityPauseStart = performance.now();
     flushSessionSaveNow();
-  } else if (Number.isFinite(Number(state.sequenceVisibilityPauseStart))) {
-    const now = performance.now();
-    shiftAllLayerSequenceClocks(Math.max(0, now - Number(state.sequenceVisibilityPauseStart)));
-    state.sequenceVisibilityPauseStart = null;
-    state.sequenceLastFrameTime = now;
-    startLayerSequenceLoop();
   }
 });
 gifPauseObserver.observe(document.body, { childList: true, subtree: true });
