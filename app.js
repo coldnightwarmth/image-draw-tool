@@ -1,31 +1,108 @@
 const MAX_VISIBLE_STAMPS = 25000;
+const BRUSH_GALLERY_PAGE_SIZE = 60;
+const DEFAULT_BRUSH_GALLERY_SORT = "alpha";
+const BRUSH_SOURCE_LOAD_CONCURRENCY = 4;
+const STOCK_BRUSH_ASSET_REVISION = "20260721-optimization-closeout-v1";
+const STOCK_BRUSH_ASSET_REVISIONS_BY_FOLDER = new Map([
+  ["nu", STOCK_BRUSH_ASSET_REVISION]
+]);
 const ALLOWED_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
 const STOCK_BRUSH_FOLDERS = Array.isArray(window.STOCK_BRUSH_FOLDERS)
   ? window.STOCK_BRUSH_FOLDERS
   : [];
+const STOCK_BRUSH_METADATA =
+  window.STOCK_BRUSH_METADATA && typeof window.STOCK_BRUSH_METADATA === "object"
+    ? window.STOCK_BRUSH_METADATA
+    : {};
+const STOCK_BRUSH_METADATA_TAGS = new Set([
+  "plant",
+  "flower",
+  "animal",
+  "character",
+  "anime",
+  "pixel-art",
+  "glitch",
+  "3d",
+  "video-game",
+  "cartoon",
+  "illustration",
+  "live-action",
+  "abstract",
+  "text",
+  "framing",
+  "particle",
+  "lighting",
+  "box",
+  "cute",
+  "spiritual",
+  "western",
+  "meme",
+  "misc"
+]);
 const STOCK_BRUSH_FOLDER_ORDER = [
   "radial",
   "flower",
   "garden",
   "stroke",
   "squares",
-  "futari glitch",
   "esp ra de glitch",
-  "laser data",
+  "esp ra de",
+  "esp ra de characters",
   "particles",
   "3d",
   "pixel art+games",
   "anime",
   "misc",
-  "esp ra de",
-  "esp ra de characters",
-  "framing"
+  "framing",
+  "nu"
 ];
-const DRAW_MODES = ["pencil", "spray", "line", "box", "circle"];
-const SHAPE_DRAW_MODES = new Set(["line", "box", "circle"]);
+const STOCK_BRUSH_FOLDER_ID_ALIASES = new Map([
+  ["futari glitch", "squares"],
+  ["laser data", "esp ra de glitch"]
+]);
+const STOCK_BRUSH_SOURCE_ALIASES = new Map([
+  ["brushes/3d/ezgif-72b51a95c83cc2f0.png", "brushes/3d/ezgif-72b51a95c83cc2f0.gif"],
+  ["brushes/anime/chika.webp", "brushes/anime/chika.gif"],
+  [
+    "brushes/garden/tumblr_2dfe4903c0e05e36e2db5535c1c13a47_e076b168_100.webp",
+    "brushes/garden/tumblr_2dfe4903c0e05e36e2db5535c1c13a47_e076b168_100.gif"
+  ],
+  ["brushes/misc/cat smash.png", "brushes/misc/cat smash.gif"],
+  [
+    "brushes/nu/tumblr_6052a87722156ecb140360ddacbc4b6c_909c5a24_640.webp",
+    "brushes/nu/tumblr_6052a87722156ecb140360ddacbc4b6c_909c5a24_640.gif"
+  ],
+  ["brushes/particles/blizzard.png", "brushes/particles/blizzard.gif"],
+  ["brushes/particles/snow.png", "brushes/particles/snow.gif"],
+  [
+    "brushes/pixel art+games/genesta kings quest.png",
+    "brushes/pixel art+games/genesta kings quest.gif"
+  ]
+]);
+const DRAW_MODES = ["pencil", "spray", "line", "box", "box-outline", "circle", "circle-outline"];
+const SHAPE_DRAW_MODES = new Set(["line", "box", "box-outline", "circle", "circle-outline"]);
+const OUTLINE_SHAPE_DRAW_MODES = new Set(["box-outline", "circle-outline"]);
+const OUTLINE_DRAW_MODE_BY_BASE = new Map([
+  ["box", "box-outline"],
+  ["circle", "circle-outline"]
+]);
+const BASE_DRAW_MODE_BY_OUTLINE = new Map([
+  ["box-outline", "box"],
+  ["circle-outline", "circle"]
+]);
 const SIDEBAR_TABS = ["draw", "brushes", "edit", "export", "community", "settings"];
 const EDIT_LAYER_LIVE_MOVE_LIMIT = 1000;
+const LAYER_MOVE_HISTORY_LIMIT = 50;
+const EXPORT_CROP_HISTORY_LIMIT = 100;
 const MAX_LAYER_SEQUENCE_EFFECTS = 3;
+const LAYER_SEQUENCE_PREVIEW_MAX_BUCKETS = 40;
+const LAYER_SEQUENCE_PREVIEW_MIN_DECAY_MS = 160;
+const LAYER_SEQUENCE_PREVIEW_MAX_DECAY_MS = 900;
+const LAYER_SEQUENCE_PREVIEW_FRAME_INTERVAL_MS = 1000 / 30;
+const LAYER_SEQUENCE_SETTING_RESET_DEBOUNCE_MS = 72;
+const LAYER_SEQUENCE_MAX_PULSE_CATCH_UP_PER_STAMP = 4;
+const LAYER_SEQUENCE_MAX_PULSE_CATCH_UP_PER_FRAME = 256;
+const LAYER_SEQUENCE_MAX_WAVE_CATCH_UP_PER_FRAME = 24;
 const LAYER_SEQUENCE_EFFECT_OPTIONS = [
   { value: "show-hide", label: "Show/Hide" },
   { value: "move", label: "Move" },
@@ -41,8 +118,14 @@ const LAYER_SEQUENCE_TIMING_OPTIONS = [
   { value: "wave", label: "Bounce" },
   { value: "step", label: "Step" },
   { value: "random", label: "Random" },
-  { value: "all", label: "All" }
+  { value: "all", label: "All" },
+  { value: "grouped", label: "Grouped" }
 ];
+const LAYER_SEQUENCE_GROUPED_EXCLUDED_EFFECTS = new Set([
+  "show-hide",
+  "color-cycle",
+  "image-cycle"
+]);
 const LAYER_SEQUENCE_MOVE_MODE_OPTIONS = [
   { value: "left", label: "left" },
   { value: "right", label: "right" },
@@ -103,6 +186,7 @@ const LAYER_SEQUENCE_DEFAULT_SETTINGS = {
 };
 const SESSION_STORAGE_KEY = "random-brush-drawer-session-v1";
 const SESSION_STORAGE_POINTER_KEY = `${SESSION_STORAGE_KEY}-pointer`;
+const SESSION_STORAGE_PENDING_POINTER_KEY = `${SESSION_STORAGE_KEY}-pending-pointer`;
 const SESSION_STORAGE_TAB_ID_KEY = `${SESSION_STORAGE_KEY}-tab-id`;
 const SESSION_IDB_PREFIX = "idb:";
 const SESSION_IDB_NAME = "image-brush-session-cache";
@@ -111,10 +195,20 @@ const SAVED_COMPOSITIONS_INDEX_KEY = "saved-compositions:index";
 const SAVED_COMPOSITION_KEY_PREFIX = "saved-composition:";
 const FAVORITE_BRUSH_SOURCES_KEY = "favorite-brush-sources:v1";
 const CUSTOM_BRUSH_PRESET_SOURCES_KEY = "custom-brush-preset-sources:v1";
-const SAVE_DEBOUNCE_MS = 140;
+const SAVE_DEBOUNCE_MS = 220;
+const SAVE_IDLE_TIMEOUT_MS = 1200;
+const SAVE_URGENT_MIN_INTERVAL_MS = 750;
+const SAVE_DIRECT_IDB_STAMP_THRESHOLD = 500;
+const SESSION_PENDING_SNAPSHOT_RETRY_DELAYS_MS = [25, 75, 150, 300, 500];
+const SCENE_RENDER_PROTOCOL = "scene-render";
+const SCENE_RENDER_VERSION = 1;
+const SCENE_RENDER_MIN_TOTAL_STAMPS = 1600;
+const SCENE_RENDER_MIN_ANIMATED_STAMPS = 650;
+const SCENE_RENDER_PREPARE_TIMEOUT_MS = 20000;
 
 const viewport = document.getElementById("viewport");
 const world = document.getElementById("world");
+let sceneRenderCanvas = document.getElementById("sceneRenderCanvas");
 const controlsPanel = document.getElementById("controls");
 const controlsMain = document.getElementById("controlsMain");
 const settingsPanel = document.getElementById("settingsPanel");
@@ -137,9 +231,19 @@ const dropZoneHeader = document.getElementById("dropZoneHeader");
 const dropZonePrompt = document.getElementById("dropZonePrompt");
 const unloadBrushDataButton = document.getElementById("unloadBrushDataButton");
 const brushGallery = document.getElementById("brushGallery");
+const brushGalleryPagination = document.getElementById("brushGalleryPagination");
+const brushGalleryPreviousPageButton = document.getElementById("brushGalleryPreviousPageButton");
+const brushGalleryNextPageButton = document.getElementById("brushGalleryNextPageButton");
+const brushGalleryPageStatus = document.getElementById("brushGalleryPageStatus");
 const stockBrushButtons = document.getElementById("stockBrushButtons");
+const brushSearchControls = document.getElementById("brushSearchControls");
+const brushGallerySearchInput = document.getElementById("brushGallerySearchInput");
+const brushTagMenuButton = document.getElementById("brushTagMenuButton");
+const brushTagMenu = document.getElementById("brushTagMenu");
 const brushSortControls = document.getElementById("brushSortControls");
 const brushSortSelect = document.getElementById("brushSortSelect");
+const stockBrushBrowseRow = document.getElementById("stockBrushBrowseRow");
+const browseAllStockBrushesButton = document.getElementById("browseAllStockBrushesButton");
 const loadAllStockBrushesButton = document.getElementById("loadAllStockBrushesButton");
 const loadFavoriteBrushesButton = document.getElementById("loadFavoriteBrushesButton");
 const loadFavoriteBrushesFullButton = document.getElementById("loadFavoriteBrushesFullButton");
@@ -200,6 +304,7 @@ const exportBgImageTileSizeSlider = document.getElementById("exportBgImageTileSi
 const exportBgImageTileSizeValue = document.getElementById("exportBgImageTileSizeValue");
 const exportBackgroundToggle = document.getElementById("exportBackgroundToggle");
 const exportSeeBeyondToggle = document.getElementById("exportSeeBeyondToggle");
+const exportGuidelinesToggle = document.getElementById("exportGuidelinesToggle");
 const gifCountToggle = document.getElementById("gifCountToggle");
 const gifCountIndicator = document.getElementById("gifCountIndicator");
 const gifPauseToggle = document.getElementById("gifPauseToggle");
@@ -239,6 +344,7 @@ const savedDeleteConfirmYesButton = document.getElementById("savedDeleteConfirmY
 const savedDeleteConfirmNoButton = document.getElementById("savedDeleteConfirmNoButton");
 const brushCropModal = document.getElementById("brushCropModal");
 const brushCropDialog = document.getElementById("brushCropDialog");
+const brushCropStageWrap = document.getElementById("brushCropStageWrap");
 const brushCropStage = document.getElementById("brushCropStage");
 const brushCropImage = document.getElementById("brushCropImage");
 const brushCropSelection = document.getElementById("brushCropSelection");
@@ -251,6 +357,10 @@ const brushCropCancelButton = document.getElementById("brushCropCancelButton");
 const brushCropWidthInput = document.getElementById("brushCropWidthInput");
 const brushCropHeightInput = document.getElementById("brushCropHeightInput");
 const brushCropResolutionResetButton = document.getElementById("brushCropResolutionResetButton");
+const brushCropZoomInput = document.getElementById("brushCropZoomInput");
+const brushCropZoomOutButton = document.getElementById("brushCropZoomOutButton");
+const brushCropZoomInButton = document.getElementById("brushCropZoomInButton");
+const brushCropZoomReadout = document.getElementById("brushCropZoomReadout");
 const brushCropFrameControls = document.getElementById("brushCropFrameControls");
 const brushCropFrameTrack = document.getElementById("brushCropFrameTrack");
 const brushCropFrameSegments = document.getElementById("brushCropFrameSegments");
@@ -259,6 +369,7 @@ const brushCropFrameStartHandle = document.getElementById("brushCropFrameStartHa
 const brushCropFrameEndHandle = document.getElementById("brushCropFrameEndHandle");
 const brushCropFrameReadout = document.getElementById("brushCropFrameReadout");
 const brushCropProbabilityControls = document.getElementById("brushCropProbabilityControls");
+const brushCropTags = document.getElementById("brushCropTags");
 const brushCropProbabilityButtons = brushCropProbabilityControls
   ? Array.from(brushCropProbabilityControls.querySelectorAll(".brush-crop-probability-button"))
   : [];
@@ -327,6 +438,7 @@ const EXPORT_GIF_MAX_SIZE_BYTES = 15 * 1000 * 1000;
 const EXPORT_GIF_SIZE_TARGET_BYTES = Math.floor(EXPORT_GIF_MAX_SIZE_BYTES * 0.985);
 const EXPORT_GIF_SIZE_LIMIT_MAX_ATTEMPTS = 8;
 const EXPORT_GIF_SIZE_LIMIT_MIN_FRAMES = 4;
+const EXPORT_GIF_ENCODER_DEFAULT_FRAME_BUDGET_BYTES = 160 * 1024 * 1024;
 const EXPORT_MANUAL_SECONDS_PRESETS = [0.5, 1, 2, 3, 4, 5];
 const EXPORT_VIDEO_MAX_DIMENSION = 1600;
 const EXPORT_VIDEO_MAX_SECONDS = 300;
@@ -341,13 +453,33 @@ const EXPORT_BG_TILE_MID_SIZE = 1000;
 const EXPORT_BG_TILE_MAX_SIZE = 5000;
 const EXPORT_BG_TILE_SLIDER_MAX = 1000;
 const EXPORT_BG_TILE_SLIDER_MID = 750;
-const GIF_JS_LIBRARY_URL = "gif.js";
-const GIF_JS_WORKER_URL = "gif.worker.js";
-const GIFUCT_MODULE_URL = "./gifuct-js.bundle.mjs";
+const RUNTIME_ASSET_REVISION = "20260721-optimization-closeout-v1";
+const GIF_JS_LIBRARY_URL = `gif.js?v=${RUNTIME_ASSET_REVISION}`;
+const GIF_JS_WORKER_URL = `gif.worker.js?v=${RUNTIME_ASSET_REVISION}`;
+const GIFUCT_MODULE_URL = `./gifuct-js.bundle.mjs?v=${RUNTIME_ASSET_REVISION}`;
+const GIF_INSPECT_WORKER_URL = `./gif-inspect-worker.js?v=${RUNTIME_ASSET_REVISION}`;
+const SCENE_RENDER_WORKER_URL = `./scene-render-worker.js?v=${RUNTIME_ASSET_REVISION}`;
+const SESSION_SERIALIZE_WORKER_URL = `./session-serialize-worker.js?v=${RUNTIME_ASSET_REVISION}`;
+const EXPORT_RASTER_WORKER_URL = `./export-raster-worker.js?v=${RUNTIME_ASSET_REVISION}`;
+const EXPORT_RASTER_PROTOCOL = "brush-export-raster";
+const EXPORT_RASTER_VERSION = 1;
+const EXPORT_RASTER_STARTUP_TIMEOUT_MS = 6000;
+const EXPORT_RASTER_PREPARE_TIMEOUT_MS = 180000;
+const EXPORT_RASTER_FRAME_TIMEOUT_MS = 60000;
+const EXPORT_SOURCE_LOAD_TIMEOUT_MS = 15000;
+const EXPORT_SOURCE_CANCEL_POLL_MS = 50;
+const EXPORT_SOURCE_IMAGE_CACHE_LIMIT = 64;
+const SAVED_PREVIEW_FRAME_TIME_MS = 100;
 const EXPORT_MIN_DIMENSION = 1;
 const EXPORT_MAX_DIMENSION = 10000;
 const EXPORT_SCALE_PRESETS = [5, 10, 25, 50, 100, 200];
 const BRUSH_CROP_MIN_SIZE = 4;
+const BRUSH_CROP_ZOOM_MIN_PERCENT = 25;
+const BRUSH_CROP_ZOOM_MAX_PERCENT = 400;
+const BRUSH_CROP_ZOOM_STEP_PERCENT = 25;
+const BRUSH_CROP_PREVIEW_MAX_WIDTH = 580;
+const BRUSH_CROP_PREVIEW_MAX_HEIGHT = 700;
+const BRUSH_CROP_PREVIEW_VIEWPORT_HEIGHT_RATIO = 0.62;
 const GIF_TRANSPARENT_MATTE = "#00ff01";
 const GIF_TRANSPARENT_MATTE_HEX = 0x00ff01;
 const STAMP_INDEX_CELL_SIZE = 256;
@@ -367,6 +499,9 @@ const SHAPE_DRAG_THRESHOLD_PX = 5;
 const PLACEMENT_CANCEL_CHECK_INTERVAL = 40;
 const EXPORT_CANCEL_CHECK_INTERVAL = 40;
 const BRUSH_FRAME_COUNT_DECODE_CONCURRENCY = 2;
+const GIF_INSPECT_WORKER_MAX_INPUT_BYTES = 128 * 1024 * 1024;
+const GIF_INSPECT_MAIN_FALLBACK_MAX_INPUT_BYTES = 16 * 1024 * 1024;
+const GIF_INSPECT_MAIN_FALLBACK_MAX_FRAMES = 20000;
 const SEQUENCE_INTERRUPT_TWEEN_MS = 160;
 const SEQUENCE_TRIGGER_PRIME_MS = 16;
 const SEQUENCE_DATASET_KEYS = [
@@ -431,6 +566,12 @@ const SEQUENCE_BASE_DATASET_KEYS = [
 const SEQUENCE_SLOT_STATE_KEYS = SEQUENCE_DATASET_KEYS.filter(
   (key) => !SEQUENCE_BASE_DATASET_KEYS.includes(key)
 );
+const layerSequencePreviewRuntimeByStroke = new WeakMap();
+const sequenceSlotRuntimeStampCache = new WeakMap();
+const pendingLayerSequenceRefreshByStroke = new Map();
+const layerSequencePreviewReducedMotionQuery = typeof window.matchMedia === "function"
+  ? window.matchMedia("(prefers-reduced-motion: reduce)")
+  : null;
 
 const state = {
   brushes: [],
@@ -449,18 +590,46 @@ const state = {
   shapeDraft: null,
   editLayerDrag: null,
   editLayerMove: null,
+  layerMoveHistory: [],
+  layerMoveRedoHistory: [],
+  nextKeyboardHistoryOrder: 1,
+  nextKeyboardUndoOrder: 1,
   sequenceRafId: null,
   sequenceLastFrameTime: null,
+  sequencePreviewLastPaintTime: null,
+  sequenceActiveStrokeIds: new Set(),
   selectedEditLayerId: null,
   strokeById: new Map(),
   stampSpatialBuckets: new Map(),
   stampSpatialCells: new WeakMap(),
+  viewportRenderedStamps: new Set(),
+  occlusionCulledStamps: new Set(),
+  stampOcclusionIdleId: null,
   stampCount: 0,
   stampVisibilityRafId: null,
   urlRefCounts: new Map(),
   nextBrushId: 1,
   nextStrokeId: 1,
   saveTimerId: null,
+  saveIdleCallbackId: null,
+  saveRevision: 0,
+  savedRevision: 0,
+  saveInFlight: false,
+  saveUrgentPending: false,
+  saveUrgentMicrotaskQueued: false,
+  saveUrgentTimerId: null,
+  saveUrgentLastStartedAt: -Infinity,
+  saveEpoch: 0,
+  saveFailureCount: 0,
+  sceneRendererActive: false,
+  sceneRendererPreparing: false,
+  sceneRendererDisabled: false,
+  sceneRenderRevision: 0,
+  sceneMutationRevision: 0,
+  sceneRendererSyncRafId: null,
+  sceneRendererElementSyncRafId: null,
+  sceneRendererPendingElements: new Set(),
+  sceneRendererLastCameraChangeAt: 0,
   soloBrushId: null,
   selectedBrushIds: new Set(),
   brushPickMode: false,
@@ -471,19 +640,25 @@ const state = {
   activeCustomBrushPresetIndex: null,
   activeStockBrushFolderId: null,
   activeStockBrushFolderIds: new Set(),
+  browsingAllStockBrushes: false,
   stockBrushLoadingFolderId: null,
   gifAnimationsPaused: false,
   sidebarCollapsed: false,
   sidebarTab: "draw",
   previousSidebarTab: "draw",
   brushGalleryCollapsed: false,
-  brushGallerySort: "alpha",
+  brushGallerySort: DEFAULT_BRUSH_GALLERY_SORT,
+  brushGallerySearch: "",
+  brushTagMenuOpen: false,
+  brushGalleryRandomSeed: createBrushGalleryRandomSeed(),
+  brushGalleryPage: 0,
   savedCompositions: [],
   savedCompositionsLoaded: false,
   pendingSavedCompositionDeleteId: null,
   canvasBackgroundColor: "#ffffff",
   exportBackgroundEnabled: true,
   exportSeeBeyondEnabled: true,
+  exportGuidelinesEnabled: false,
   exportBgImageUrl: "",
   exportBgImageObjectUrl: "",
   exportBgImageOpacity: 100,
@@ -523,6 +698,8 @@ const state = {
   exportResolutionLocked: true,
   exportCustomResolution: null,
   exportDrag: null,
+  exportCropHistory: [],
+  exportCropRedoHistory: [],
   ctrlOrMetaHeld: false,
   shortcutPreview: {
     brushId: null,
@@ -559,6 +736,7 @@ const state = {
     framePreviewUrls: [],
     framePreviewTimerId: null,
     framePreviewIndex: 0,
+    zoomPercent: 100,
     weightMode: "normal",
     cropRect: null,
     drag: null
@@ -566,7 +744,37 @@ const state = {
 };
 
 let snapshotDbPromise = null;
+let snapshotDbConnection = null;
 let sessionTabIdCache = null;
+let lastLifecycleFlushRevision = -1;
+let sessionSerializerWorker = null;
+let sessionSerializerRequestId = 0;
+const sessionSerializerRequests = new Map();
+const sessionStrokeTokenByObject = new WeakMap();
+const sessionSerializerAcknowledgedRevisions = new Map();
+let nextSessionStrokeToken = 1;
+let gifInspectWorker = null;
+let gifInspectRequestId = 0;
+const gifInspectRequests = new Map();
+let sceneRendererWorker = null;
+let sceneRendererInitialized = false;
+let sceneRendererInitPromise = null;
+let sceneRendererInitResolve = null;
+let sceneRendererInitReject = null;
+const sceneRendererSceneRequests = new Map();
+const sceneRendererUpsertRequests = new Map();
+const sceneRendererReadySources = new Set();
+const sceneRendererUnsupportedSources = new Set();
+const sceneStampIdMap = new WeakMap();
+const sceneRendererPendingStampRevision = new WeakMap();
+let nextSceneStampId = 1;
+let brushByIdCacheSource = null;
+let brushByIdCacheLength = -1;
+let brushByIdCache = new Map();
+let brushChoiceCacheRevision = 0;
+let brushChoicePoolCache = null;
+let sceneRendererCameraIdleTimerId = null;
+let nextExportRasterSessionId = 1;
 let gifLibraryPromise = null;
 let gifuctModulePromise = null;
 let tintNativePickerOpen = false;
@@ -589,14 +797,17 @@ function createCancellableTask(type) {
     cancelled: false,
     gif: null,
     mediaRecorder: null,
+    rasterSession: null,
     cancel() {
       this.cancelled = true;
+      this.rasterSession?.cancel();
       if (this.gif && typeof this.gif.abort === "function") {
         try {
           this.gif.abort();
         } catch (error) {
           // GIF may already have finished or aborted.
         }
+        releaseGifEncoderFrames(this.gif);
       }
       if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
         try {
@@ -703,6 +914,9 @@ const exportBackgroundStillPreviewCache = new Map();
 const exportBackgroundRenderCache = new Map();
 const brushSourceDataCache = new Map();
 const stockBrushIconPaths = new Map();
+let stockBrushCategoryTagsBySource = null;
+let stockBrushSourceInfoByLookupKey = null;
+let stockBrushMetadataBySource = null;
 const brushFrameCountPromises = new Map();
 const brushFrameCountQueue = [];
 let activeBrushFrameCountDecodes = 0;
@@ -1057,9 +1271,17 @@ function applyBrushTintStyle(element, disabled = false, tintSettings = null, eff
     .filter(Boolean)
     .join(" ");
   if (filterValue) {
-    element.style.filter = filterValue;
-  } else {
+    if (element.style.filter !== filterValue) {
+      element.style.filter = filterValue;
+    }
+  } else if (element.style.filter) {
     element.style.removeProperty("filter");
+  }
+}
+
+function setInlineStyleIfChanged(element, property, value) {
+  if (element?.style?.[property] !== value) {
+    element.style[property] = value;
   }
 }
 
@@ -1087,7 +1309,10 @@ function removeSequencePixelateProxy(stamp) {
     proxy.remove();
     sequencePixelateProxyMap.delete(stamp);
   }
-  if (stamp instanceof HTMLElement) {
+  if (
+    stamp instanceof HTMLElement &&
+    stamp.classList.contains("has-sequence-pixelate-proxy")
+  ) {
     stamp.classList.remove("has-sequence-pixelate-proxy");
   }
 }
@@ -1301,9 +1526,364 @@ function getBrushMetaText(brush) {
   return `${getBrushFrameCountLabel(brush)} / ${getBrushDimensionsLabel(brush)}`;
 }
 
+function updateBrushGalleryMeta(brush) {
+  if (!brushGallery || !brush || state.sidebarTab !== "brushes") {
+    return;
+  }
+  const brushId = Number(brush.id);
+  if (!Number.isFinite(brushId)) {
+    return;
+  }
+  const meta = brushGallery.querySelector(
+    `.brush-item[data-brush-id="${brushId}"] .brush-meta`
+  );
+  if (meta) {
+    meta.textContent = getBrushMetaText(brush);
+  }
+}
+
+function createGifInspectClientError(
+  code,
+  message,
+  { category = "internal", retriable = false, details = null, name = "Error" } = {}
+) {
+  const error = new Error(message || "GIF inspection failed.");
+  error.name = name;
+  error.code = code || "GIF_INSPECTION_FAILED";
+  error.category = category;
+  error.retriable = retriable === true;
+  if (details && typeof details === "object") {
+    error.details = details;
+  }
+  return error;
+}
+
+function createGifInspectWorkerError(payload = null) {
+  const errorPayload = payload && typeof payload === "object" ? payload : {};
+  return createGifInspectClientError(
+    errorPayload.code || "GIF_INSPECTION_FAILED",
+    errorPayload.message || "GIF inspection failed.",
+    {
+      category: errorPayload.category || "internal",
+      retriable: errorPayload.retriable === true,
+      details: errorPayload.details || null,
+    }
+  );
+}
+
+function isGifInspectCapabilityError(error) {
+  return (
+    error?.category === "capability" ||
+    [
+      "GIF_INSPECT_WORKER_UNAVAILABLE",
+      "GIF_INSPECT_WORKER_FAILED",
+      "GIF_INSPECT_WORKER_POST_FAILED",
+      "UNSUPPORTED_VERSION",
+    ].includes(String(error?.code || ""))
+  );
+}
+
+function createGifInspectSafetyError(code, message, details = null) {
+  return createGifInspectClientError(code, message, {
+    category: "safety",
+    details,
+  });
+}
+
+function disposeGifInspectWorker(error = null) {
+  if (gifInspectWorker) {
+    gifInspectWorker.terminate();
+    gifInspectWorker = null;
+  }
+  if (error) {
+    for (const request of gifInspectRequests.values()) {
+      request.reject(error);
+    }
+  }
+  gifInspectRequests.clear();
+}
+
+function getGifInspectWorker() {
+  if (gifInspectWorker || typeof Worker !== "function") {
+    return gifInspectWorker;
+  }
+  try {
+    const worker = new Worker(GIF_INSPECT_WORKER_URL, { type: "module" });
+    worker.addEventListener("message", (event) => {
+      const message = event.data || {};
+      if (message.protocol !== "gif-inspect" || message.version !== 1) {
+        return;
+      }
+      const request = gifInspectRequests.get(message.jobId);
+      if (!request || !["result", "error", "cancelled"].includes(message.type)) {
+        return;
+      }
+      gifInspectRequests.delete(message.jobId);
+      if (message.type === "result") {
+        request.resolve(message.result);
+      } else if (message.type === "cancelled") {
+        request.reject(
+          createGifInspectClientError("GIF_INSPECTION_CANCELLED", "GIF inspection cancelled.", {
+            category: "cancelled",
+            name: "AbortError",
+          })
+        );
+      } else {
+        request.reject(createGifInspectWorkerError(message.error));
+      }
+    });
+    worker.addEventListener("error", () => {
+      disposeGifInspectWorker(
+        createGifInspectClientError(
+          "GIF_INSPECT_WORKER_FAILED",
+          "GIF inspection worker failed.",
+          { category: "capability" }
+        )
+      );
+    });
+    gifInspectWorker = worker;
+  } catch (error) {
+    gifInspectWorker = null;
+  }
+  return gifInspectWorker;
+}
+
+function inspectGifSourceInWorker(sourceUrl, options = {}) {
+  const worker = getGifInspectWorker();
+  if (!worker) {
+    return {
+      jobId: null,
+      promise: Promise.reject(
+        createGifInspectClientError(
+          "GIF_INSPECT_WORKER_UNAVAILABLE",
+          "GIF inspection workers are unavailable.",
+          { category: "capability" }
+        )
+      )
+    };
+  }
+  const jobId = `gif-inspect-${++gifInspectRequestId}`;
+  const promise = new Promise((resolve, reject) => {
+    gifInspectRequests.set(jobId, { resolve, reject });
+    try {
+      worker.postMessage({
+        protocol: "gif-inspect",
+        version: 1,
+        type: "inspect",
+        jobId,
+        source: { url: sourceUrl },
+        options
+      });
+    } catch (error) {
+      gifInspectRequests.delete(jobId);
+      reject(
+        createGifInspectClientError(
+          "GIF_INSPECT_WORKER_POST_FAILED",
+          error instanceof Error ? error.message : "Could not start GIF inspection.",
+          {
+            category: "capability",
+            details: { cause: error instanceof Error ? error.message : "unknown error" },
+          }
+        )
+      );
+    }
+  });
+  return { jobId, promise };
+}
+
+function cancelGifInspection(jobId) {
+  if (!jobId || !gifInspectWorker || !gifInspectRequests.has(jobId)) {
+    return;
+  }
+  gifInspectWorker.postMessage({
+    protocol: "gif-inspect",
+    version: 1,
+    type: "cancel",
+    jobId
+  });
+}
+
 function clearBrushFrameCountJobs() {
+  for (const token of brushFrameCountPromises.values()) {
+    cancelGifInspection(token?.jobId);
+    token?.fallbackController?.abort();
+  }
   brushFrameCountPromises.clear();
   brushFrameCountQueue.length = 0;
+}
+
+async function readGifInspectionFallbackBytes(sourceUrl, maxInputBytes, signal = null) {
+  const inputLimit = Math.max(1, Math.floor(Number(maxInputBytes) || 0));
+  if (signal?.aborted) {
+    throw createCancellationError("GIF inspection cancelled.");
+  }
+  if (typeof sourceUrl !== "string" || !sourceUrl) {
+    throw createGifInspectClientError("INVALID_SOURCE", "Missing GIF source.", {
+      category: "input",
+    });
+  }
+
+  if (sourceUrl.startsWith("data:")) {
+    const markerIndex = sourceUrl.indexOf(",");
+    if (markerIndex < 0) {
+      throw createGifInspectClientError("INVALID_SOURCE", "Invalid GIF data URL.", {
+        category: "input",
+      });
+    }
+    const metadata = sourceUrl.slice(0, markerIndex);
+    const payloadLength = sourceUrl.length - markerIndex - 1;
+    const maximumEncodedLength = metadata.includes(";base64")
+      ? Math.ceil(inputLimit * 4 / 3) + 4
+      : inputLimit * 3;
+    if (payloadLength > maximumEncodedLength) {
+      throw createGifInspectSafetyError(
+        "INPUT_TOO_LARGE",
+        "The GIF exceeds the bounded fallback byte limit.",
+        { maxInputBytes: inputLimit }
+      );
+    }
+    const bytes = dataUrlToUint8Array(sourceUrl);
+    if (bytes.byteLength > inputLimit) {
+      throw createGifInspectSafetyError(
+        "INPUT_TOO_LARGE",
+        "The GIF exceeds the bounded fallback byte limit.",
+        { byteLength: bytes.byteLength, maxInputBytes: inputLimit }
+      );
+    }
+    return bytes;
+  }
+
+  let response;
+  try {
+    response = await fetch(sourceUrl, {
+      signal,
+      credentials: "same-origin",
+    });
+  } catch (error) {
+    if (signal?.aborted || isCancellationError(error)) {
+      throw createCancellationError("GIF inspection cancelled.");
+    }
+    throw createGifInspectClientError("FETCH_FAILED", "The GIF URL could not be fetched.", {
+      category: "network",
+      retriable: true,
+      details: { cause: error instanceof Error ? error.message : "unknown error" },
+    });
+  }
+  if (!response.ok) {
+    throw createGifInspectClientError(
+      "FETCH_FAILED",
+      `The GIF request failed with HTTP ${response.status}.`,
+      {
+        category: "network",
+        retriable: response.status >= 500,
+        details: { status: response.status },
+      }
+    );
+  }
+
+  const contentLengthHeader = response.headers.get("content-length");
+  const declaredLength = contentLengthHeader == null ? NaN : Number(contentLengthHeader);
+  if (Number.isFinite(declaredLength) && declaredLength > inputLimit) {
+    await response.body?.cancel?.("GIF input exceeded its bounded fallback byte limit.");
+    throw createGifInspectSafetyError(
+      "INPUT_TOO_LARGE",
+      "The GIF exceeds the bounded fallback byte limit.",
+      { byteLength: declaredLength, maxInputBytes: inputLimit }
+    );
+  }
+  if (!response.body?.getReader) {
+    throw createGifInspectClientError(
+      "GIF_INSPECT_BOUNDED_FALLBACK_UNAVAILABLE",
+      "A bounded GIF metadata fallback is unavailable in this browser.",
+      { category: "capability" }
+    );
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        throw createCancellationError("GIF inspection cancelled.");
+      }
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      byteLength += value.byteLength;
+      if (byteLength > inputLimit) {
+        await reader.cancel("GIF input exceeded its bounded fallback byte limit.");
+        throw createGifInspectSafetyError(
+          "INPUT_TOO_LARGE",
+          "The GIF exceeds the bounded fallback byte limit.",
+          { byteLength, maxInputBytes: inputLimit }
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function inspectGifFrameCountOnMainThreadBounded(sourceUrl, signal = null) {
+  const bytes = await readGifInspectionFallbackBytes(
+    sourceUrl,
+    GIF_INSPECT_MAIN_FALLBACK_MAX_INPUT_BYTES,
+    signal
+  );
+  if (bytes.byteLength < 13) {
+    throw createGifInspectClientError("INVALID_GIF", "The source is too short to be a GIF.", {
+      category: "input",
+    });
+  }
+  const signature = String.fromCharCode(...bytes.subarray(0, 6));
+  if (signature !== "GIF87a" && signature !== "GIF89a") {
+    throw createGifInspectClientError("INVALID_GIF", "The source is not a GIF.", {
+      category: "input",
+    });
+  }
+
+  const gifuctModule = await loadGifuctModule();
+  if (signal?.aborted) {
+    throw createCancellationError("GIF inspection cancelled.");
+  }
+  let parsed;
+  try {
+    parsed = gifuctModule.parseGIF(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    );
+  } catch (error) {
+    throw createGifInspectClientError("PARSE_FAILED", "The GIF could not be parsed.", {
+      category: "input",
+      details: { cause: error instanceof Error ? error.message : "unknown error" },
+    });
+  }
+  const frameCount = Array.isArray(parsed?.frames)
+    ? parsed.frames.reduce((count, frame) => count + (frame?.image ? 1 : 0), 0)
+    : 0;
+  if (frameCount <= 0) {
+    throw createGifInspectClientError("NO_FRAMES", "The GIF contains no image frames.", {
+      category: "input",
+    });
+  }
+  if (frameCount > GIF_INSPECT_MAIN_FALLBACK_MAX_FRAMES) {
+    throw createGifInspectSafetyError(
+      "GIF_FRAME_LIMIT_EXCEEDED",
+      "The GIF exceeds the bounded fallback frame limit.",
+      { frameCount, maxFrameCount: GIF_INSPECT_MAIN_FALLBACK_MAX_FRAMES }
+    );
+  }
+  return frameCount;
 }
 
 function runBrushFrameCountQueue() {
@@ -1315,22 +1895,63 @@ function runBrushFrameCountQueue() {
     activeBrushFrameCountDecodes += 1;
 
     window.setTimeout(() => {
-      decodeGifAnimation(job.sourceUrl)
-        .then((animation) => normalizeBrushFrameCount(animation?.frames?.length) || 1)
-        .catch(() => 1)
+      if (brushFrameCountPromises.get(job.brushId) !== job.token) {
+        activeBrushFrameCountDecodes = Math.max(0, activeBrushFrameCountDecodes - 1);
+        runBrushFrameCountQueue();
+        return;
+      }
+      const inspection = inspectGifSourceInWorker(job.sourceUrl, {
+        checkOpacity: false,
+        maxInputBytes: GIF_INSPECT_WORKER_MAX_INPUT_BYTES,
+      });
+      job.token.jobId = inspection.jobId;
+      inspection.promise
+        .then((result) => normalizeBrushFrameCount(result?.frameCount) || 1)
+        .catch(async (error) => {
+          if (brushFrameCountPromises.get(job.brushId) !== job.token) {
+            return null;
+          }
+          if (isCancellationError(error) || error?.category === "cancelled") {
+            return null;
+          }
+          if (!isGifInspectCapabilityError(error)) {
+            return 1;
+          }
+          const fallbackController = new AbortController();
+          job.token.fallbackController = fallbackController;
+          try {
+            const frameCount = await inspectGifFrameCountOnMainThreadBounded(
+              job.sourceUrl,
+              fallbackController.signal
+            );
+            return normalizeBrushFrameCount(frameCount) || 1;
+          } catch (error) {
+            if (isCancellationError(error) || fallbackController.signal.aborted) {
+              return null;
+            }
+            return 1;
+          } finally {
+            if (job.token.fallbackController === fallbackController) {
+              job.token.fallbackController = null;
+            }
+          }
+        })
         .then((count) => {
+          if (!count || brushFrameCountPromises.get(job.brushId) !== job.token) {
+            return;
+          }
           const currentBrush = findBrushById(job.brushId);
-          if (!currentBrush || (currentBrush.originalUrl || currentBrush.url) !== job.sourceUrl) {
+          if (!currentBrush || getBrushOriginalUrl(currentBrush) !== job.sourceUrl) {
             return;
           }
           currentBrush.frameCount = count;
-          if (state.sidebarTab === "brushes") {
-            renderBrushGallery();
-          }
+          updateBrushGalleryMeta(currentBrush);
           scheduleSessionSave();
         })
         .finally(() => {
-          brushFrameCountPromises.delete(job.brushId);
+          if (brushFrameCountPromises.get(job.brushId) === job.token) {
+            brushFrameCountPromises.delete(job.brushId);
+          }
           activeBrushFrameCountDecodes = Math.max(0, activeBrushFrameCountDecodes - 1);
           runBrushFrameCountQueue();
         });
@@ -1355,9 +1976,10 @@ function ensureBrushFrameCount(brush) {
     return;
   }
 
-  const sourceUrl = brush.originalUrl || brush.url;
-  brushFrameCountPromises.set(brushId, true);
-  brushFrameCountQueue.push({ brushId, sourceUrl });
+  const sourceUrl = getBrushOriginalUrl(brush);
+  const token = { jobId: null, fallbackController: null };
+  brushFrameCountPromises.set(brushId, token);
+  brushFrameCountQueue.push({ brushId, sourceUrl, token });
   runBrushFrameCountQueue();
 }
 
@@ -1375,7 +1997,7 @@ function getImageGifSource(image) {
   );
 }
 
-function markGifPlaybackStart(image, source = "") {
+function markGifPlaybackStart(image, source = "", force = false) {
   if (!(image instanceof HTMLImageElement)) {
     return;
   }
@@ -1385,7 +2007,11 @@ function markGifPlaybackStart(image, source = "") {
     delete image.dataset.gifPlaybackStartedAt;
     return;
   }
-  if (image.dataset.gifPlaybackSource !== gifSource || !Number.isFinite(Number(image.dataset.gifPlaybackStartedAt))) {
+  if (
+    force ||
+    image.dataset.gifPlaybackSource !== gifSource ||
+    !Number.isFinite(Number(image.dataset.gifPlaybackStartedAt))
+  ) {
     image.dataset.gifPlaybackSource = gifSource;
     image.dataset.gifPlaybackStartedAt = String(performance.now());
   }
@@ -1393,6 +2019,25 @@ function markGifPlaybackStart(image, source = "") {
 
 function isViewportCulledStamp(image) {
   return image instanceof HTMLImageElement && image.dataset.viewportCulled === "true";
+}
+
+function isOcclusionCulledStamp(image) {
+  return image instanceof HTMLImageElement && image.dataset.occlusionCulled === "true";
+}
+
+function isRenderCulledStamp(image) {
+  return isViewportCulledStamp(image) || isOcclusionCulledStamp(image);
+}
+
+function strokeHasActiveSequenceTransform(stroke) {
+  return Boolean(
+    stroke &&
+      !stroke.hidden &&
+      isLayerSequenceEnabled(stroke) &&
+      getLayerSequenceSlots(stroke).some((slot) =>
+        slot && (slot.effect === "move" || slot.effect === "rotate" || slot.effect === "scale")
+      )
+  );
 }
 
 function isImageLayerPaused(image) {
@@ -1430,7 +2075,8 @@ function freezeGifImage(image) {
   if (
     !(image instanceof HTMLImageElement) ||
     image.dataset.gifPausedSrc ||
-    isViewportCulledStamp(image)
+    isRenderCulledStamp(image) ||
+    isSceneRendererStampSuppressed(image)
   ) {
     return;
   }
@@ -1480,8 +2126,14 @@ function resumeGifImage(image) {
     return;
   }
 
+  if (isSceneRendererStampSuppressed(image)) {
+    markGifPlaybackStart(image, pausedSource);
+    delete image.dataset.gifPausedSrc;
+    return;
+  }
+
   image.src = pausedSource;
-  markGifPlaybackStart(image, pausedSource);
+  markGifPlaybackStart(image, pausedSource, true);
   delete image.dataset.gifPausedSrc;
 }
 
@@ -1493,12 +2145,12 @@ function applyGifPauseStateToImage(image) {
   }
 }
 
-function applyBrushGalleryPreviewAnimationState(preview, brush) {
+function applyBrushGalleryPreviewAnimationState(preview, brush, previewDisabledBrush = false) {
   if (!(preview instanceof HTMLImageElement)) {
     return;
   }
 
-  if (brush && brush.enabled === false) {
+  if (brush && brush.enabled === false && !previewDisabledBrush) {
     preview.dataset.forceGifStill = "true";
     freezeGifImage(preview);
     return;
@@ -1573,9 +2225,22 @@ function updateGifPauseButtonPosition() {
 }
 
 function setGifAnimationsPaused(paused) {
-  state.gifAnimationsPaused = Boolean(paused);
+  if (state.sceneRendererActive || state.sceneRendererPreparing) {
+    deactivateSceneRenderer();
+  }
+  invalidateStampOcclusion();
+  const shouldPause = Boolean(paused);
+  const now = performance.now();
+  for (const stroke of state.strokes) {
+    setStrokeSequenceClockPaused(stroke, shouldPause || Boolean(stroke.animationPaused), now);
+  }
+  state.gifAnimationsPaused = shouldPause;
   applyGlobalGifPauseState(state.gifAnimationsPaused);
   updateGifPauseButtonUI();
+  refreshLayerSequenceLoop();
+  if (!state.gifAnimationsPaused) {
+    scheduleStampOcclusionRefresh();
+  }
 }
 
 function loadGifLibrary() {
@@ -1682,10 +2347,13 @@ function getBrushOriginalHeight(brush) {
 }
 
 function getBrushOriginalUrl(brush) {
-  if (typeof brush?.originalUrl === "string" && brush.originalUrl) {
-    return brush.originalUrl;
-  }
-  return typeof brush?.url === "string" ? brush.url : "";
+  const source =
+    typeof brush?.originalUrl === "string" && brush.originalUrl
+      ? brush.originalUrl
+      : typeof brush?.url === "string"
+      ? brush.url
+      : "";
+  return getStockBrushRequestUrl(source);
 }
 
 function normalizeBrushCropRect(rect, fullWidth, fullHeight) {
@@ -1809,6 +2477,27 @@ function updateBrushCropProbabilityUI() {
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   }
+}
+
+function updateBrushCropTagsUI(brush) {
+  if (!brushCropTags) {
+    return;
+  }
+  const tags = getBrushTags(brush);
+  brushCropTags.replaceChildren();
+  brushCropTags.hidden = tags.length === 0;
+  if (!tags.length) {
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const tag of tags) {
+    const tagElement = document.createElement("span");
+    tagElement.className = "brush-crop-tag";
+    tagElement.textContent = `#${tag}`;
+    fragment.appendChild(tagElement);
+  }
+  brushCropTags.appendChild(fragment);
 }
 
 function syncBrushCropOutputToAspect(axis = "width") {
@@ -2212,6 +2901,7 @@ function openBrushCropPopup(brush) {
   state.brushCropEditor.frameControlsLoading = false;
   state.brushCropEditor.framePreviewUrls = [];
   state.brushCropEditor.framePreviewIndex = 0;
+  state.brushCropEditor.zoomPercent = 100;
   clearBrushCropFramePreviewTimer();
   state.brushCropEditor.weightMode = normalizeBrushWeightMode(brush.weightMode);
   state.brushCropEditor.cropRect = currentCrop;
@@ -2220,6 +2910,12 @@ function openBrushCropPopup(brush) {
   brushCropCancelButton.disabled = false;
   brushCropModal.classList.add("is-open");
   brushCropModal.setAttribute("aria-hidden", "false");
+  updateBrushCropZoomUI();
+  applyBrushCropPreviewSize();
+  if (brushCropStageWrap) {
+    brushCropStageWrap.scrollLeft = 0;
+    brushCropStageWrap.scrollTop = 0;
+  }
   delete brushCropImage.dataset.gifPausePending;
   delete brushCropImage.dataset.gifPausedSrc;
   brushCropImage.src = imageUrl;
@@ -2242,6 +2938,7 @@ function openBrushCropPopup(brush) {
   updateBrushCropResolutionInputs();
   updateBrushCropFrameControls();
   updateBrushCropProbabilityUI();
+  updateBrushCropTagsUI(brush);
   void loadBrushCropFrameControls(brush);
   if (brushCropImage.complete && brushCropImage.naturalWidth > 0) {
     renderBrushCropModal();
@@ -2308,11 +3005,19 @@ function closeBrushCropModal() {
   state.brushCropEditor.frameControlsLoading = false;
   state.brushCropEditor.framePreviewUrls = [];
   state.brushCropEditor.framePreviewIndex = 0;
+  state.brushCropEditor.zoomPercent = 100;
   state.brushCropEditor.weightMode = "normal";
   state.brushCropEditor.cropRect = null;
   state.brushCropEditor.drag = null;
   brushCropModal.classList.remove("is-open");
   brushCropModal.setAttribute("aria-hidden", "true");
+  if (brushCropTags) {
+    brushCropTags.replaceChildren();
+    brushCropTags.hidden = true;
+  }
+  updateBrushCropZoomUI();
+  brushCropImage.style.width = "";
+  brushCropImage.style.height = "";
   delete brushCropImage.dataset.gifPausePending;
   delete brushCropImage.dataset.gifPausedSrc;
   brushCropImage.src = "";
@@ -2323,6 +3028,89 @@ function setBrushCropRectStyle(element, left, top, width, height) {
   element.style.top = `${top}px`;
   element.style.width = `${Math.max(0, width)}px`;
   element.style.height = `${Math.max(0, height)}px`;
+}
+
+function normalizeBrushCropZoomPercent(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 100;
+  }
+  const steppedValue = Math.round(numericValue / BRUSH_CROP_ZOOM_STEP_PERCENT) *
+    BRUSH_CROP_ZOOM_STEP_PERCENT;
+  return clamp(steppedValue, BRUSH_CROP_ZOOM_MIN_PERCENT, BRUSH_CROP_ZOOM_MAX_PERCENT);
+}
+
+function updateBrushCropZoomUI() {
+  const zoomPercent = normalizeBrushCropZoomPercent(state.brushCropEditor.zoomPercent);
+  state.brushCropEditor.zoomPercent = zoomPercent;
+  if (brushCropZoomInput) {
+    brushCropZoomInput.value = String(zoomPercent);
+    brushCropZoomInput.setAttribute("aria-valuetext", `${zoomPercent}%`);
+  }
+  if (brushCropZoomReadout) {
+    brushCropZoomReadout.textContent = `${zoomPercent}%`;
+  }
+  if (brushCropZoomOutButton) {
+    brushCropZoomOutButton.disabled = zoomPercent <= BRUSH_CROP_ZOOM_MIN_PERCENT;
+  }
+  if (brushCropZoomInButton) {
+    brushCropZoomInButton.disabled = zoomPercent >= BRUSH_CROP_ZOOM_MAX_PERCENT;
+  }
+}
+
+function getBrushCropBasePreviewSize() {
+  const fullWidth = Math.max(1, Number(state.brushCropEditor.imageWidth) || 1);
+  const fullHeight = Math.max(1, Number(state.brushCropEditor.imageHeight) || 1);
+  const viewportWidth = Math.max(1, window.innerWidth - 62);
+  const stageWrapWidth = Math.max(
+    1,
+    (Number(brushCropStageWrap?.clientWidth) || viewportWidth) - 16
+  );
+  const maxWidth = Math.max(
+    1,
+    Math.min(BRUSH_CROP_PREVIEW_MAX_WIDTH, viewportWidth, stageWrapWidth)
+  );
+  const maxHeight = Math.max(
+    1,
+    Math.min(
+      BRUSH_CROP_PREVIEW_MAX_HEIGHT,
+      window.innerHeight * BRUSH_CROP_PREVIEW_VIEWPORT_HEIGHT_RATIO
+    )
+  );
+  const fitScale = Math.min(1, maxWidth / fullWidth, maxHeight / fullHeight);
+  return {
+    width: fullWidth * fitScale,
+    height: fullHeight * fitScale
+  };
+}
+
+function applyBrushCropPreviewSize() {
+  if (!brushCropImage) {
+    return;
+  }
+  const baseSize = getBrushCropBasePreviewSize();
+  const zoomScale = normalizeBrushCropZoomPercent(state.brushCropEditor.zoomPercent) / 100;
+  brushCropImage.style.width = `${baseSize.width * zoomScale}px`;
+  brushCropImage.style.height = `${baseSize.height * zoomScale}px`;
+}
+
+function centerBrushCropSelectionInPreview() {
+  if (!brushCropStageWrap || !brushCropSelection) {
+    return;
+  }
+  const wrapRect = brushCropStageWrap.getBoundingClientRect();
+  const selectionRect = brushCropSelection.getBoundingClientRect();
+  brushCropStageWrap.scrollLeft +=
+    (selectionRect.left + selectionRect.width / 2) - (wrapRect.left + wrapRect.width / 2);
+  brushCropStageWrap.scrollTop +=
+    (selectionRect.top + selectionRect.height / 2) - (wrapRect.top + wrapRect.height / 2);
+}
+
+function setBrushCropZoomPercent(value) {
+  state.brushCropEditor.zoomPercent = normalizeBrushCropZoomPercent(value);
+  updateBrushCropZoomUI();
+  renderBrushCropModal();
+  centerBrushCropSelectionInPreview();
 }
 
 function getBrushCropDisplayScale() {
@@ -2347,6 +3135,8 @@ function renderBrushCropModal() {
     fullWidth,
     fullHeight
   );
+
+  applyBrushCropPreviewSize();
 
   const scale = getBrushCropDisplayScale();
   const imageRect = brushCropImage.getBoundingClientRect();
@@ -2533,22 +3323,43 @@ function openSnapshotDb() {
         database.createObjectStore(SESSION_IDB_STORE_NAME);
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Failed to open snapshot DB"));
+    request.onsuccess = () => {
+      snapshotDbConnection = request.result;
+      snapshotDbConnection.addEventListener("versionchange", () => {
+        snapshotDbConnection?.close();
+        snapshotDbConnection = null;
+        snapshotDbPromise = null;
+      }, { once: true });
+      resolve(snapshotDbConnection);
+    };
+    request.onerror = () => {
+      snapshotDbPromise = null;
+      reject(request.error || new Error("Failed to open snapshot DB"));
+    };
   });
 
   return snapshotDbPromise;
 }
 
-async function writeSnapshotToIndexedDb(tabId, snapshotJson) {
-  const database = await openSnapshotDb();
-  await new Promise((resolve, reject) => {
-    const transaction = database.transaction(SESSION_IDB_STORE_NAME, "readwrite");
-    transaction.objectStore(SESSION_IDB_STORE_NAME).put(snapshotJson, tabId);
+function beginSnapshotWriteToIndexedDb(database, tabId, snapshotJson) {
+  return new Promise((resolve, reject) => {
+    let transaction;
+    try {
+      transaction = database.transaction(SESSION_IDB_STORE_NAME, "readwrite");
+      transaction.objectStore(SESSION_IDB_STORE_NAME).put(snapshotJson, tabId);
+    } catch (error) {
+      reject(error);
+      return;
+    }
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error || new Error("Snapshot write failed"));
     transaction.onabort = () => reject(transaction.error || new Error("Snapshot write aborted"));
   });
+}
+
+async function writeSnapshotToIndexedDb(tabId, snapshotJson) {
+  const database = await openSnapshotDb();
+  await beginSnapshotWriteToIndexedDb(database, tabId, snapshotJson);
 }
 
 async function readSnapshotFromIndexedDb(tabId) {
@@ -2627,6 +3438,25 @@ function removeSessionStorageItemSafe(key) {
   }
 }
 
+function getLifecycleSnapshotKeyFromPointer(pointer) {
+  const value = String(pointer || "");
+  if (!value.startsWith(SESSION_IDB_PREFIX)) {
+    return "";
+  }
+  const key = value.slice(SESSION_IDB_PREFIX.length);
+  return key.includes(":lifecycle:") ? key : "";
+}
+
+function cleanupSupersededLifecycleSnapshot(pointer, preservedKey = "") {
+  const key = getLifecycleSnapshotKeyFromPointer(pointer);
+  if (!key || key === preservedKey) {
+    return;
+  }
+  void deleteSnapshotFromIndexedDb(key).catch(() => {
+    // Lifecycle cleanup is opportunistic and must never invalidate a good save.
+  });
+}
+
 function getLocalStorageItemSafe(key) {
   try {
     return localStorage.getItem(key);
@@ -2653,7 +3483,7 @@ function normalizeFavoriteBrushSource(source) {
 }
 
 function getBrushFavoriteSource(brush) {
-  return normalizeFavoriteBrushSource(brush?.originalUrl || brush?.url || "");
+  return getCanonicalStockBrushSource(brush?.originalUrl || brush?.url || "");
 }
 
 function loadFavoriteBrushSources() {
@@ -2667,9 +3497,10 @@ function loadFavoriteBrushSources() {
     const parsed = JSON.parse(raw);
     state.favoriteBrushSources = new Set(
       Array.isArray(parsed)
-        ? parsed.map(normalizeFavoriteBrushSource).filter(Boolean)
+        ? parsed.map(getCanonicalStockBrushSource).filter(Boolean)
         : []
     );
+    saveFavoriteBrushSources();
   } catch (error) {
     state.favoriteBrushSources = new Set();
   }
@@ -2683,7 +3514,7 @@ function saveFavoriteBrushSources() {
 }
 
 function isBrushSourceFavorite(source) {
-  const normalized = normalizeFavoriteBrushSource(source);
+  const normalized = getCanonicalStockBrushSource(source);
   return Boolean(normalized && state.favoriteBrushSources instanceof Set && state.favoriteBrushSources.has(normalized));
 }
 
@@ -2692,7 +3523,7 @@ function isBrushFavorite(brush) {
 }
 
 function getBrushPresetSource(brush) {
-  return normalizeFavoriteBrushSource(brush?.originalUrl || brush?.url || "");
+  return getCanonicalStockBrushSource(brush?.originalUrl || brush?.url || "");
 }
 
 function normalizeCustomBrushPresetIndex(index) {
@@ -2725,7 +3556,7 @@ function getCustomBrushPresetSourcesSnapshot() {
 function normalizeCustomBrushPresetSourcesSnapshot(value) {
   return Array.from({ length: 5 }, (_, index) => {
     const sources = Array.isArray(value?.[index]) ? value[index] : [];
-    return new Set(sources.map(normalizeFavoriteBrushSource).filter(Boolean));
+    return new Set(sources.map(getCanonicalStockBrushSource).filter(Boolean));
   });
 }
 
@@ -2755,7 +3586,7 @@ function isActiveCustomBrushPresetSource(source) {
   if (presetIndex === null) {
     return false;
   }
-  const normalized = normalizeFavoriteBrushSource(source);
+  const normalized = getCanonicalStockBrushSource(source);
   return Boolean(normalized && getCustomBrushPresetSources(presetIndex).has(normalized));
 }
 
@@ -2766,9 +3597,10 @@ function clearActiveCustomBrushPreset() {
 function setActiveStockBrushFolders(folderIds, mode = "multi") {
   const validIds = Array.from(new Set(
     (Array.isArray(folderIds) ? folderIds : [folderIds])
-      .map((folderId) => String(folderId || ""))
+      .map(normalizeStockBrushFolderId)
       .filter((folderId) => getStockBrushFolderById(folderId))
   ));
+  state.browsingAllStockBrushes = false;
   state.activeStockBrushFolderIds = new Set(validIds);
   if (!validIds.length) {
     state.activeStockBrushFolderId = null;
@@ -2780,6 +3612,7 @@ function setActiveStockBrushFolders(folderIds, mode = "multi") {
 }
 
 function clearActiveStockBrushFolders() {
+  state.browsingAllStockBrushes = false;
   state.activeStockBrushFolderId = null;
   state.activeStockBrushFolderIds = new Set();
 }
@@ -2926,6 +3759,7 @@ async function loadCustomBrushPreset(index) {
       state.nextBrushId += 1;
       return brush;
     });
+    resetBrushGalleryForBrushSetChange();
     clearBrushFrameCountJobs();
     state.soloBrushId = null;
     clearSelectedBrushes();
@@ -2956,6 +3790,7 @@ async function loadCustomBrushPreset(index) {
 function cloneBrushForReturnState(brush) {
   return {
     ...brush,
+    tags: getBrushTags(brush),
     cropRect: brush?.cropRect ? { ...brush.cropRect } : null,
     frameRange: brush?.frameRange ? { ...brush.frameRange } : null
   };
@@ -2971,11 +3806,15 @@ function captureFavoriteReturnState() {
       : [],
     activeStockBrushFolderId: state.activeStockBrushFolderId,
     activeStockBrushFolderIds: Array.from(getActiveStockBrushFolderIdSet()),
+    browsingAllStockBrushes: state.browsingAllStockBrushes,
     sidebarTab: state.sidebarTab,
     previousSidebarTab: state.previousSidebarTab,
     sidebarCollapsed: state.sidebarCollapsed,
     brushGalleryCollapsed: state.brushGalleryCollapsed,
-    brushGallerySort: state.brushGallerySort
+    brushGallerySort: state.brushGallerySort,
+    brushGallerySearch: state.brushGallerySearch,
+    brushGalleryRandomSeed: state.brushGalleryRandomSeed,
+    brushGalleryPage: state.brushGalleryPage
   };
 }
 
@@ -3006,7 +3845,11 @@ function restoreFavoriteReturnState() {
           .filter((id) => Number.isFinite(id) && brushIds.has(id))
       : []
   );
-  if (Array.isArray(snapshot.activeStockBrushFolderIds) && snapshot.activeStockBrushFolderIds.length) {
+  if (
+    snapshot.activeStockBrushFolderId !== "all" &&
+    Array.isArray(snapshot.activeStockBrushFolderIds) &&
+    snapshot.activeStockBrushFolderIds.length
+  ) {
     setActiveStockBrushFolders(snapshot.activeStockBrushFolderIds);
   } else if (typeof snapshot.activeStockBrushFolderId === "string" && snapshot.activeStockBrushFolderId) {
     if (snapshot.activeStockBrushFolderId === "all") {
@@ -3025,11 +3868,19 @@ function restoreFavoriteReturnState() {
   } else {
     clearActiveStockBrushFolders();
   }
+  state.browsingAllStockBrushes = Boolean(snapshot.browsingAllStockBrushes);
   state.sidebarTab = normalizeSidebarTab(snapshot.sidebarTab);
   state.previousSidebarTab = normalizeSidebarTab(snapshot.previousSidebarTab);
   state.sidebarCollapsed = Boolean(snapshot.sidebarCollapsed);
   state.brushGalleryCollapsed = Boolean(snapshot.brushGalleryCollapsed);
   state.brushGallerySort = normalizeBrushGallerySort(snapshot.brushGallerySort);
+  state.brushGallerySearch = normalizeBrushGallerySearch(snapshot.brushGallerySearch);
+  state.brushGalleryRandomSeed =
+    normalizeBrushGalleryRandomSeed(snapshot.brushGalleryRandomSeed) ?? createBrushGalleryRandomSeed();
+  state.brushGalleryPage = normalizeBrushGalleryPage(snapshot.brushGalleryPage);
+  if (state.brushGallerySort === "random") {
+    resetBrushGalleryForBrushSetChange();
+  }
   state.favoriteReturnState = null;
   state.stockBrushLoadingFolderId = null;
   state.brushCursorPreview.brushId = null;
@@ -3047,7 +3898,20 @@ function restoreFavoriteReturnState() {
 }
 
 function findBrushById(id) {
-  return state.brushes.find((brush) => brush.id === id) || null;
+  if (
+    brushByIdCacheSource !== state.brushes ||
+    brushByIdCacheLength !== state.brushes.length
+  ) {
+    brushByIdCacheSource = state.brushes;
+    brushByIdCacheLength = state.brushes.length;
+    brushByIdCache = new Map(state.brushes.map((brush) => [brush.id, brush]));
+  }
+  return brushByIdCache.get(id) || null;
+}
+
+function invalidateBrushChoicePool() {
+  brushChoiceCacheRevision += 1;
+  brushChoicePoolCache = null;
 }
 
 function getSoloBrush() {
@@ -3057,6 +3921,7 @@ function getSoloBrush() {
   const brush = findBrushById(Number(state.soloBrushId));
   if (!brush) {
     state.soloBrushId = null;
+    invalidateBrushChoicePool();
     return null;
   }
   return brush;
@@ -3076,6 +3941,7 @@ function getSelectedBrushes() {
 
   if (selectedBrushes.length !== state.selectedBrushIds.size) {
     state.selectedBrushIds = new Set(selectedBrushes.map((brush) => brush.id));
+    invalidateBrushChoicePool();
   }
 
   return selectedBrushes;
@@ -3087,11 +3953,13 @@ function clearSelectedBrushes() {
   } else {
     state.selectedBrushIds = new Set();
   }
+  invalidateBrushChoicePool();
 }
 
 function setSoloBrushId(brushId) {
   clearSelectedBrushes();
   state.soloBrushId = Number.isFinite(Number(brushId)) ? Number(brushId) : null;
+  invalidateBrushChoicePool();
 }
 
 function updateBrushImagePickerButton() {
@@ -3105,6 +3973,9 @@ function updateBrushImagePickerButton() {
 function setBrushPickMode(active) {
   state.brushPickMode = Boolean(active) && state.sidebarTab === "draw";
   if (state.brushPickMode) {
+    if (state.sceneRendererActive || state.sceneRendererPreparing) {
+      deactivateSceneRenderer();
+    }
     if (state.eraseMode) {
       setEraseMode(false);
     }
@@ -3113,6 +3984,9 @@ function setBrushPickMode(active) {
   }
   updateBrushImagePickerButton();
   updateBrushCursorPreview();
+  if (!state.brushPickMode) {
+    scheduleSceneRendererEvaluation();
+  }
 }
 
 function updateSliderText() {
@@ -3307,7 +4181,52 @@ function setBrushGalleryCollapsed(collapsed) {
 }
 
 function normalizeBrushGallerySort(sortMode) {
-  return ["alpha", "area-asc", "area-desc"].includes(sortMode) ? sortMode : "alpha";
+  return ["alpha", "random", "area-asc", "area-desc"].includes(sortMode)
+    ? sortMode
+    : DEFAULT_BRUSH_GALLERY_SORT;
+}
+
+function normalizeBrushGallerySearch(value) {
+  return typeof value === "string" ? value.slice(0, 160) : "";
+}
+
+function createBrushGalleryRandomSeed() {
+  try {
+    const values = new Uint32Array(1);
+    window.crypto.getRandomValues(values);
+    return values[0];
+  } catch (error) {
+    return Math.floor(Math.random() * 0x100000000) >>> 0;
+  }
+}
+
+function normalizeBrushGalleryRandomSeed(value) {
+  const numericSeed = Number(value);
+  return Number.isFinite(numericSeed) ? Math.floor(numericSeed) >>> 0 : null;
+}
+
+function getBrushGalleryRandomRank(brush, seed) {
+  let value = ((Number(brush?.id) >>> 0) ^ seed) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+  value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+  return (value ^ (value >>> 16)) >>> 0;
+}
+
+function normalizeBrushGalleryPage(pageIndex) {
+  const numericPage = Math.floor(Number(pageIndex));
+  return Number.isFinite(numericPage) && numericPage > 0 ? numericPage : 0;
+}
+
+function resetBrushGalleryPage() {
+  state.brushGalleryPage = 0;
+  state.pendingBrushGallerySelectionScroll = false;
+}
+
+function resetBrushGalleryForBrushSetChange() {
+  resetBrushGalleryPage();
+  if (normalizeBrushGallerySort(state.brushGallerySort) === "random") {
+    state.brushGalleryRandomSeed = createBrushGalleryRandomSeed();
+  }
 }
 
 function setSliderGroupCollapsed(groupId, collapsed) {
@@ -3504,14 +4423,60 @@ function isShapeDrawMode(mode) {
   return SHAPE_DRAW_MODES.has(mode);
 }
 
+function getBaseDrawMode(mode) {
+  return BASE_DRAW_MODE_BY_OUTLINE.get(mode) || mode;
+}
+
+function isOutlineShapeDrawMode(mode) {
+  return OUTLINE_SHAPE_DRAW_MODES.has(mode);
+}
+
+function getDrawModeButtonLabel(mode, isOutlineVariant = false) {
+  if (mode === "pencil") {
+    return "Pencil tool";
+  }
+  if (mode === "spray") {
+    return "Spray tool";
+  }
+  if (mode === "line") {
+    return "Line tool";
+  }
+  if (mode === "box") {
+    return isOutlineVariant ? "Box outline tool" : "Box tool";
+  }
+  if (mode === "circle") {
+    return isOutlineVariant ? "Circle outline tool" : "Circle tool";
+  }
+  return "Draw tool";
+}
+
+function getDrawModeFromButtonClick(buttonMode) {
+  const baseButtonMode = getBaseDrawMode(buttonMode);
+  if (
+    OUTLINE_DRAW_MODE_BY_BASE.has(baseButtonMode) &&
+    getBaseDrawMode(state.drawMode) === baseButtonMode
+  ) {
+    return isOutlineShapeDrawMode(state.drawMode)
+      ? baseButtonMode
+      : OUTLINE_DRAW_MODE_BY_BASE.get(baseButtonMode);
+  }
+  return buttonMode;
+}
+
 function updateDrawModeUI() {
   const isSprayMode = state.drawMode === "spray";
   if (drawModeButtons) {
     const buttons = Array.from(drawModeButtons.querySelectorAll(".draw-mode-button"));
     for (const button of buttons) {
-      const isActive = button.dataset.drawMode === state.drawMode;
+      const buttonMode = getBaseDrawMode(button.dataset.drawMode || "");
+      const isActive = buttonMode === getBaseDrawMode(state.drawMode);
+      const isOutlineVariant = isActive && isOutlineShapeDrawMode(state.drawMode);
+      const label = getDrawModeButtonLabel(buttonMode, isOutlineVariant);
       button.classList.toggle("is-active", isActive);
+      button.classList.toggle("is-outline-mode", isOutlineVariant);
       button.setAttribute("aria-pressed", String(isActive));
+      button.setAttribute("aria-label", label);
+      button.title = label;
     }
   }
   spraySpreadGroup.hidden = !isSprayMode;
@@ -3678,6 +4643,7 @@ function revokeExportBackgroundImageUrl() {
   if (state.exportBgImageObjectUrl) {
     URL.revokeObjectURL(state.exportBgImageObjectUrl);
   }
+  exportBackgroundImageCache.clear();
   state.exportBgImageObjectUrl = "";
   state.exportBgImagePreviewUrl = "";
 }
@@ -3932,6 +4898,15 @@ function loadExportBackgroundImageFile(file) {
     });
 }
 
+function updateExportGuidelinesUI() {
+  if (exportGuidelinesToggle) {
+    exportGuidelinesToggle.checked = Boolean(state.exportGuidelinesEnabled);
+  }
+  if (exportOverlay) {
+    exportOverlay.classList.toggle("has-guidelines", Boolean(state.exportGuidelinesEnabled));
+  }
+}
+
 function updateSettingsPanelUI() {
   if (drawCanvasBgRow) {
     drawCanvasBgRow.hidden = !state.showDrawBackgroundColorControl;
@@ -3954,6 +4929,7 @@ function updateSettingsPanelUI() {
   if (exportSeeBeyondToggle) {
     exportSeeBeyondToggle.checked = state.exportSeeBeyondEnabled !== false;
   }
+  updateExportGuidelinesUI();
   updateExportBackgroundImageUI();
   updateExportAnimationUI();
   if (gifCountToggle) {
@@ -3975,17 +4951,21 @@ function isGifStampElement(element) {
     return false;
   }
 
-  const brushId = Number(element.dataset.brushId);
-  const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
-  const brushName = brush ? String(brush.name || "") : "";
   const sourceUrl =
     element.dataset.brushUrl ||
     element.dataset.gifPausedSrc ||
     element.currentSrc ||
     element.getAttribute("src") ||
-    (brush ? String(brush.url || "") : "");
+    "";
+  if (isGifUrl(sourceUrl)) {
+    return true;
+  }
+  const brushId = Number(element.dataset.brushId);
+  const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+  const brushName = brush ? String(brush.name || "") : "";
+  const fallbackUrl = sourceUrl || (brush ? String(brush.url || "") : "");
 
-  return isGifUrl(sourceUrl) || /\.gif$/i.test(brushName);
+  return isGifUrl(fallbackUrl) || /\.gif$/i.test(brushName);
 }
 
 function getPlacedGifCount() {
@@ -4057,6 +5037,9 @@ function setSidebarTab(tab, options = {}) {
   }
 
   state.sidebarTab = nextTab;
+  if (nextTab === "edit" && (state.sceneRendererActive || state.sceneRendererPreparing)) {
+    deactivateSceneRenderer();
+  }
   if (nextTab !== "draw") {
     setBrushPickMode(false);
   }
@@ -4071,6 +5054,7 @@ function setSidebarTab(tab, options = {}) {
   updateEraseCursorVisibility();
   updateBrushCursorPreview();
   scheduleSessionSave();
+  scheduleSceneRendererEvaluation();
 }
 
 function updateBrushDataControlPlacement(activeTab) {
@@ -4131,6 +5115,9 @@ function updateSidebarTabUI() {
 
 function updateSidebarVisibilityUI() {
   controlsPanel.classList.toggle("is-collapsed", state.sidebarCollapsed);
+  if (state.sidebarCollapsed && state.brushTagMenuOpen) {
+    setBrushTagMenuOpen(false);
+  }
   sidebarToggleButton.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
   sidebarToggleButton.setAttribute(
     "aria-label",
@@ -4282,19 +5269,28 @@ function setStampViewportRendered(stamp, rendered) {
   }
 
   if (rendered) {
+    state.viewportRenderedStamps.add(stamp);
     if (isViewportCulledStamp(stamp)) {
       delete stamp.dataset.viewportCulled;
-      stamp.classList.remove("is-culled");
+      stamp.classList.toggle("is-culled", isOcclusionCulledStamp(stamp));
       const source =
         stamp.dataset.sequenceDisplayedSource ||
         stamp.dataset.sequenceBaseSrc ||
         stamp.dataset.brushUrl ||
         stamp.dataset.gifPausedSrc ||
         "";
-      if (source && stamp.getAttribute("src") !== source) {
+      if (
+        !isOcclusionCulledStamp(stamp) &&
+        !isSceneRendererStampSuppressed(stamp) &&
+        source &&
+        stamp.getAttribute("src") !== source
+      ) {
         stamp.src = source;
+        markGifPlaybackStart(stamp, source, true);
       }
-      applyGifPauseStateToImage(stamp);
+      if (!isOcclusionCulledStamp(stamp) && !isSceneRendererStampSuppressed(stamp)) {
+        applyGifPauseStateToImage(stamp);
+      }
     }
     return;
   }
@@ -4303,6 +5299,8 @@ function setStampViewportRendered(stamp, rendered) {
     return;
   }
 
+  state.viewportRenderedStamps.delete(stamp);
+  removeSequencePixelateProxy(stamp);
   stamp.dataset.viewportCulled = "true";
   stamp.classList.add("is-culled");
   stamp.src = TRANSPARENT_STAMP_SRC;
@@ -4331,10 +5329,1169 @@ function updateStampViewportVisibility(stamp, viewportBounds = getViewportVisibi
 
 function refreshStampViewportVisibility() {
   const viewportBounds = getViewportVisibilityBounds();
+  const showCandidates = getStampCandidatesInBounds(viewportBounds.show);
+  for (const stamp of showCandidates) {
+    if (
+      stamp.parentElement === world &&
+      !stamp.classList.contains("is-layer-hidden") &&
+      rectsIntersect(getCachedStampWorldBounds(stamp), viewportBounds.show)
+    ) {
+      setStampViewportRendered(stamp, true);
+    }
+  }
+
+  for (const stamp of Array.from(state.viewportRenderedStamps)) {
+    if (
+      stamp.parentElement !== world ||
+      stamp.classList.contains("is-layer-hidden")
+    ) {
+      state.viewportRenderedStamps.delete(stamp);
+      continue;
+    }
+    if (!rectsIntersect(getCachedStampWorldBounds(stamp), viewportBounds.hide)) {
+      setStampViewportRendered(stamp, false);
+    }
+  }
+  scheduleStampOcclusionRefresh();
+}
+
+function setStampOcclusionCulled(stamp, culled) {
+  if (!(stamp instanceof HTMLImageElement)) {
+    return false;
+  }
+  const stroke = getStampLayerStroke(stamp);
+  const shouldCull =
+    Boolean(culled) &&
+    !shouldPauseGifImage(stamp) &&
+    !strokeHasActiveSequenceTransform(stroke);
+  if (shouldCull === isOcclusionCulledStamp(stamp)) {
+    return false;
+  }
+
+  if (shouldCull) {
+    state.occlusionCulledStamps.add(stamp);
+    stamp.dataset.occlusionCulled = "true";
+    removeSequencePixelateProxy(stamp);
+    stamp.classList.add("is-culled");
+    if (!isViewportCulledStamp(stamp)) {
+      stamp.src = TRANSPARENT_STAMP_SRC;
+    }
+    return true;
+  }
+
+  state.occlusionCulledStamps.delete(stamp);
+  delete stamp.dataset.occlusionCulled;
+  if (isViewportCulledStamp(stamp)) {
+    stamp.classList.add("is-culled");
+    return true;
+  }
+  stamp.classList.remove("is-culled");
+  const source =
+    stamp.dataset.sequenceDisplayedSource ||
+    stamp.dataset.sequenceBaseSrc ||
+    stamp.dataset.brushUrl ||
+    stamp.dataset.gifPausedSrc ||
+    "";
+  if (!isSceneRendererStampSuppressed(stamp) && source && stamp.getAttribute("src") !== source) {
+    stamp.src = source;
+    markGifPlaybackStart(stamp, source, true);
+  }
+  if (!isSceneRendererStampSuppressed(stamp)) {
+    applyGifPauseStateToImage(stamp);
+  }
+  return true;
+}
+
+function cancelStampOcclusionRefresh() {
+  if (state.stampOcclusionIdleId === null) {
+    return;
+  }
+  if (typeof window.cancelIdleCallback === "function") {
+    window.cancelIdleCallback(state.stampOcclusionIdleId);
+  } else {
+    window.clearTimeout(state.stampOcclusionIdleId);
+  }
+  state.stampOcclusionIdleId = null;
+}
+
+function invalidateStampOcclusion() {
+  cancelStampOcclusionRefresh();
+  const changed = [];
+  for (const stamp of Array.from(state.occlusionCulledStamps)) {
+    if (setStampOcclusionCulled(stamp, false)) {
+      changed.push(stamp);
+    }
+  }
+  if (changed.length) {
+    syncSceneRendererElements(changed);
+  }
+}
+
+function getStampOcclusionRecord(stamp) {
+  const stroke = getStampLayerStroke(stamp);
+  const source =
+    stamp.dataset.sequenceDisplayedSource ||
+    stamp.dataset.sequenceBaseSrc ||
+    stamp.dataset.brushUrl ||
+    "";
+  const metadata = getStockBrushMetadataForSource(source);
+  const rotation =
+    (Number(stamp.dataset.rotation) || 0) +
+    getStampLayerTransform(stroke, stamp).rotation;
+  const normalizedQuarterTurn = Math.abs(rotation % 90);
+  const axisAligned = normalizedQuarterTurn < 0.0001 || Math.abs(normalizedQuarterTurn - 90) < 0.0001;
+  const hasSequence = stamp.dataset.sequenceActive === "1" || Boolean(
+    stroke && isLayerSequenceEnabled(stroke)
+  );
+  const hasEffects = Boolean(
+    stamp.style.filter ||
+    stamp.classList.contains("has-sequence-pixelate-proxy") ||
+    hasSequence
+  );
+  const opacity = clamp(Number(stamp.style.opacity) || 0, 0, 1);
+  const blendMode = stroke ? getLayerBlendMode(stroke) : "normal";
+  return {
+    id: stamp,
+    element: stamp,
+    rect: getCachedStampWorldBounds(stamp),
+    visible:
+      stamp.parentElement === world &&
+      !stamp.classList.contains("is-layer-hidden") &&
+      !isViewportCulledStamp(stamp),
+    cullable: !hasEffects,
+    opaque: metadata?.opaque === true,
+    opacity,
+    blendMode,
+    filter: stamp.style.filter || "",
+    effects: hasEffects,
+    axisAligned
+  };
+}
+
+function refreshStampOcclusion() {
+  state.stampOcclusionIdleId = null;
+  if (
+    !window.SceneOcclusion ||
+    state.gifAnimationsPaused ||
+    state.sequenceExportActive ||
+    state.exportTask
+  ) {
+    invalidateStampOcclusion();
+    return;
+  }
+  const viewportBounds = getViewportWorldBounds(0);
+  const records = [];
+  for (const child of world.children) {
+    if (child instanceof HTMLImageElement && child.classList.contains("stamp")) {
+      const record = getStampOcclusionRecord(child);
+      if (record.visible) {
+        records.push(record);
+      }
+    }
+  }
+  if (records.length < 2) {
+    invalidateStampOcclusion();
+    return;
+  }
+
+  const result = window.SceneOcclusion.compute(records, {
+    viewport: viewportBounds,
+    order: "bottom-to-top",
+    tileSize: Math.max(4, 24 / Math.max(0.05, state.camera.scale)),
+    idOf: (record) => record.id,
+    rectOf: (record) => record.rect,
+    isCullable: (record) => record.cullable === true,
+    isOccluder: (record) =>
+      record.opaque === true &&
+      record.opacity === 1 &&
+      record.blendMode === "normal" &&
+      record.effects === false &&
+      record.axisAligned === true
+  });
+
+  const nextOccluded = result.occludedIds;
+  const changed = [];
+  for (const stamp of Array.from(state.occlusionCulledStamps)) {
+    if (!nextOccluded.has(stamp)) {
+      if (setStampOcclusionCulled(stamp, false)) {
+        changed.push(stamp);
+      }
+    }
+  }
+  for (const stamp of nextOccluded) {
+    if (setStampOcclusionCulled(stamp, true)) {
+      changed.push(stamp);
+    }
+  }
+  if (changed.length) {
+    syncSceneRendererElements(changed);
+  }
+}
+
+function scheduleStampOcclusionRefresh() {
+  if (state.stampOcclusionIdleId !== null || !window.SceneOcclusion) {
+    return;
+  }
+  const run = () => refreshStampOcclusion();
+  state.stampOcclusionIdleId = typeof window.requestIdleCallback === "function"
+    ? window.requestIdleCallback(run, { timeout: 180 })
+    : window.setTimeout(run, 32);
+}
+
+function createSceneRendererMessage(type, payload = {}) {
+  return {
+    protocol: SCENE_RENDER_PROTOCOL,
+    version: SCENE_RENDER_VERSION,
+    type,
+    ...payload
+  };
+}
+
+function getSceneStampId(stamp) {
+  if (!(stamp instanceof HTMLImageElement)) {
+    return null;
+  }
+  if (!sceneStampIdMap.has(stamp)) {
+    sceneStampIdMap.set(stamp, `stamp-${nextSceneStampId++}`);
+  }
+  return sceneStampIdMap.get(stamp);
+}
+
+function getSceneRendererStampSource(stamp) {
+  return (
+    stamp?.dataset?.sequenceDisplayedSource ||
+    stamp?.dataset?.sequenceImageCycleSrc ||
+    stamp?.dataset?.sequenceBaseSrc ||
+    stamp?.dataset?.brushUrl ||
+    stamp?.dataset?.gifPausedSrc ||
+    ""
+  );
+}
+
+function getSceneRendererMimeType(source) {
+  const dataMatch = String(source || "").match(/^data:([^;,]+)/i);
+  if (dataMatch) {
+    return dataMatch[1].toLowerCase();
+  }
+  const cleanSource = String(source || "").split(/[?#]/)[0].toLowerCase();
+  if (cleanSource.endsWith(".gif")) return "image/gif";
+  if (cleanSource.endsWith(".png")) return "image/png";
+  if (cleanSource.endsWith(".webp")) return "image/webp";
+  if (cleanSource.endsWith(".jpg") || cleanSource.endsWith(".jpeg")) return "image/jpeg";
+  return "";
+}
+
+function getSceneRendererBlurAmount(stamp) {
+  const filter = String(stamp?.style?.filter || "").trim();
+  if (!filter) {
+    return 0;
+  }
+  const match = filter.match(/^blur\(\s*([0-9]+(?:\.[0-9]+)?)px\s*\)$/i);
+  return match ? clamp(Number(match[1]) || 0, 0, 256) : null;
+}
+
+function getSceneRendererTransform(stamp) {
+  const left = parseFloat(stamp.style.left) || 0;
+  const top = parseFloat(stamp.style.top) || 0;
+  const baseWidth = Math.max(1, parseFloat(stamp.style.width) || 1);
+  const baseHeight = Math.max(1, parseFloat(stamp.style.height) || 1);
+  const transform = stamp.style.transform || "none";
+  try {
+    const matrix = new DOMMatrix(transform);
+    const scaleX = Math.max(0.0001, Math.hypot(matrix.a, matrix.b));
+    const scaleY = Math.max(0.0001, Math.hypot(matrix.c, matrix.d));
+    return {
+      centerX: left + baseWidth / 2 + matrix.e,
+      centerY: top + baseHeight / 2 + matrix.f,
+      width: baseWidth * scaleX,
+      height: baseHeight * scaleY,
+      rotation: (Math.atan2(matrix.b, matrix.a) * 180) / Math.PI
+    };
+  } catch (error) {
+    return {
+      centerX: left + baseWidth / 2,
+      centerY: top + baseHeight / 2,
+      width: baseWidth,
+      height: baseHeight,
+      rotation: Number(stamp.dataset.rotation) || 0
+    };
+  }
+}
+
+function getSceneRendererStampRecord(stamp) {
+  if (!(stamp instanceof HTMLImageElement) || stamp.parentElement !== world) {
+    return null;
+  }
+  const sourceUrl = getSceneRendererStampSource(stamp);
+  if (
+    !sourceUrl ||
+    sourceUrl === TRANSPARENT_STAMP_SRC ||
+    sceneRendererUnsupportedSources.has(sourceUrl)
+  ) {
+    return null;
+  }
+  const blurAmount = getSceneRendererBlurAmount(stamp);
+  if (blurAmount === null || stamp.classList.contains("has-sequence-pixelate-proxy")) {
+    return null;
+  }
+  const sourceMetadata = getStockBrushMetadataForSource(sourceUrl);
+  const brushId = Number(stamp.dataset.brushId);
+  const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+  const gifSource = isGifUrl(sourceUrl) || Boolean(brush && getBrushSourceIsGif(brush));
+  const metadataAnimated = sourceMetadata?.animated === true;
+  const sourceMimeType = getSceneRendererMimeType(sourceUrl);
+  const potentiallyAnimatedUnknownSource = Boolean(
+    !sourceMetadata &&
+    !gifSource &&
+    (
+      /^(?:image\/(?:png|webp|avif|svg\+xml))$/i.test(sourceMimeType) ||
+      /^(?:blob:)/i.test(sourceUrl) ||
+      /\.(?:png|webp|avif|svg)(?:[?#]|$)/i.test(sourceUrl)
+    )
+  );
+  if (potentiallyAnimatedUnknownSource) {
+    return null;
+  }
+  if (metadataAnimated && !gifSource) {
+    return null;
+  }
+  const sourceTypeKnown = gifSource || Boolean(
+    sourceMimeType ||
+    brush ||
+    sourceMetadata
+  );
+  const animated = gifSource ? true : sourceTypeKnown ? false : null;
+  const stroke = getStampLayerStroke(stamp);
+  if (stroke && getLayerBlendMode(stroke) !== "normal") {
+    // CSS mix-blend-mode sees the live canvas backdrop, while the worker canvas
+    // is composited as one surface. Keep the DOM renderer for exact parity.
+    return null;
+  }
+  if (stroke?.animationPaused) {
+    return null;
+  }
+  const geometry = getSceneRendererTransform(stamp);
+  let startedAt = Number(stamp.dataset.gifPlaybackStartedAt);
+  if (!Number.isFinite(startedAt)) {
+    startedAt = performance.now();
+    if (gifSource) {
+      stamp.dataset.gifPlaybackSource = sourceUrl;
+      stamp.dataset.gifPlaybackStartedAt = String(startedAt);
+    }
+  }
+  return {
+    id: getSceneStampId(stamp),
+    sourceUrl,
+    sourceType: gifSource ? "gif" : sourceTypeKnown ? "static" : "auto",
+    ...(typeof animated === "boolean" ? { animated } : {}),
+    mimeType: sourceMimeType,
+    centerX: geometry.centerX,
+    centerY: geometry.centerY,
+    width: geometry.width,
+    height: geometry.height,
+    rotation: geometry.rotation,
+    opacity: clamp(Number(stamp.style.opacity) || 0, 0, 1),
+    blendMode: stroke ? getLayerBlendMode(stroke) : "normal",
+    imageRendering: stamp.style.imageRendering === "auto" ? "auto" : "pixelated",
+    visible:
+      !stamp.classList.contains("is-layer-hidden") &&
+      !isOcclusionCulledStamp(stamp),
+    blurAmount,
+    startedAt,
+    phaseOffsetMs: 0,
+    animationPaused: false,
+    animationPausedAt: 0
+  };
+}
+
+function getSceneRendererStampsInOrder() {
+  return Array.from(world.children).filter(
+    (element) => element instanceof HTMLImageElement && element.classList.contains("stamp")
+  );
+}
+
+function collectSceneRendererRecords() {
+  const records = [];
+  for (const stamp of getSceneRendererStampsInOrder()) {
+    if (stamp.classList.contains("is-layer-hidden")) {
+      continue;
+    }
+    const record = getSceneRendererStampRecord(stamp);
+    if (!record) {
+      return null;
+    }
+    records.push(record);
+  }
+  return records;
+}
+
+function hasSceneRendererCapability() {
+  return Boolean(
+    sceneRenderCanvas &&
+    typeof Worker === "function" &&
+    typeof sceneRenderCanvas.transferControlToOffscreen === "function" &&
+    typeof window.OffscreenCanvas === "function" &&
+    typeof window.createImageBitmap === "function"
+  );
+}
+
+function canUseSceneRendererMode() {
+  return Boolean(
+    !state.sceneRendererDisabled &&
+    hasSceneRendererCapability() &&
+    !state.exportMode &&
+    !state.exportTask &&
+    state.sidebarTab !== "edit" &&
+    !state.eraseMode &&
+    !state.brushPickMode &&
+    !state.gifAnimationsPaused &&
+    !hasActiveSequenceEffectOnCanvas() &&
+    !state.brushCropEditor.open &&
+    document.visibilityState !== "hidden"
+  );
+}
+
+function canStartSceneRendererMode() {
+  return Boolean(
+    canUseSceneRendererMode() &&
+    !state.drawing &&
+    !state.placementTask &&
+    !state.shapeDraft &&
+    !state.panning &&
+    !state.touchGesture &&
+    performance.now() - state.sceneRendererLastCameraChangeAt >= 160
+  );
+}
+
+function sceneRendererMeetsLoadThreshold() {
+  const lowCoreDevice = Number(navigator.hardwareConcurrency) > 0 && navigator.hardwareConcurrency <= 4;
+  const animatedThreshold = lowCoreDevice
+    ? Math.max(400, Math.round(SCENE_RENDER_MIN_ANIMATED_STAMPS * 0.75))
+    : SCENE_RENDER_MIN_ANIMATED_STAMPS;
+  const totalThreshold = lowCoreDevice
+    ? Math.max(1000, Math.round(SCENE_RENDER_MIN_TOTAL_STAMPS * 0.75))
+    : SCENE_RENDER_MIN_TOTAL_STAMPS;
+  let total = 0;
+  let animated = 0;
   const stamps = world.getElementsByClassName("stamp");
   for (let index = 0; index < stamps.length; index += 1) {
-    updateStampViewportVisibility(stamps[index], viewportBounds);
+    const stamp = stamps[index];
+    if (!(stamp instanceof HTMLImageElement)) {
+      continue;
+    }
+    if (stamp.classList.contains("is-layer-hidden")) {
+      continue;
+    }
+    total += 1;
+    const source = getSceneRendererStampSource(stamp);
+    const metadata = getStockBrushMetadataForSource(source);
+    let animatedSource = isGifUrl(source) || metadata?.animated === true;
+    if (!animatedSource) {
+      const brushId = Number(stamp.dataset.brushId);
+      const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+      animatedSource = Boolean(brush && getBrushSourceIsGif(brush));
+    }
+    if (animatedSource) {
+      animated += 1;
+    }
+    if (animated >= animatedThreshold || total >= totalThreshold) {
+      return true;
+    }
   }
+  return false;
+}
+
+function getSceneRendererCanvasMetrics() {
+  const rect = viewport.getBoundingClientRect();
+  const visibleCount = Math.max(1, state.viewportRenderedStamps.size);
+  const dprCap = visibleCount >= 8000 ? 1 : visibleCount >= 3000 ? 1.25 : 1.5;
+  return {
+    width: Math.max(1, rect.width),
+    height: Math.max(1, rect.height),
+    dpr: Math.max(1, Math.min(Number(window.devicePixelRatio) || 1, dprCap))
+  };
+}
+
+function getSceneRendererMemoryBudgetBytes() {
+  const deviceMemory = Number(navigator.deviceMemory);
+  if (Number.isFinite(deviceMemory) && deviceMemory <= 4) {
+    return 96 * 1024 * 1024;
+  }
+  if (Number.isFinite(deviceMemory) && deviceMemory <= 8) {
+    return 192 * 1024 * 1024;
+  }
+  return 256 * 1024 * 1024;
+}
+
+function postSceneRendererMessage(type, payload = {}, transfer = []) {
+  if (!sceneRendererWorker) {
+    return false;
+  }
+  try {
+    sceneRendererWorker.postMessage(createSceneRendererMessage(type, payload), transfer);
+    return true;
+  } catch (error) {
+    failSceneRenderer(error);
+    return false;
+  }
+}
+
+function settleSceneRendererSceneRequest(revision, error = null, value = null) {
+  const request = sceneRendererSceneRequests.get(Number(revision));
+  if (!request) {
+    return;
+  }
+  sceneRendererSceneRequests.delete(Number(revision));
+  window.clearTimeout(request.timeoutId);
+  if (error) {
+    request.reject(error);
+  } else {
+    request.resolve(value);
+  }
+}
+
+function handleSceneRendererMessage(event) {
+  const message = event.data || {};
+  if (message.protocol !== SCENE_RENDER_PROTOCOL || message.version !== SCENE_RENDER_VERSION) {
+    return;
+  }
+
+  if (message.type === "initialized") {
+    sceneRendererInitialized = true;
+    sceneRendererInitResolve?.(message);
+    sceneRendererInitResolve = null;
+    sceneRendererInitReject = null;
+    return;
+  }
+
+  if (message.type === "source-status") {
+    const sourceUrl = String(message.sourceUrl || "");
+    if (message.status === "ready" && sourceUrl) {
+      sceneRendererReadySources.add(sourceUrl);
+      if (state.sceneRendererActive) {
+        suppressSceneRendererStampsForSource(sourceUrl);
+      }
+    } else if (message.status === "loading" && sourceUrl) {
+      // A source can be reloaded after worker-side eviction. Do not allow a
+      // stale ready marker to hide its DOM fallback before a frame presents.
+      sceneRendererReadySources.delete(sourceUrl);
+    } else if (message.status === "evicted" && sourceUrl) {
+      sceneRendererReadySources.delete(sourceUrl);
+      if (
+        state.sceneRendererActive &&
+        getSceneRendererStampsInOrder().some(
+          (stamp) => getSceneRendererStampSource(stamp) === sourceUrl
+        )
+      ) {
+        deactivateSceneRenderer();
+      }
+    } else if (
+      message.status === "error" &&
+      (state.sceneRendererActive || state.sceneRendererPreparing) &&
+      getSceneRendererStampsInOrder().some(
+        (stamp) => getSceneRendererStampSource(stamp) === sourceUrl
+      )
+    ) {
+      const error = new Error(message.error?.message || "A scene source could not be decoded.");
+      error.name = "SceneRendererFallbackError";
+      sceneRendererUnsupportedSources.add(sourceUrl);
+      deactivateSceneRenderer({ dispose: true, reason: error });
+    }
+    return;
+  }
+
+  if (
+    (message.type === "ack" && message.action === "upsert") ||
+    message.type === "frame-presented"
+  ) {
+    const requestId = String(message.requestId || "");
+    if (message.ignored) {
+      clearSceneRendererUpsertRequest(requestId);
+      return;
+    }
+    if (message.type === "ack" && message.presented !== true && !message.ignored) {
+      return;
+    }
+    const presentedRevision = Number(message.revision);
+    if (!Number.isFinite(presentedRevision)) {
+      return;
+    }
+    for (const [pendingRequestId, request] of sceneRendererUpsertRequests) {
+      if (request.revision > presentedRevision) {
+        continue;
+      }
+      sceneRendererUpsertRequests.delete(pendingRequestId);
+      for (const item of request.stamps) {
+        const { stamp, recordId } = item;
+        if (sceneRendererPendingStampRevision.get(stamp) !== request.revision) {
+          continue;
+        }
+        sceneRendererPendingStampRevision.delete(stamp);
+        if (
+          state.sceneRendererActive &&
+          stamp.parentElement === world &&
+          getSceneStampId(stamp) === recordId &&
+          !state.sceneRendererPendingElements.has(stamp)
+        ) {
+          suppressSceneRendererStamp(stamp);
+        }
+      }
+    }
+    return;
+  }
+
+  if (message.type === "scene-ready") {
+    settleSceneRendererSceneRequest(message.revision, null, message);
+    return;
+  }
+
+  if (message.type === "scene-error") {
+    const firstError = Array.isArray(message.errors) ? message.errors[0]?.error : null;
+    const error = new Error(firstError?.message || "The accelerated scene could not be prepared.");
+    const failedSourceUrl = String(
+      Array.isArray(message.errors) ? message.errors[0]?.sourceUrl || "" : ""
+    );
+    if (failedSourceUrl) {
+      sceneRendererUnsupportedSources.add(failedSourceUrl);
+      error.name = "SceneRendererFallbackError";
+    }
+    if (sceneRendererSceneRequests.has(Number(message.revision))) {
+      settleSceneRendererSceneRequest(message.revision, error);
+    } else if (
+      Number(message.revision) === state.sceneRenderRevision &&
+      (state.sceneRendererActive || state.sceneRendererPreparing)
+    ) {
+      failSceneRenderer(error);
+    }
+    if (
+      failedSourceUrl &&
+      (state.sceneRendererActive || state.sceneRendererPreparing)
+    ) {
+      deactivateSceneRenderer({ dispose: true, reason: error });
+    }
+    return;
+  }
+
+  if (message.type === "error") {
+    const error = new Error(message.error?.message || "The accelerated renderer failed.");
+    if (!sceneRendererInitialized && sceneRendererInitReject) {
+      sceneRendererInitReject(error);
+      sceneRendererInitResolve = null;
+      sceneRendererInitReject = null;
+    } else if (state.sceneRendererActive || state.sceneRendererPreparing) {
+      failSceneRenderer(error);
+    }
+  }
+}
+
+function clearSceneRendererUpsertRequest(requestId) {
+  const request = sceneRendererUpsertRequests.get(String(requestId || ""));
+  if (!request) {
+    return;
+  }
+  sceneRendererUpsertRequests.delete(String(requestId || ""));
+  for (const { stamp } of request.stamps) {
+    if (sceneRendererPendingStampRevision.get(stamp) === request.revision) {
+      sceneRendererPendingStampRevision.delete(stamp);
+    }
+  }
+}
+
+function clearSceneRendererUpsertRequests() {
+  for (const requestId of Array.from(sceneRendererUpsertRequests.keys())) {
+    clearSceneRendererUpsertRequest(requestId);
+  }
+}
+
+function resetSceneRendererWorkerState(reason = null) {
+  sceneRendererInitialized = false;
+  sceneRendererInitPromise = null;
+  sceneRendererInitResolve = null;
+  sceneRendererInitReject = null;
+  sceneRendererReadySources.clear();
+  clearSceneRendererUpsertRequests();
+  const stopError = reason || new Error("The accelerated renderer stopped.");
+  for (const request of sceneRendererSceneRequests.values()) {
+    window.clearTimeout(request.timeoutId);
+    request.reject(stopError);
+  }
+  sceneRendererSceneRequests.clear();
+}
+
+function replaceTransferredSceneRenderCanvas() {
+  if (!sceneRenderCanvas?.parentElement) {
+    return;
+  }
+  const replacement = document.createElement("canvas");
+  replacement.id = "sceneRenderCanvas";
+  replacement.hidden = true;
+  replacement.setAttribute("aria-hidden", "true");
+  sceneRenderCanvas.replaceWith(replacement);
+  sceneRenderCanvas = replacement;
+}
+
+async function initializeSceneRendererWorker() {
+  if (sceneRendererInitialized && sceneRendererWorker) {
+    return true;
+  }
+  if (sceneRendererInitPromise) {
+    return sceneRendererInitPromise;
+  }
+  if (!hasSceneRendererCapability()) {
+    return false;
+  }
+
+  sceneRendererInitPromise = new Promise((resolve, reject) => {
+    sceneRendererInitResolve = resolve;
+    sceneRendererInitReject = reject;
+  })
+    .then(() => true)
+    .catch(() => false);
+
+  try {
+    sceneRendererWorker = new Worker(SCENE_RENDER_WORKER_URL, { type: "module" });
+    sceneRendererWorker.addEventListener("message", handleSceneRendererMessage);
+    sceneRendererWorker.addEventListener("error", (event) => {
+      const error = new Error(event.message || "The accelerated renderer worker crashed.");
+      if (!sceneRendererInitialized && sceneRendererInitReject) {
+        sceneRendererInitReject(error);
+      } else {
+        failSceneRenderer(error);
+      }
+    });
+    const offscreenCanvas = sceneRenderCanvas.transferControlToOffscreen();
+    const metrics = getSceneRendererCanvasMetrics();
+    sceneRendererWorker.postMessage(
+      createSceneRendererMessage("init", {
+        requestId: "scene-render-init",
+        canvas: offscreenCanvas,
+        width: metrics.width,
+        height: metrics.height,
+        dpr: metrics.dpr,
+        timeOrigin: performance.timeOrigin,
+        camera: { ...state.camera },
+        options: {
+          memoryBudgetBytes: getSceneRendererMemoryBudgetBytes(),
+          decodeConcurrency: 2
+        }
+      }),
+      [offscreenCanvas]
+    );
+    window.setTimeout(() => {
+      if (!sceneRendererInitialized && sceneRendererInitReject) {
+        sceneRendererInitReject(new Error("The accelerated renderer did not initialize in time."));
+        sceneRendererInitResolve = null;
+        sceneRendererInitReject = null;
+      }
+    }, 5000);
+  } catch (error) {
+    sceneRendererInitReject?.(error);
+    sceneRendererInitResolve = null;
+    sceneRendererInitReject = null;
+  }
+
+  const initialized = await sceneRendererInitPromise;
+  if (!initialized) {
+    state.sceneRendererDisabled = true;
+    sceneRendererWorker?.terminate();
+    sceneRendererWorker = null;
+    resetSceneRendererWorkerState();
+    replaceTransferredSceneRenderCanvas();
+  }
+  return initialized;
+}
+
+function isSceneRendererStampSuppressed(stamp) {
+  return stamp instanceof HTMLImageElement && stamp.dataset.sceneRendererSuppressed === "true";
+}
+
+function suppressSceneRendererStamp(stamp) {
+  if (!(stamp instanceof HTMLImageElement) || stamp.parentElement !== world) {
+    return;
+  }
+  stamp.dataset.sceneRendererSuppressed = "true";
+  stamp.classList.add("is-scene-rendered");
+  if (stamp.getAttribute("src") !== TRANSPARENT_STAMP_SRC) {
+    stamp.src = TRANSPARENT_STAMP_SRC;
+  }
+}
+
+function restoreSceneRendererStamp(stamp) {
+  if (!(stamp instanceof HTMLImageElement) || !isSceneRendererStampSuppressed(stamp)) {
+    return;
+  }
+  delete stamp.dataset.sceneRendererSuppressed;
+  stamp.classList.remove("is-scene-rendered");
+  if (isRenderCulledStamp(stamp)) {
+    stamp.src = TRANSPARENT_STAMP_SRC;
+    return;
+  }
+  const source = getSceneRendererStampSource(stamp);
+  if (source && stamp.getAttribute("src") !== source) {
+    stamp.src = source;
+    markGifPlaybackStart(stamp, source, true);
+  }
+  applyGifPauseStateToImage(stamp);
+}
+
+function suppressSceneRendererStampsForSource(sourceUrl) {
+  for (const stamp of getSceneRendererStampsInOrder()) {
+    if (
+      getSceneRendererStampSource(stamp) === sourceUrl &&
+      !sceneRendererPendingStampRevision.has(stamp) &&
+      !state.sceneRendererPendingElements.has(stamp)
+    ) {
+      suppressSceneRendererStamp(stamp);
+    }
+  }
+}
+
+function failSceneRenderer(error) {
+  if (state.sceneRendererDisabled && !sceneRendererWorker) {
+    return;
+  }
+  console.warn("Accelerated scene renderer fell back to DOM.", error);
+  state.sceneRendererDisabled = true;
+  deactivateSceneRenderer({ dispose: true });
+}
+
+function deactivateSceneRenderer(options = {}) {
+  const dispose = options.dispose === true;
+  state.sceneRendererActive = false;
+  state.sceneRendererPreparing = false;
+  viewport.classList.remove("is-accelerated-scene");
+  if (state.sceneRendererSyncRafId !== null) {
+    window.cancelAnimationFrame(state.sceneRendererSyncRafId);
+    state.sceneRendererSyncRafId = null;
+  }
+  if (state.sceneRendererElementSyncRafId !== null) {
+    window.cancelAnimationFrame(state.sceneRendererElementSyncRafId);
+    state.sceneRendererElementSyncRafId = null;
+  }
+  state.sceneRendererPendingElements.clear();
+  clearSceneRendererUpsertRequests();
+  if (sceneRenderCanvas) {
+    sceneRenderCanvas.hidden = true;
+  }
+  for (const stamp of getSceneRendererStampsInOrder()) {
+    restoreSceneRendererStamp(stamp);
+  }
+
+  if (dispose) {
+    sceneRendererWorker?.terminate();
+    sceneRendererWorker = null;
+    resetSceneRendererWorkerState(options.reason || null);
+    replaceTransferredSceneRenderCanvas();
+  } else if (sceneRendererWorker && sceneRendererInitialized) {
+    postSceneRendererMessage("pause", { paused: true, now: performance.now() });
+  }
+}
+
+function supersedeSceneRendererSceneRequests(revision) {
+  for (const [pendingRevision, pending] of sceneRendererSceneRequests) {
+    if (pendingRevision < revision) {
+      window.clearTimeout(pending.timeoutId);
+      sceneRendererSceneRequests.delete(pendingRevision);
+      pending.resolve({ stale: true, revision: pendingRevision });
+    }
+  }
+}
+
+function requestSceneRendererScene(records, revision) {
+  supersedeSceneRendererSceneRequests(revision);
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      sceneRendererSceneRequests.delete(revision);
+      reject(new Error("The accelerated scene took too long to prepare."));
+    }, SCENE_RENDER_PREPARE_TIMEOUT_MS);
+    sceneRendererSceneRequests.set(revision, { resolve, reject, timeoutId });
+    if (!postSceneRendererMessage("scene", { revision, records })) {
+      settleSceneRendererSceneRequest(
+        revision,
+        new Error("The accelerated scene could not be sent to its worker.")
+      );
+    }
+  });
+}
+
+async function activateSceneRenderer() {
+  if (
+    state.sceneRendererActive ||
+    state.sceneRendererPreparing ||
+    !canStartSceneRendererMode() ||
+    !sceneRendererMeetsLoadThreshold()
+  ) {
+    return;
+  }
+  let records = collectSceneRendererRecords();
+  if (!records?.length) {
+    return;
+  }
+  state.sceneRendererPreparing = true;
+  try {
+    if (!await initializeSceneRendererWorker()) {
+      return;
+    }
+    postSceneRendererMessage("pause", { paused: false, now: performance.now() });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (!canStartSceneRendererMode()) {
+        return;
+      }
+      resizeSceneRenderer();
+      syncSceneRendererCamera();
+      const mutationRevision = state.sceneMutationRevision;
+      const revision = ++state.sceneRenderRevision;
+      const expectedStampCount = records.length;
+      const prepared = await requestSceneRendererScene(records, revision);
+      if (prepared?.stale) {
+        records = collectSceneRendererRecords();
+        if (!records) {
+          return;
+        }
+        continue;
+      }
+      const currentRecords = collectSceneRendererRecords();
+      if (!currentRecords || !canStartSceneRendererMode()) {
+        return;
+      }
+      if (
+        currentRecords.length !== expectedStampCount ||
+        state.sceneMutationRevision !== mutationRevision
+      ) {
+        records = currentRecords;
+        continue;
+      }
+
+      for (const record of records) {
+        sceneRendererReadySources.add(record.sourceUrl);
+      }
+      state.sceneRendererActive = true;
+      state.sceneRendererPreparing = false;
+      viewport.classList.add("is-accelerated-scene");
+      sceneRenderCanvas.hidden = false;
+      postSceneRendererMessage("pause", { paused: false, now: performance.now() });
+      for (const stamp of getSceneRendererStampsInOrder()) {
+        suppressSceneRendererStamp(stamp);
+      }
+      return;
+    }
+  } catch (error) {
+    if (error?.name !== "SceneRendererFallbackError") {
+      failSceneRenderer(error);
+    }
+  } finally {
+    state.sceneRendererPreparing = false;
+    if (!state.sceneRendererActive && sceneRendererInitialized) {
+      postSceneRendererMessage("pause", { paused: true, now: performance.now() });
+    }
+    if (
+      !state.sceneRendererActive &&
+      canStartSceneRendererMode() &&
+      sceneRendererMeetsLoadThreshold() &&
+      collectSceneRendererRecords()
+    ) {
+      window.setTimeout(scheduleSceneRendererEvaluation, 80);
+    }
+  }
+}
+
+function scheduleSceneRendererEvaluation() {
+  if (state.sceneRendererSyncRafId !== null) {
+    return;
+  }
+  state.sceneRendererSyncRafId = window.requestAnimationFrame(() => {
+    state.sceneRendererSyncRafId = null;
+    if (state.sceneRendererActive) {
+      if (
+        !canUseSceneRendererMode() ||
+        !sceneRendererMeetsLoadThreshold() ||
+        !collectSceneRendererRecords()
+      ) {
+        deactivateSceneRenderer();
+      }
+      return;
+    }
+    if (canStartSceneRendererMode() && sceneRendererMeetsLoadThreshold()) {
+      void activateSceneRenderer();
+    }
+  });
+}
+
+function scheduleSceneRendererFullSync() {
+  if (!state.sceneRendererActive) {
+    scheduleSceneRendererEvaluation();
+    return;
+  }
+  if (state.sceneRendererSyncRafId !== null) {
+    return;
+  }
+  state.sceneRendererSyncRafId = window.requestAnimationFrame(() => {
+    state.sceneRendererSyncRafId = null;
+    const records = collectSceneRendererRecords();
+    if (!records || !canUseSceneRendererMode()) {
+      deactivateSceneRenderer();
+      return;
+    }
+    const revision = ++state.sceneRenderRevision;
+    if (records.some((record) => !sceneRendererReadySources.has(record.sourceUrl))) {
+      deactivateSceneRenderer();
+      scheduleSceneRendererEvaluation();
+      return;
+    }
+    void requestSceneRendererScene(records, revision)
+      .then((prepared) => {
+        if (!state.sceneRendererActive || prepared?.stale) {
+          return;
+        }
+        for (const record of records) {
+          sceneRendererReadySources.add(record.sourceUrl);
+        }
+        for (const stamp of getSceneRendererStampsInOrder()) {
+          suppressSceneRendererStamp(stamp);
+        }
+      })
+      .catch(failSceneRenderer);
+  });
+}
+
+function noteSceneRendererMutation() {
+  state.sceneMutationRevision += 1;
+}
+
+function syncSceneRendererElements(elements) {
+  const elementList = Array.from(elements || []);
+  for (const element of elementList) {
+    state.sceneRendererPendingElements.delete(element);
+  }
+  noteSceneRendererMutation();
+  if ((state.sceneRendererActive || state.sceneRendererPreparing) && !canUseSceneRendererMode()) {
+    deactivateSceneRenderer();
+    return;
+  }
+  if (state.sceneRendererPreparing) {
+    return;
+  }
+  if (!state.sceneRendererActive) {
+    scheduleSceneRendererEvaluation();
+    return;
+  }
+  const stamps = elementList.filter(
+    (element) => element instanceof HTMLImageElement && element.parentElement === world
+  );
+  const records = [];
+  const stampsAwaitingPresentation = [];
+  for (const stamp of stamps) {
+    const record = getSceneRendererStampRecord(stamp);
+    if (!record) {
+      deactivateSceneRenderer();
+      return;
+    }
+    records.push(record);
+    if (!sceneRendererReadySources.has(record.sourceUrl)) {
+      deactivateSceneRenderer();
+      scheduleSceneRendererEvaluation();
+      return;
+    }
+    if (isSceneRendererStampSuppressed(stamp)) {
+      suppressSceneRendererStamp(stamp);
+    } else {
+      stampsAwaitingPresentation.push({ stamp, recordId: record.id });
+    }
+  }
+  if (!records.length) {
+    return;
+  }
+  const revision = ++state.sceneRenderRevision;
+  supersedeSceneRendererSceneRequests(revision);
+  const requestId = `scene-render-upsert-${revision}`;
+  if (stampsAwaitingPresentation.length) {
+    for (const { stamp } of stampsAwaitingPresentation) {
+      sceneRendererPendingStampRevision.set(stamp, revision);
+    }
+    sceneRendererUpsertRequests.set(requestId, {
+      revision,
+      stamps: stampsAwaitingPresentation
+    });
+  }
+  if (!postSceneRendererMessage("upsert", {
+    requestId,
+    revision,
+    records
+  })) {
+    clearSceneRendererUpsertRequest(requestId);
+  }
+}
+
+function scheduleSceneRendererElementsSync(elements) {
+  const elementList = Array.from(elements || []);
+  if (!state.sceneRendererActive) {
+    syncSceneRendererElements(elementList);
+    return;
+  }
+  for (const element of elementList) {
+    if (element instanceof HTMLImageElement) {
+      state.sceneRendererPendingElements.add(element);
+    }
+  }
+  if (state.sceneRendererElementSyncRafId !== null) {
+    return;
+  }
+  state.sceneRendererElementSyncRafId = window.requestAnimationFrame(() => {
+    state.sceneRendererElementSyncRafId = null;
+    if (!state.sceneRendererPendingElements.size) {
+      return;
+    }
+    const pendingElements = Array.from(state.sceneRendererPendingElements);
+    state.sceneRendererPendingElements.clear();
+    syncSceneRendererElements(pendingElements);
+  });
+}
+
+function removeSceneRendererElements(elements) {
+  const ids = Array.from(elements || [])
+    .map((element) => sceneStampIdMap.get(element))
+    .filter(Boolean);
+  noteSceneRendererMutation();
+  if (!state.sceneRendererActive || !ids.length) {
+    return;
+  }
+  const revision = ++state.sceneRenderRevision;
+  supersedeSceneRendererSceneRequests(revision);
+  postSceneRendererMessage("remove", {
+    revision,
+    ids
+  });
+}
+
+function syncSceneRendererOrder() {
+  noteSceneRendererMutation();
+  if (!state.sceneRendererActive) {
+    scheduleSceneRendererEvaluation();
+    return;
+  }
+  const ids = getSceneRendererStampsInOrder().map(getSceneStampId);
+  const revision = ++state.sceneRenderRevision;
+  supersedeSceneRendererSceneRequests(revision);
+  postSceneRendererMessage("order", {
+    revision,
+    ids
+  });
+}
+
+function syncSceneRendererCamera() {
+  if ((!state.sceneRendererActive && !state.sceneRendererPreparing) || !sceneRendererInitialized) {
+    return;
+  }
+  postSceneRendererMessage("camera", { camera: { ...state.camera } });
+}
+
+function resizeSceneRenderer() {
+  if (!sceneRendererInitialized) {
+    return;
+  }
+  const metrics = getSceneRendererCanvasMetrics();
+  postSceneRendererMessage("resize", metrics);
 }
 
 function scheduleStampVisibilityRefresh() {
@@ -4354,8 +6511,10 @@ function restoreAllCulledStampSources() {
   }
   const stamps = world.getElementsByClassName("stamp");
   for (let index = 0; index < stamps.length; index += 1) {
+    setStampOcclusionCulled(stamps[index], false);
     setStampViewportRendered(stamps[index], true);
   }
+  state.occlusionCulledStamps.clear();
 }
 
 function getStampWorldBoundsFromLayout(left, top, width, height, rotationDegrees) {
@@ -4397,12 +6556,82 @@ function getStampWorldBounds(element) {
   );
 }
 
+function getStampSequenceVisualWorldBounds(stroke, element, visual) {
+  if (!(element instanceof HTMLImageElement) || !visual) {
+    return getCachedStampWorldBounds(element);
+  }
+  const left = parseFloat(element.style.left) || 0;
+  const top = parseFloat(element.style.top) || 0;
+  const width = Math.max(0, parseFloat(element.style.width) || 0);
+  const height = Math.max(0, parseFloat(element.style.height) || 0);
+  const layerTransform = visual.groupedTransform
+    ? getStampGroupedLayerTransform(stroke, element, visual.groupedTransform)
+    : getStampLayerTransform(stroke, element);
+  const scale = Math.max(
+    0.001,
+    Math.abs(layerTransform.scale * (Number(visual.scale) || 1))
+  );
+  const rotation =
+    (Number(element.dataset.rotation) || 0) +
+    layerTransform.rotation +
+    (Number(visual.rotationOffset) || 0);
+  const centerX =
+    left + width / 2 + layerTransform.x + (Number(visual.moveX) || 0);
+  const centerY =
+    top + height / 2 + layerTransform.y + (Number(visual.moveY) || 0);
+  const visualWidth = width * scale;
+  const visualHeight = height * scale;
+  return getStampWorldBoundsFromLayout(
+    centerX - visualWidth / 2,
+    centerY - visualHeight / 2,
+    visualWidth,
+    visualHeight,
+    rotation
+  );
+}
+
 function getStampIndexCellCoord(value) {
   return Math.floor(value / STAMP_INDEX_CELL_SIZE);
 }
 
 function getStampIndexCellKey(cellX, cellY) {
   return `${cellX}:${cellY}`;
+}
+
+function getStampCandidatesInBounds(bounds) {
+  const candidates = new Set();
+  if (!bounds) {
+    return candidates;
+  }
+
+  const minCellX = getStampIndexCellCoord(bounds.left);
+  const maxCellX = getStampIndexCellCoord(bounds.right);
+  const minCellY = getStampIndexCellCoord(bounds.top);
+  const maxCellY = getStampIndexCellCoord(bounds.bottom);
+  const cellColumns = Math.max(0, maxCellX - minCellX + 1);
+  const cellRows = Math.max(0, maxCellY - minCellY + 1);
+  const cellCount = cellColumns * cellRows;
+  const fullScanThreshold = Math.max(256, state.stampCount * 3);
+
+  if (!state.stampSpatialBuckets.size || cellCount > fullScanThreshold) {
+    for (const stamp of getVisibleStampElements()) {
+      candidates.add(stamp);
+    }
+    return candidates;
+  }
+
+  for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+    for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+      const bucket = state.stampSpatialBuckets.get(getStampIndexCellKey(cellX, cellY));
+      if (!bucket) {
+        continue;
+      }
+      for (const stamp of bucket) {
+        candidates.add(stamp);
+      }
+    }
+  }
+  return candidates;
 }
 
 function unregisterStampSpatialCells(element) {
@@ -4739,6 +6968,117 @@ function normalizeExportSetupSnapshot(setup) {
   };
 }
 
+function captureCurrentExportSetupSnapshot() {
+  return normalizeExportSetupSnapshot({
+    selectionBounds: state.exportSelectionBounds,
+    scalePercent: state.exportScalePercent,
+    resolutionLocked: state.exportResolutionLocked,
+    customResolution: state.exportCustomResolution
+  });
+}
+
+function exportHistoryNumbersEqual(left, right, epsilon = 0.001) {
+  return Math.abs(Number(left) - Number(right)) <= epsilon;
+}
+
+function exportSelectionBoundsEqual(left, right) {
+  if (!left || !right) {
+    return left === right;
+  }
+  return (
+    exportHistoryNumbersEqual(left.left, right.left) &&
+    exportHistoryNumbersEqual(left.top, right.top) &&
+    exportHistoryNumbersEqual(left.right, right.right) &&
+    exportHistoryNumbersEqual(left.bottom, right.bottom)
+  );
+}
+
+function exportCustomResolutionsEqual(left, right) {
+  if (!left || !right) {
+    return left === right;
+  }
+  return Number(left.width) === Number(right.width) && Number(left.height) === Number(right.height);
+}
+
+function exportSetupSnapshotsEqual(left, right) {
+  if (!left || !right) {
+    return left === right;
+  }
+  return (
+    exportSelectionBoundsEqual(left.selectionBounds, right.selectionBounds) &&
+    exportHistoryNumbersEqual(left.scalePercent, right.scalePercent) &&
+    left.resolutionLocked === right.resolutionLocked &&
+    exportCustomResolutionsEqual(left.customResolution, right.customResolution)
+  );
+}
+
+function resetExportCropHistory() {
+  state.exportCropHistory = [];
+  state.exportCropRedoHistory = [];
+}
+
+function pushExportCropHistoryStep(beforeSetup, afterSetup, options = {}) {
+  const before = normalizeExportSetupSnapshot(beforeSetup);
+  const after = normalizeExportSetupSnapshot(afterSetup);
+  if (
+    !before ||
+    !after ||
+    exportSetupSnapshotsEqual(before, after) ||
+    (options.requireBoundsChange &&
+      exportSelectionBoundsEqual(before.selectionBounds, after.selectionBounds))
+  ) {
+    return false;
+  }
+
+  state.exportCropRedoHistory = [];
+  state.exportCropHistory.push({ before, after });
+  if (state.exportCropHistory.length > EXPORT_CROP_HISTORY_LIMIT) {
+    state.exportCropHistory.splice(
+      0,
+      state.exportCropHistory.length - EXPORT_CROP_HISTORY_LIMIT
+    );
+  }
+  return true;
+}
+
+function applyExportCropHistorySnapshot(snapshot) {
+  const setup = normalizeExportSetupSnapshot(snapshot);
+  if (!state.exportMode || state.exportTask || !setup) {
+    return false;
+  }
+
+  state.exportSelectionBounds = { ...setup.selectionBounds };
+  state.exportScalePercent = setup.scalePercent;
+  state.exportResolutionLocked = setup.resolutionLocked;
+  state.exportCustomResolution = setup.resolutionLocked
+    ? null
+    : normalizeExportCustomResolution(setup.customResolution);
+  state.exportDrag = null;
+  updateExportResolutionLockButtonsUI();
+  updateExportOverlayGeometry();
+  return true;
+}
+
+function undoExportCropAdjustment() {
+  const action = state.exportCropHistory[state.exportCropHistory.length - 1];
+  if (!action || !applyExportCropHistorySnapshot(action.before)) {
+    return false;
+  }
+  state.exportCropHistory.pop();
+  state.exportCropRedoHistory.push(action);
+  return true;
+}
+
+function redoExportCropAdjustment() {
+  const action = state.exportCropRedoHistory[state.exportCropRedoHistory.length - 1];
+  if (!action || !applyExportCropHistorySnapshot(action.after)) {
+    return false;
+  }
+  state.exportCropRedoHistory.pop();
+  state.exportCropHistory.push(action);
+  return true;
+}
+
 function rectContainsRect(outer, inner) {
   const epsilon = 0.001;
   return (
@@ -5061,6 +7401,7 @@ function updateExportOverlayGeometry() {
   const normalized = normalizeExportSelectionBounds(state.exportSelectionBounds);
   state.exportSelectionBounds = normalized;
   exportOverlay.classList.toggle("is-see-beyond-off", state.exportSeeBeyondEnabled === false);
+  exportOverlay.classList.toggle("has-guidelines", Boolean(state.exportGuidelinesEnabled));
 
   const topLeft = worldToScreen(normalized.left, normalized.top);
   const bottomRight = worldToScreen(normalized.right, normalized.bottom);
@@ -5171,12 +7512,14 @@ function updateExportModeUI() {
 
 function exitExportMode(options = {}) {
   rememberCurrentExportSetup();
+  resetExportCropHistory();
   state.exportMode = false;
   state.exportSelectionBounds = null;
   state.exportDrag = null;
   state.exportScalePercent = 100;
   updateExportModeUI();
   updateUndoState();
+  scheduleSceneRendererEvaluation();
   if (options.focusButton) {
     exportModeButton.focus();
   }
@@ -5189,6 +7532,10 @@ function enterExportMode() {
 
   if (!getVisibleStampCount()) {
     return;
+  }
+
+  if (state.sceneRendererActive || state.sceneRendererPreparing) {
+    deactivateSceneRenderer();
   }
 
   if (clearConfirmModal.classList.contains("is-open")) {
@@ -5212,6 +7559,7 @@ function enterExportMode() {
   }
 
   const remembered = getRememberedExportSetup();
+  resetExportCropHistory();
   state.exportMode = true;
   state.exportSelectionBounds = remembered
     ? remembered.selectionBounds
@@ -5247,7 +7595,8 @@ function startExportSelectionDrag(pointerId, options) {
     edge,
     startWorldX: pointerPoint.x,
     startWorldY: pointerPoint.y,
-    originBounds: { ...state.exportSelectionBounds }
+    originBounds: { ...state.exportSelectionBounds },
+    originSetup: captureCurrentExportSetupSnapshot()
   };
   try {
     exportSelection.setPointerCapture(pointerId);
@@ -5412,7 +7761,8 @@ function updateExportSelectionDrag(pointerId, clientX, clientY, modifiers = {}) 
 }
 
 function stopExportSelectionDrag(pointerId) {
-  if (!state.exportDrag || state.exportDrag.pointerId !== pointerId) {
+  const drag = state.exportDrag;
+  if (!drag || drag.pointerId !== pointerId) {
     return;
   }
   try {
@@ -5423,6 +7773,9 @@ function stopExportSelectionDrag(pointerId) {
     // Ignore release errors for already-finished pointers.
   }
   state.exportDrag = null;
+  pushExportCropHistoryStep(drag.originSetup, captureCurrentExportSetupSnapshot(), {
+    requireBoundsChange: true
+  });
 }
 
 function getEnabledBrushesForSizing() {
@@ -5859,10 +8212,16 @@ function cancelDrawingForGesture() {
   }
 
   const drawing = state.drawing;
+  removeSceneRendererElements(drawing.stroke.elements);
   for (const element of drawing.stroke.elements) {
+    unregisterStampSpatialCells(element);
+    state.viewportRenderedStamps.delete(element);
     decrementUrlRef(element.dataset.brushUrl);
     removeSequencePixelateProxy(element);
-    element.remove();
+    if (element.parentElement === world) {
+      element.remove();
+      state.stampCount = Math.max(0, state.stampCount - 1);
+    }
   }
   if (viewport.hasPointerCapture(drawing.pointerId)) {
     viewport.releasePointerCapture(drawing.pointerId);
@@ -6080,7 +8439,9 @@ function isStampAtLeastHalfInsideCircle(element, centerX, centerY, radius) {
 }
 
 function removeStrokeFromState(stroke) {
+  cancelScheduledStrokeSequenceEffectRefresh(stroke);
   state.strokeById.delete(stroke.id);
+  state.sequenceActiveStrokeIds.delete(stroke.id);
   const strokeIndex = state.strokes.indexOf(stroke);
   if (strokeIndex >= 0) {
     state.strokes.splice(strokeIndex, 1);
@@ -6088,10 +8449,20 @@ function removeStrokeFromState(stroke) {
 }
 
 function removeStampElementFromState(element, removalContext = null) {
+  invalidateStampOcclusion();
+  removeSceneRendererElements([element]);
   const strokeId = Number(element.dataset.strokeId);
   const stroke = Number.isFinite(strokeId) ? state.strokeById.get(strokeId) : null;
-  const strokeIndex = stroke ? state.strokes.indexOf(stroke) : -1;
-  const stampIndex = stroke ? stroke.elements.indexOf(element) : -1;
+  const currentStrokeIndex = stroke ? state.strokes.indexOf(stroke) : -1;
+  const currentStampIndex = stroke ? stroke.elements.indexOf(element) : -1;
+  const strokeIndex =
+    stroke && removalContext?.strokeOrder instanceof Map && removalContext.strokeOrder.has(stroke)
+      ? Number(removalContext.strokeOrder.get(stroke))
+      : currentStrokeIndex;
+  const stampIndex =
+    removalContext?.stampOrder instanceof Map && removalContext.stampOrder.has(element)
+      ? Number(removalContext.stampOrder.get(element))
+      : currentStampIndex;
 
   if (removalContext) {
     let worldIndex = -1;
@@ -6110,8 +8481,10 @@ function removeStampElementFromState(element, removalContext = null) {
     });
   }
 
-  if (stroke && stampIndex >= 0) {
-    stroke.elements.splice(stampIndex, 1);
+  if (stroke && currentStampIndex >= 0) {
+    stroke.elements.splice(currentStampIndex, 1);
+    markStrokeSerializationDirty(stroke);
+    invalidateStrokeSequenceTopology(stroke);
     if (!stroke.elements.length) {
       removeStrokeFromState(stroke);
     }
@@ -6119,6 +8492,7 @@ function removeStampElementFromState(element, removalContext = null) {
 
   if (element.parentElement === world) {
     unregisterStampSpatialCells(element);
+    state.viewportRenderedStamps.delete(element);
     decrementUrlRef(element.dataset.brushUrl);
     removeSequencePixelateProxy(element);
     element.remove();
@@ -6251,6 +8625,7 @@ function deleteSequenceRuntimeDataset(element) {
   if (!element?.dataset) {
     return;
   }
+  sequenceSlotRuntimeStampCache.delete(element);
   for (const key of Object.keys(element.dataset)) {
     if (key.startsWith("sequence")) {
       delete element.dataset[key];
@@ -6277,6 +8652,7 @@ function commitSequenceSlotScratch(stamp, slotIndex) {
   if (!stamp?.dataset) {
     return;
   }
+  sequenceSlotRuntimeStampCache.delete(stamp);
   for (const key of SEQUENCE_SLOT_STATE_KEYS) {
     const slotKey = getSequenceSlotDatasetKey(slotIndex, key);
     if (Object.prototype.hasOwnProperty.call(stamp.dataset, key)) {
@@ -6288,11 +8664,61 @@ function commitSequenceSlotScratch(stamp, slotIndex) {
   }
 }
 
+function createSequenceSlotRuntimeStamp(stamp, slotIndex) {
+  let slots = sequenceSlotRuntimeStampCache.get(stamp);
+  if (!slots) {
+    slots = [];
+    sequenceSlotRuntimeStampCache.set(stamp, slots);
+  }
+  if (slots[slotIndex]) {
+    return slots[slotIndex];
+  }
+  const dataset = Object.create(null);
+  for (const key of SEQUENCE_BASE_DATASET_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(stamp.dataset, key)) {
+      dataset[key] = stamp.dataset[key];
+    }
+  }
+  if (stamp.dataset.brushUrl) {
+    dataset.brushUrl = stamp.dataset.brushUrl;
+  }
+  for (const key of SEQUENCE_SLOT_STATE_KEYS) {
+    const slotKey = getSequenceSlotDatasetKey(slotIndex, key);
+    if (Object.prototype.hasOwnProperty.call(stamp.dataset, slotKey)) {
+      dataset[key] = stamp.dataset[slotKey];
+    }
+  }
+  const runtimeStamp = { dataset };
+  slots[slotIndex] = runtimeStamp;
+  return runtimeStamp;
+}
+
+function commitSequenceSlotRuntimeStamp(stamp, slotIndex, runtimeStamp) {
+  const dataset = runtimeStamp?.dataset;
+  if (!dataset || typeof dataset !== "object") {
+    return;
+  }
+  for (const key of SEQUENCE_SLOT_STATE_KEYS) {
+    const slotKey = getSequenceSlotDatasetKey(slotIndex, key);
+    if (Object.prototype.hasOwnProperty.call(dataset, key)) {
+      const nextValue = String(dataset[key]);
+      if (stamp.dataset[slotKey] !== nextValue) {
+        stamp.dataset[slotKey] = nextValue;
+      }
+    } else if (Object.prototype.hasOwnProperty.call(stamp.dataset, slotKey)) {
+      delete stamp.dataset[slotKey];
+    }
+  }
+}
+
 function cloneSequenceRuntime(runtime) {
   if (!runtime || typeof runtime !== "object") {
     return null;
   }
   const clone = { ...runtime };
+  if (runtime.groupDataset && typeof runtime.groupDataset === "object") {
+    clone.groupDataset = { ...runtime.groupDataset };
+  }
   if (Array.isArray(runtime.triggeredPulseByIndex)) {
     clone.triggeredPulseByIndex = runtime.triggeredPulseByIndex.slice();
   }
@@ -6305,6 +8731,34 @@ function cloneSequenceRuntime(runtime) {
   return clone;
 }
 
+function cloneLayerSequencePreviewSlots(slots) {
+  if (!Array.isArray(slots)) {
+    return null;
+  }
+  return slots.map((slotState) => {
+    if (!slotState || !Array.isArray(slotState.buckets)) {
+      return null;
+    }
+    return {
+      ...slotState,
+      buckets: slotState.buckets.map((bucket) => ({ ...bucket }))
+    };
+  });
+}
+
+function createLayerSequencePreviewExportSnapshot(stroke) {
+  return cloneLayerSequencePreviewSlots(layerSequencePreviewRuntimeByStroke.get(stroke));
+}
+
+function restoreLayerSequencePreviewExportSnapshot(stroke, slots) {
+  const restoredSlots = cloneLayerSequencePreviewSlots(slots);
+  if (restoredSlots) {
+    layerSequencePreviewRuntimeByStroke.set(stroke, restoredSlots);
+  } else {
+    layerSequencePreviewRuntimeByStroke.delete(stroke);
+  }
+}
+
 function createSequenceExportSnapshot() {
   return state.strokes.map((stroke) => ({
     stroke,
@@ -6312,6 +8766,10 @@ function createSequenceExportSnapshot() {
     sequenceSlotRuntimes: Array.isArray(stroke.sequenceSlotRuntimes)
       ? stroke.sequenceSlotRuntimes.map(cloneSequenceRuntime)
       : null,
+    sequencePauseStartTime: Number.isFinite(Number(stroke.sequencePauseStartTime))
+      ? Number(stroke.sequencePauseStartTime)
+      : null,
+    sequencePreviewRuntime: createLayerSequencePreviewExportSnapshot(stroke),
     elements: stroke.elements.map((element) => {
       const dataset = {};
       for (const key of Object.keys(element.dataset)) {
@@ -6342,6 +8800,15 @@ function restoreSequenceExportSnapshot(snapshot) {
     strokeSnapshot.stroke.sequenceSlotRuntimes = Array.isArray(strokeSnapshot.sequenceSlotRuntimes)
       ? strokeSnapshot.sequenceSlotRuntimes.map(cloneSequenceRuntime)
       : null;
+    if (Number.isFinite(strokeSnapshot.sequencePauseStartTime)) {
+      strokeSnapshot.stroke.sequencePauseStartTime = strokeSnapshot.sequencePauseStartTime;
+    } else {
+      delete strokeSnapshot.stroke.sequencePauseStartTime;
+    }
+    restoreLayerSequencePreviewExportSnapshot(
+      strokeSnapshot.stroke,
+      strokeSnapshot.sequencePreviewRuntime
+    );
     const elements = Array.isArray(strokeSnapshot.elements) ? strokeSnapshot.elements : [];
     for (const elementSnapshot of elements) {
       const element = elementSnapshot?.element;
@@ -6391,9 +8858,18 @@ async function prewarmSequencesForExport(prewarmMs, task = null) {
   runLayerSequences(durationMs);
 }
 
-function hasActiveSequenceEffectOnCanvas() {
-  return state.strokes.some((stroke) => {
-    if (!stroke || stroke.hidden || !isLayerSequenceEnabled(stroke) || !Array.isArray(stroke.elements)) {
+function getActiveSequenceStrokes() {
+  if (state.gifAnimationsPaused || document.visibilityState === "hidden") {
+    return [];
+  }
+  return state.strokes.filter((stroke) => {
+    if (
+      !stroke ||
+      stroke.hidden ||
+      isStrokeSequencePaused(stroke) ||
+      !isLayerSequenceEnabled(stroke) ||
+      !Array.isArray(stroke.elements)
+    ) {
       return false;
     }
     return getLayerSequenceSlots(stroke).some((slot) =>
@@ -6403,6 +8879,41 @@ function hasActiveSequenceEffectOnCanvas() {
   });
 }
 
+function hasActiveSequenceEffectOnCanvas() {
+  return getActiveSequenceStrokes().length > 0;
+}
+
+function getTrackedActiveSequenceStrokes() {
+  const activeStrokes = [];
+  for (const strokeId of state.sequenceActiveStrokeIds) {
+    const stroke = state.strokeById.get(strokeId);
+    if (stroke) {
+      activeStrokes.push(stroke);
+    }
+  }
+  return activeStrokes;
+}
+
+function getAdaptiveSequenceFrameIntervalMs(activeStrokes = null) {
+  const strokes = Array.isArray(activeStrokes)
+    ? activeStrokes
+    : getTrackedActiveSequenceStrokes();
+  let activeStampCount = 0;
+  for (const stroke of strokes) {
+    activeStampCount += Array.isArray(stroke?.elements) ? stroke.elements.length : 0;
+  }
+  if (activeStampCount >= 8000) {
+    return 50;
+  }
+  if (activeStampCount >= 3000) {
+    return 1000 / 30;
+  }
+  if (activeStampCount >= 1000) {
+    return 25;
+  }
+  return 0;
+}
+
 function notifyStampLimitReached() {
   updateBrushStatus(
     `Canvas limit reached (${MAX_VISIBLE_STAMPS.toLocaleString()} images). Undo or clear to add more.`
@@ -6410,7 +8921,14 @@ function notifyStampLimitReached() {
 }
 
 function normalizeStrokeLayerType(layerType) {
-  if (layerType === "spray" || layerType === "line" || layerType === "box" || layerType === "circle") {
+  if (
+    layerType === "spray" ||
+    layerType === "line" ||
+    layerType === "box" ||
+    layerType === "box-outline" ||
+    layerType === "circle" ||
+    layerType === "circle-outline"
+  ) {
     return layerType;
   }
   return "stroke";
@@ -6447,6 +8965,7 @@ function setLayerBlendMode(stroke, blendMode) {
     return;
   }
   stroke.blendMode = normalizeLayerBlendMode(blendMode);
+  markStrokeSerializationDirty(stroke);
   applyStrokeBlendMode(stroke);
 }
 
@@ -6454,12 +8973,16 @@ function applyStrokeBlendMode(stroke) {
   if (!stroke || !Array.isArray(stroke.elements)) {
     return;
   }
+  invalidateStampOcclusion();
   const blendMode = getLayerBlendMode(stroke);
   const cssBlendMode = blendMode === "normal" ? "" : blendMode;
   for (const element of stroke.elements) {
-    element.style.mixBlendMode = cssBlendMode;
-    element.dataset.blendMode = blendMode;
+    setInlineStyleIfChanged(element, "mixBlendMode", cssBlendMode);
+    if (element.dataset.blendMode !== blendMode) {
+      element.dataset.blendMode = blendMode;
+    }
   }
+  syncSceneRendererElements(stroke.elements);
 }
 
 function normalizeLayerSequenceValue(value, options) {
@@ -6469,14 +8992,15 @@ function normalizeLayerSequenceValue(value, options) {
 }
 
 function normalizeLayerSequenceSlot(slot = {}) {
+  const effect = normalizeLayerSequenceValue(
+    slot.effect || slot.sequenceEffect || slot.sequenceEffects,
+    LAYER_SEQUENCE_EFFECT_OPTIONS
+  );
   return {
-    effect: normalizeLayerSequenceValue(
-      slot.effect || slot.sequenceEffect || slot.sequenceEffects,
-      LAYER_SEQUENCE_EFFECT_OPTIONS
-    ),
-    timingStyle: normalizeLayerSequenceValue(
+    effect,
+    timingStyle: normalizeLayerSequenceTimingStyle(
       slot.timingStyle || slot.sequenceTimingStyle || slot.sequenceTimingStyles,
-      LAYER_SEQUENCE_TIMING_OPTIONS
+      effect
     ),
     settings: normalizeLayerSequenceSettings(slot.settings || slot.sequenceSettings)
   };
@@ -6498,6 +9022,7 @@ function setExtraLayerSequenceSlots(stroke, slots) {
     return;
   }
   stroke.sequenceEffectSlots = normalizeExtraLayerSequenceSlots(slots);
+  markStrokeSerializationDirty(stroke);
 }
 
 function hasLayerSequenceEffectSlots(stroke) {
@@ -6537,17 +9062,37 @@ function isImplementedLayerSequenceEffect(effect) {
   );
 }
 
+function isGroupedLayerSequenceEffect(effect) {
+  return isImplementedLayerSequenceEffect(effect) &&
+    !LAYER_SEQUENCE_GROUPED_EXCLUDED_EFFECTS.has(String(effect || ""));
+}
+
+function getLayerSequenceTimingOptionsForEffect(effect) {
+  return LAYER_SEQUENCE_TIMING_OPTIONS.filter(
+    (option) => option.value !== "grouped" || isGroupedLayerSequenceEffect(effect)
+  );
+}
+
+function normalizeLayerSequenceTimingStyle(value, effect) {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  if (String(candidate || "") === "grouped" && !isGroupedLayerSequenceEffect(effect)) {
+    return "all";
+  }
+  return normalizeLayerSequenceValue(candidate, getLayerSequenceTimingOptionsForEffect(effect));
+}
+
 function getLayerSequenceSlot(stroke, slotIndex = 0) {
   const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
   if (safeSlotIndex <= 0) {
+    const effect = normalizeLayerSequenceValue(
+      stroke?.sequenceEffect || stroke?.sequenceEffects,
+      LAYER_SEQUENCE_EFFECT_OPTIONS
+    );
     return {
-      effect: normalizeLayerSequenceValue(
-        stroke?.sequenceEffect || stroke?.sequenceEffects,
-        LAYER_SEQUENCE_EFFECT_OPTIONS
-      ),
-      timingStyle: normalizeLayerSequenceValue(
+      effect,
+      timingStyle: normalizeLayerSequenceTimingStyle(
         stroke?.sequenceTimingStyle || stroke?.sequenceTimingStyles,
-        LAYER_SEQUENCE_TIMING_OPTIONS
+        effect
       ),
       settings: normalizeLayerSequenceSettings(stroke?.sequenceSettings)
     };
@@ -6570,9 +9115,9 @@ function getLayerSequenceTimingStyle(stroke, slotIndex = 0) {
   if (Number(slotIndex) > 0) {
     return getLayerSequenceSlot(stroke, slotIndex).timingStyle;
   }
-  return normalizeLayerSequenceValue(
+  return normalizeLayerSequenceTimingStyle(
     stroke?.sequenceTimingStyle || stroke?.sequenceTimingStyles,
-    LAYER_SEQUENCE_TIMING_OPTIONS
+    getLayerSequenceEffect(stroke)
   );
 }
 
@@ -6587,11 +9132,11 @@ function setLayerSequenceValue(stroke, group, value, slotIndex = 0) {
   if (!stroke) {
     return;
   }
-  const options = group === "timing"
-    ? LAYER_SEQUENCE_TIMING_OPTIONS
-    : LAYER_SEQUENCE_EFFECT_OPTIONS;
-  const normalized = normalizeLayerSequenceValue(value, options);
   const safeSlotIndex = clamp(Math.floor(Number(slotIndex)) || 0, 0, MAX_LAYER_SEQUENCE_EFFECTS - 1);
+  const currentEffect = getLayerSequenceEffect(stroke, safeSlotIndex);
+  const normalized = group === "timing"
+    ? normalizeLayerSequenceTimingStyle(value, currentEffect)
+    : normalizeLayerSequenceValue(value, LAYER_SEQUENCE_EFFECT_OPTIONS);
   if (safeSlotIndex > 0) {
     const extras = getExtraLayerSequenceSlots(stroke);
     const slot = normalizeLayerSequenceSlot(extras[safeSlotIndex - 1]);
@@ -6599,6 +9144,7 @@ function setLayerSequenceValue(stroke, group, value, slotIndex = 0) {
       slot.timingStyle = normalized;
     } else {
       slot.effect = normalized;
+      slot.timingStyle = normalizeLayerSequenceTimingStyle(slot.timingStyle, slot.effect);
     }
     extras[safeSlotIndex - 1] = slot;
     setExtraLayerSequenceSlots(stroke, extras);
@@ -6608,7 +9154,13 @@ function setLayerSequenceValue(stroke, group, value, slotIndex = 0) {
   } else {
     stroke.sequenceEffect = normalized;
     delete stroke.sequenceEffects;
+    stroke.sequenceTimingStyle = normalizeLayerSequenceTimingStyle(
+      stroke.sequenceTimingStyle || stroke.sequenceTimingStyles,
+      stroke.sequenceEffect
+    );
+    delete stroke.sequenceTimingStyles;
   }
+  markStrokeSerializationDirty(stroke);
 }
 
 function getLayerSequenceSettings(stroke, slotIndex = 0) {
@@ -6701,9 +9253,13 @@ function setLayerSequenceSetting(stroke, key, rawValue, slotIndex = 0) {
   } else {
     stroke.sequenceSettings = normalizeLayerSequenceSettings(nextSettings);
   }
+  markStrokeSerializationDirty(stroke);
 }
 
 function createLayerSequenceSelect(stroke, group, options, slotIndex = 0) {
+  const selectOptions = group === "timing"
+    ? getLayerSequenceTimingOptionsForEffect(getLayerSequenceEffect(stroke, slotIndex))
+    : options;
   const selectedValue = group === "timing"
     ? getLayerSequenceTimingStyle(stroke, slotIndex)
     : getLayerSequenceEffect(stroke, slotIndex);
@@ -6713,7 +9269,7 @@ function createLayerSequenceSelect(stroke, group, options, slotIndex = 0) {
   select.dataset.sequenceSlotIndex = String(slotIndex);
   select.setAttribute("aria-label", group === "timing" ? "Sequence style" : "Sequence effect");
 
-  for (const option of options) {
+  for (const option of selectOptions) {
     const optionNode = document.createElement("option");
     optionNode.value = option.value;
     optionNode.textContent = option.label;
@@ -6963,8 +9519,20 @@ function getLayerControlDisplayValue(stroke, key) {
   return "";
 }
 
+const strokeLayerBoundsCache = new WeakMap();
+
 function getStrokeLayerBounds(stroke) {
   const elements = Array.isArray(stroke?.elements) ? stroke.elements : [];
+  const revision = Number(stroke?.serializationRevision) || 0;
+  const cached = strokeLayerBoundsCache.get(stroke);
+  if (
+    cached &&
+    cached.revision === revision &&
+    cached.elements === elements &&
+    cached.length === elements.length
+  ) {
+    return cached.bounds;
+  }
   let left = Infinity;
   let top = Infinity;
   let right = -Infinity;
@@ -6983,9 +9551,26 @@ function getStrokeLayerBounds(stroke) {
     bottom = Math.max(bottom, elementTop + height);
   }
   if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right) || !Number.isFinite(bottom)) {
+    if (stroke && typeof stroke === "object") {
+      strokeLayerBoundsCache.set(stroke, {
+        revision,
+        elements,
+        length: elements.length,
+        bounds: null
+      });
+    }
     return null;
   }
-  return { left, top, right, bottom };
+  const bounds = { left, top, right, bottom };
+  if (stroke && typeof stroke === "object") {
+    strokeLayerBoundsCache.set(stroke, {
+      revision,
+      elements,
+      length: elements.length,
+      bounds
+    });
+  }
+  return bounds;
 }
 
 function getStampLayerTransform(stroke, element) {
@@ -7019,6 +9604,43 @@ function getStampLayerTransform(stroke, element) {
   };
 }
 
+function getStampGroupedLayerTransform(stroke, element, groupedTransform = null) {
+  const groupMoveX = Number(groupedTransform?.moveX) || 0;
+  const groupMoveY = Number(groupedTransform?.moveY) || 0;
+  const groupRotation = Number(groupedTransform?.rotationOffset) || 0;
+  const groupScale = Number.isFinite(Number(groupedTransform?.scale))
+    ? Math.max(0.001, Number(groupedTransform.scale))
+    : 1;
+  const scale = getLayerScaleFactor(stroke) * groupScale;
+  const rotation = getLayerRotationDegrees(stroke) + groupRotation;
+  if (!stroke || !element) {
+    return { x: groupMoveX, y: groupMoveY, rotation, scale };
+  }
+  const bounds = getStrokeLayerBounds(stroke);
+  if (!bounds) {
+    return { x: groupMoveX, y: groupMoveY, rotation, scale };
+  }
+  const layerCenterX = (bounds.left + bounds.right) / 2;
+  const layerCenterY = (bounds.top + bounds.bottom) / 2;
+  const left = parseFloat(element.style.left) || 0;
+  const top = parseFloat(element.style.top) || 0;
+  const width = Math.max(0, parseFloat(element.style.width) || 0);
+  const height = Math.max(0, parseFloat(element.style.height) || 0);
+  const centerX = left + width / 2;
+  const centerY = top + height / 2;
+  const dx = (centerX - layerCenterX) * scale;
+  const dy = (centerY - layerCenterY) * scale;
+  const radians = (rotation * Math.PI) / 180;
+  const transformedCenterX = layerCenterX + groupMoveX + dx * Math.cos(radians) - dy * Math.sin(radians);
+  const transformedCenterY = layerCenterY + groupMoveY + dx * Math.sin(radians) + dy * Math.cos(radians);
+  return {
+    x: transformedCenterX - centerX,
+    y: transformedCenterY - centerY,
+    rotation,
+    scale
+  };
+}
+
 function syncStrokeLayerOpacityBase(stroke) {
   if (!stroke || !Array.isArray(stroke.elements)) {
     return;
@@ -7033,7 +9655,9 @@ function applyStampLayerVisualStyle(stroke, stamp, visual = null) {
   if (!stamp) {
     return;
   }
-  const layerTransform = getStampLayerTransform(stroke, stamp);
+  const layerTransform = visual?.groupedTransform
+    ? getStampGroupedLayerTransform(stroke, stamp, visual.groupedTransform)
+    : getStampLayerTransform(stroke, stamp);
   const baseRotation = Number(stamp.dataset.rotation) || 0;
   const opacity = Number.isFinite(Number(visual?.opacity))
     ? Number(visual.opacity)
@@ -7042,15 +9666,19 @@ function applyStampLayerVisualStyle(stroke, stamp, visual = null) {
   const moveY = layerTransform.y + (Number(visual?.moveY) || 0);
   const rotation = baseRotation + layerTransform.rotation + (Number(visual?.rotationOffset) || 0);
   const scale = layerTransform.scale * (Number(visual?.scale) || 1);
-  stamp.style.opacity = String(clamp(opacity, 0, 1));
-  stamp.style.transform =
-    `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`;
+  setInlineStyleIfChanged(stamp, "opacity", String(clamp(opacity, 0, 1)));
+  setInlineStyleIfChanged(
+    stamp,
+    "transform",
+    `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`
+  );
 }
 
 function applyStrokeLayerVisuals(stroke) {
   if (!stroke || !Array.isArray(stroke.elements)) {
     return;
   }
+  invalidateStampOcclusion();
   syncStrokeLayerOpacityBase(stroke);
   for (const element of stroke.elements) {
     applyStampLayerVisualStyle(stroke, element);
@@ -7062,6 +9690,7 @@ function applyStrokeLayerVisuals(stroke) {
     }
   }
   scheduleStampVisibilityRefresh();
+  syncSceneRendererElements(stroke.elements);
 }
 
 function setLayerControlValue(stroke, key, value) {
@@ -7076,6 +9705,7 @@ function setLayerControlValue(stroke, key, value) {
   } else if (key === "layerRotation") {
     stroke.layerRotation = normalizeLayerRotationDegrees(value);
   }
+  markStrokeSerializationDirty(stroke);
   applyStrokeLayerVisuals(stroke);
 }
 
@@ -7110,6 +9740,43 @@ function createLayerRangeControl(stroke, key, label, min, max, step) {
   return field;
 }
 
+function createLayerFreezeControl(stroke) {
+  const row = document.createElement("div");
+  row.className = "edit-layer-property-row edit-layer-freeze-row";
+
+  const inputId = `editLayerFreeze-${stroke.id}`;
+  const labelText = document.createElement("label");
+  labelText.className = "edit-layer-property-label";
+  labelText.htmlFor = inputId;
+  labelText.textContent = "freeze?";
+
+  const value = document.createElement("span");
+  value.className = "edit-layer-property-value";
+  value.setAttribute("aria-hidden", "true");
+
+  const switchLabel = document.createElement("label");
+  switchLabel.className = "ios-switch edit-layer-freeze-switch";
+  switchLabel.htmlFor = inputId;
+
+  const input = document.createElement("input");
+  input.id = inputId;
+  input.type = "checkbox";
+  input.className = "edit-layer-freeze-input";
+  input.checked = Boolean(stroke.animationPaused);
+  input.setAttribute("aria-label", "Freeze layer animation");
+
+  const slider = document.createElement("span");
+  slider.className = "ios-switch-slider";
+  slider.setAttribute("aria-hidden", "true");
+
+  switchLabel.appendChild(input);
+  switchLabel.appendChild(slider);
+  row.appendChild(labelText);
+  row.appendChild(value);
+  row.appendChild(switchLabel);
+  return row;
+}
+
 function createLayerPropertyControls(stroke) {
   const panel = document.createElement("div");
   panel.className = "edit-layer-property-controls";
@@ -7117,6 +9784,7 @@ function createLayerPropertyControls(stroke) {
   panel.appendChild(createLayerRangeControl(stroke, "layerOpacity", "opacity", 0, 100, 1));
   panel.appendChild(createLayerRangeControl(stroke, "layerScale", "scale", -1000, 1000, 1));
   panel.appendChild(createLayerRangeControl(stroke, "layerRotation", "rotation", -360, 360, 1));
+  panel.appendChild(createLayerFreezeControl(stroke));
   return panel;
 }
 
@@ -7264,6 +9932,500 @@ function updateLayerBlendMenuSelection(menu, blendMode) {
   }
 }
 
+function getLayerSequencePreviewBucketCount(total) {
+  return Math.min(
+    LAYER_SEQUENCE_PREVIEW_MAX_BUCKETS,
+    Math.max(1, Math.floor(Number(total)) || 1)
+  );
+}
+
+function getLayerSequencePreviewSlotState(stroke, slotIndex, total, effect, timingStyle) {
+  if (!stroke || typeof stroke !== "object") {
+    return null;
+  }
+  let slots = layerSequencePreviewRuntimeByStroke.get(stroke);
+  if (!slots) {
+    slots = [];
+    layerSequencePreviewRuntimeByStroke.set(stroke, slots);
+  }
+  const safeSlotIndex = clamp(
+    Math.floor(Number(slotIndex)) || 0,
+    0,
+    MAX_LAYER_SEQUENCE_EFFECTS - 1
+  );
+  const safeTotal = Math.max(0, Math.floor(Number(total)) || 0);
+  const bucketCount = getLayerSequencePreviewBucketCount(safeTotal);
+  const signature = `${safeTotal}:${effect}:${timingStyle}`;
+  let slotState = slots[safeSlotIndex];
+  if (!slotState || slotState.signature !== signature) {
+    slotState = {
+      signature,
+      total: safeTotal,
+      effect,
+      timingStyle,
+      decayMs: null,
+      pausedAt: null,
+      buckets: Array.from({ length: bucketCount }, () => ({
+        key: "",
+        firedAt: -Infinity,
+        decayMs: LAYER_SEQUENCE_PREVIEW_MIN_DECAY_MS,
+        effectDuration: 1
+      }))
+    };
+    slots[safeSlotIndex] = slotState;
+  }
+  return slotState;
+}
+
+function getLayerSequencePreviewDecayMs(timingStyle, effectDuration, settings) {
+  let duration = Math.sqrt(Math.max(1, Number(effectDuration) || 1)) * 18;
+  if (timingStyle === "pulse") {
+    duration = getPulseSpacingMs(settings) * 2.2;
+  } else if (timingStyle === "wave") {
+    duration = getWaveSpacingMs(settings) * 1.25;
+  } else if (timingStyle === "step") {
+    duration = Math.max(1, Number(settings.stepLength) || 1) * 0.75;
+  } else if (timingStyle === "random") {
+    duration = getRandomIntervalMs(settings) * 0.75;
+  }
+  return Math.round(clamp(
+    duration,
+    LAYER_SEQUENCE_PREVIEW_MIN_DECAY_MS,
+    LAYER_SEQUENCE_PREVIEW_MAX_DECAY_MS
+  ));
+}
+
+function createLayerSequencePreviewCapture(
+  stroke,
+  slotIndex,
+  total,
+  effect,
+  timingStyle,
+  settings,
+  effectDuration
+) {
+  if (!stroke || state.sequenceExportActive) {
+    return null;
+  }
+  const slotState = getLayerSequencePreviewSlotState(
+    stroke,
+    slotIndex,
+    total,
+    effect,
+    timingStyle
+  );
+  if (!slotState) {
+    return null;
+  }
+  if (!Number.isFinite(slotState.decayMs)) {
+    slotState.decayMs = getLayerSequencePreviewDecayMs(
+      timingStyle,
+      effectDuration,
+      settings
+    );
+  }
+  return {
+    slotState,
+    total: Math.max(1, Math.floor(Number(total)) || 1),
+    effectDuration: Math.max(1, Number(effectDuration) || 1),
+    recordedKeysByBucket: Array(slotState.buckets.length).fill("")
+  };
+}
+
+function claimLayerSequencePreviewImpulse(capture, index, trigger, activateAll = false) {
+  if (!capture?.slotState || !trigger?.key) {
+    return false;
+  }
+  if (activateAll) {
+    return true;
+  }
+  const safeIndex = clamp(Math.floor(Number(index)) || 0, 0, capture.total - 1);
+  const bucketCount = capture.slotState.buckets.length;
+  const bucketIndex = Math.min(
+    bucketCount - 1,
+    Math.floor((safeIndex * bucketCount) / capture.total)
+  );
+  if (
+    capture.recordedKeysByBucket[bucketIndex] === trigger.key ||
+    capture.slotState.buckets[bucketIndex]?.key === trigger.key
+  ) {
+    return false;
+  }
+  capture.recordedKeysByBucket[bucketIndex] = trigger.key;
+  return true;
+}
+
+function updateLayerSequencePreviewBucket(bucket, key, firedAt, decayMs, effectDuration) {
+  if (!bucket || bucket.key === key) {
+    return;
+  }
+  bucket.key = key;
+  bucket.firedAt = firedAt;
+  bucket.decayMs = decayMs;
+  bucket.effectDuration = effectDuration;
+}
+
+function recordLayerSequencePreviewImpulse(
+  capture,
+  index,
+  trigger,
+  now,
+  activateAll = false
+) {
+  if (!capture?.slotState || !trigger?.key) {
+    return;
+  }
+  const { slotState, total, effectDuration } = capture;
+  const frameTime = Number.isFinite(Number(now)) ? Number(now) : performance.now();
+  const rawTriggerStartTime = Number.isFinite(Number(trigger.startTime))
+    ? Number(trigger.startTime)
+    : frameTime;
+  const firedAt = Math.min(
+    frameTime,
+    rawTriggerStartTime - SEQUENCE_TRIGGER_PRIME_MS
+  );
+  const decayMs = slotState.decayMs;
+  const bucketCount = slotState.buckets.length;
+  if (activateAll) {
+    for (const bucket of slotState.buckets) {
+      updateLayerSequencePreviewBucket(
+        bucket,
+        trigger.key,
+        firedAt,
+        decayMs,
+        effectDuration
+      );
+    }
+    return;
+  }
+  const safeIndex = clamp(Math.floor(Number(index)) || 0, 0, total - 1);
+  const bucketIndex = Math.min(
+    bucketCount - 1,
+    Math.floor((safeIndex * bucketCount) / total)
+  );
+  updateLayerSequencePreviewBucket(
+    slotState.buckets[bucketIndex],
+    trigger.key,
+    firedAt,
+    decayMs,
+    effectDuration
+  );
+}
+
+function createLayerSequencePreview(stroke, slotIndex = 0) {
+  const preview = document.createElement("div");
+  preview.className = "edit-layer-sequence-preview";
+  preview.dataset.strokeId = String(stroke.id);
+  preview.dataset.sequenceSlotIndex = String(slotIndex);
+  preview.setAttribute("role", "img");
+  preview.title = "Live trigger impulses across this layer's stamp sequence";
+
+  const canvas = document.createElement("canvas");
+  canvas.className = "edit-layer-sequence-preview-canvas";
+  canvas.setAttribute("aria-hidden", "true");
+
+  preview.appendChild(canvas);
+  return preview;
+}
+
+function getLayerSequencePreviewPlaybackState(stroke) {
+  if (!isLayerSequenceEnabled(stroke)) {
+    return "disabled";
+  }
+  if (stroke?.hidden) {
+    return "hidden";
+  }
+  if (
+    document.visibilityState === "hidden" ||
+    isStrokeSequencePaused(stroke) ||
+    Number.isFinite(Number(stroke?.sequencePauseStartTime))
+  ) {
+    return "paused";
+  }
+  return "playing";
+}
+
+function setLayerSequencePreviewDataset(preview, key, value) {
+  const nextValue = String(value);
+  if (preview.dataset[key] !== nextValue) {
+    preview.dataset[key] = nextValue;
+  }
+}
+
+function drawLayerSequencePreviewMarker(
+  context,
+  x,
+  y,
+  effect,
+  level,
+  phase,
+  settings,
+  reducedMotion
+) {
+  const active = level > 0;
+  const accent = effect === "color-cycle"
+    ? normalizeHexColor(settings.colorCycleColor, "#ff00ff")
+    : "#111111";
+  let size = active ? 2.4 + level * 2 : 1.7;
+  let offsetX = 0;
+  let offsetY = 0;
+  if (active && effect === "scale") {
+    size *= 1 + Math.min(1.25, Math.max(0, Number(settings.scaleAmount) || 0) / 240);
+  }
+  if (active && effect === "move" && !reducedMotion) {
+    const distance = 1.5 + level * 2.5;
+    if (settings.moveMode === "left") {
+      offsetX = -distance;
+    } else if (settings.moveMode === "right") {
+      offsetX = distance;
+    } else if (settings.moveMode === "up") {
+      offsetY = -distance;
+    } else if (settings.moveMode === "down") {
+      offsetY = distance;
+    } else {
+      offsetX = Math.cos(phase * Math.PI * 2) * distance;
+      offsetY = Math.sin(phase * Math.PI * 2) * distance;
+    }
+  }
+
+  context.save();
+  context.translate(x + offsetX, y + offsetY);
+  context.globalAlpha = active ? 0.5 + level * 0.5 : 0.38;
+  context.fillStyle = active ? accent : "#777777";
+  context.strokeStyle = "#111111";
+  context.lineWidth = 1;
+  if (active && effect === "blur") {
+    context.shadowColor = accent;
+    context.shadowBlur = 3 + level * 5;
+  }
+  if (effect === "pixelate") {
+    context.fillRect(-size, -size, size * 2, size * 2);
+  } else if (effect === "image-cycle") {
+    context.rotate(active && !reducedMotion ? phase * Math.PI * 0.5 : Math.PI * 0.25);
+    context.fillRect(-size, -size, size * 2, size * 2);
+  } else if (effect === "rotate") {
+    context.rotate(active && !reducedMotion
+      ? phase * Math.PI * 2 * (settings.rotateReverse ? -1 : 1)
+      : Math.PI * 0.25);
+    context.fillRect(-size, -size, size * 2, size * 2);
+  } else {
+    context.beginPath();
+    context.arc(0, 0, size, 0, Math.PI * 2);
+    context.fill();
+  }
+  if (active && effect === "color-cycle") {
+    context.globalAlpha = 0.8;
+    context.stroke();
+  }
+  context.restore();
+
+  if (active && !reducedMotion) {
+    context.save();
+    context.globalAlpha = level * 0.42;
+    context.strokeStyle = accent;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.arc(x + offsetX, y + offsetY, size + (1 - level) * 5 + 2, 0, Math.PI * 2);
+    context.stroke();
+    context.restore();
+  }
+}
+
+function paintLayerSequencePreview(preview, stroke, slotIndex, now) {
+  const canvas = preview.querySelector(".edit-layer-sequence-preview-canvas");
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) {
+    return;
+  }
+  const slot = getLayerSequenceSlot(stroke, slotIndex);
+  const effect = slot.effect;
+  const timingStyle = slot.timingStyle;
+  const settings = normalizeLayerSequenceSettings(slot.settings);
+  const total = Math.max(0, Array.isArray(stroke.elements) ? stroke.elements.length : 0);
+  const slotState = getLayerSequencePreviewSlotState(
+    stroke,
+    slotIndex,
+    total,
+    effect,
+    timingStyle
+  );
+  const playbackState = getLayerSequencePreviewPlaybackState(stroke);
+  const isPlaying = playbackState === "playing";
+  const pauseStartTime = Number(stroke.sequencePauseStartTime);
+  if (playbackState === "paused" && slotState.pausedAt === null) {
+    slotState.pausedAt = Number.isFinite(pauseStartTime) ? pauseStartTime : now;
+  } else if (playbackState !== "paused") {
+    slotState.pausedAt = null;
+  }
+  const displayTime = playbackState === "paused" && slotState.pausedAt !== null
+    ? slotState.pausedAt
+    : now;
+  const effectLabel = LAYER_SEQUENCE_EFFECT_OPTIONS.find((option) => option.value === effect)?.label || effect;
+  const timingLabel = LAYER_SEQUENCE_TIMING_OPTIONS.find((option) => option.value === timingStyle)?.label || timingStyle;
+  const countText = `${total} stamp${total === 1 ? "" : "s"}`;
+  const ariaLabel = `${effectLabel} ${timingLabel} trigger timeline across ${countText}` +
+    (isPlaying ? "" : `, ${playbackState}`);
+  if (preview.getAttribute("aria-label") !== ariaLabel) {
+    preview.setAttribute("aria-label", ariaLabel);
+  }
+  preview.classList.toggle("is-inactive", !isPlaying);
+  preview.classList.toggle("is-paused", playbackState === "paused");
+  preview.classList.toggle("is-hidden", playbackState === "hidden");
+  setLayerSequencePreviewDataset(preview, "effect", effect);
+  setLayerSequencePreviewDataset(preview, "timingStyle", timingStyle);
+  setLayerSequencePreviewDataset(preview, "total", total);
+  setLayerSequencePreviewDataset(preview, "bucketCount", slotState.buckets.length);
+  setLayerSequencePreviewDataset(preview, "playbackState", playbackState);
+
+  const width = Math.max(1, Math.round(canvas.clientWidth));
+  const height = Math.max(1, Math.round(canvas.clientHeight));
+  if (width <= 1 || height <= 1) {
+    return;
+  }
+  const pixelRatio = Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1));
+  const renderWidth = Math.round(width * pixelRatio);
+  const renderHeight = Math.round(height * pixelRatio);
+  if (canvas.width !== renderWidth || canvas.height !== renderHeight) {
+    canvas.width = renderWidth;
+    canvas.height = renderHeight;
+  }
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const reducedMotion = Boolean(layerSequencePreviewReducedMotionQuery?.matches);
+  const left = 14;
+  const right = Math.max(left, width - 14);
+  const centerY = Math.round(height / 2);
+  const bucketCount = slotState.buckets.length;
+  const positionForBucket = (index) => bucketCount <= 1
+    ? (left + right) / 2
+    : left + ((right - left) * index) / (bucketCount - 1);
+  const visuals = slotState.buckets.map((bucket) => {
+    const age = displayTime - bucket.firedAt;
+    const impulseActive = Number.isFinite(age) && age >= 0 && age < bucket.decayMs;
+    const impulseLevel = impulseActive
+      ? reducedMotion
+        ? 1
+        : 1 - age / Math.max(1, bucket.decayMs)
+      : 0;
+    const effectActive = Number.isFinite(age) && age >= 0 && age < bucket.effectDuration;
+    return {
+      level: clamp(Math.max(impulseLevel, effectActive ? 0.14 : 0), 0, 1),
+      phase: clamp(age / Math.max(1, bucket.effectDuration), 0, 1)
+    };
+  });
+
+  context.save();
+  context.strokeStyle = isPlaying ? "#b5b5b5" : "#d0d0d0";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(left, centerY + 0.5);
+  context.lineTo(right, centerY + 0.5);
+  context.stroke();
+  context.restore();
+
+  const activeBuckets = [];
+  for (let index = 0; index < bucketCount; index += 1) {
+    const visual = visuals[index];
+    if (visual.level <= 0) {
+      continue;
+    }
+    activeBuckets.push(index);
+    const x = positionForBucket(index);
+    const previousX = index > 0 ? positionForBucket(index - 1) : x;
+    const nextX = index < bucketCount - 1 ? positionForBucket(index + 1) : x;
+    context.save();
+    context.globalAlpha = 0.2 + visual.level * 0.55;
+    context.strokeStyle = effect === "color-cycle"
+      ? normalizeHexColor(settings.colorCycleColor, "#ff00ff")
+      : "#111111";
+    context.lineWidth = 1 + visual.level;
+    context.beginPath();
+    context.moveTo((previousX + x) / 2, centerY + 0.5);
+    context.lineTo((nextX + x) / 2, centerY + 0.5);
+    context.stroke();
+    context.restore();
+  }
+
+  for (let index = 0; index < bucketCount; index += 1) {
+    const visual = visuals[index];
+    drawLayerSequencePreviewMarker(
+      context,
+      positionForBucket(index),
+      centerY,
+      effect,
+      visual.level,
+      visual.phase,
+      settings,
+      reducedMotion
+    );
+  }
+  setLayerSequencePreviewDataset(preview, "activeBuckets", activeBuckets.join(","));
+}
+
+function isLayerSequencePreviewVisible(preview, listRect) {
+  if (!(preview instanceof HTMLElement) || preview.hidden || !preview.getClientRects().length) {
+    return false;
+  }
+  const rect = preview.getBoundingClientRect();
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.right > listRect.left &&
+    rect.left < listRect.right &&
+    rect.bottom > listRect.top &&
+    rect.top < listRect.bottom
+  );
+}
+
+function renderLayerSequencePreviews(now = performance.now(), options = {}) {
+  if (
+    !editLayerList ||
+    state.sidebarTab !== "edit" ||
+    state.sidebarCollapsed ||
+    document.visibilityState === "hidden"
+  ) {
+    return;
+  }
+  const frameTime = Number.isFinite(Number(now)) ? Number(now) : performance.now();
+  const force = options.force === true;
+  const paintInterval = layerSequencePreviewReducedMotionQuery?.matches
+    ? 100
+    : LAYER_SEQUENCE_PREVIEW_FRAME_INTERVAL_MS;
+  const lastPaintTime = Number(state.sequencePreviewLastPaintTime);
+  if (!force && Number.isFinite(lastPaintTime) && frameTime - lastPaintTime < paintInterval) {
+    return;
+  }
+  const previews = editLayerList.querySelectorAll(".edit-layer-sequence-preview");
+  const rawListRect = editLayerList.getBoundingClientRect();
+  const listRect = {
+    left: Math.max(0, rawListRect.left),
+    top: Math.max(0, rawListRect.top),
+    right: Math.min(window.innerWidth, rawListRect.right),
+    bottom: Math.min(window.innerHeight, rawListRect.bottom)
+  };
+  let paintedAny = false;
+  for (const preview of previews) {
+    if (!isLayerSequencePreviewVisible(preview, listRect)) {
+      continue;
+    }
+    const stroke = getStrokeById(preview.dataset.strokeId);
+    if (!stroke) {
+      continue;
+    }
+    paintLayerSequencePreview(
+      preview,
+      stroke,
+      Number(preview.dataset.sequenceSlotIndex) || 0,
+      frameTime
+    );
+    paintedAny = true;
+  }
+  if (paintedAny) {
+    state.sequencePreviewLastPaintTime = frameTime;
+  }
+}
+
 function createLayerSequenceSettings(stroke, slotIndex = 0) {
   const effect = getLayerSequenceEffect(stroke, slotIndex);
   const timingStyle = getLayerSequenceTimingStyle(stroke, slotIndex);
@@ -7272,6 +10434,7 @@ function createLayerSequenceSettings(stroke, slotIndex = 0) {
   panel.className = "edit-layer-sequence-settings";
   panel.dataset.strokeId = String(stroke.id);
   panel.dataset.sequenceSlotIndex = String(slotIndex);
+  panel.appendChild(createLayerSequencePreview(stroke, slotIndex));
 
   if (effect === "show-hide") {
     panel.appendChild(createLayerSequenceToggleControl(stroke, "showHideFade", "fade?", slotIndex));
@@ -7515,8 +10678,19 @@ function removeLayerSequenceSlot(stroke, slotIndex) {
   return true;
 }
 
-function serializeStrokeList(strokes) {
-  return strokes.map((stroke) => ({
+const strokeSerializationCache = new WeakMap();
+
+function markStrokeSerializationDirty(stroke) {
+  if (!stroke || typeof stroke !== "object") {
+    return;
+  }
+  stroke.serializationRevision = (Number(stroke.serializationRevision) || 0) + 1;
+  strokeSerializationCache.delete(stroke);
+  strokeLayerBoundsCache.delete(stroke);
+}
+
+function createSerializedStroke(stroke) {
+  return {
     id: Number.isFinite(Number(stroke.id)) ? Number(stroke.id) : null,
     layerNumber: Number.isFinite(Number(stroke.layerNumber)) ? Number(stroke.layerNumber) : null,
     layerType: normalizeStrokeLayerType(stroke.layerType),
@@ -7528,6 +10702,7 @@ function serializeStrokeList(strokes) {
     layerOpacity: getLayerOpacityPercent(stroke),
     layerScale: getLayerScaleValue(stroke),
     layerRotation: getLayerRotationDegrees(stroke),
+    hidden: Boolean(stroke.hidden),
     animationPaused: Boolean(stroke.animationPaused),
     sequenceOpen: Boolean(stroke.sequenceOpen),
     sequenceConfigured: hasLayerSequenceEffectSlots(stroke),
@@ -7550,11 +10725,52 @@ function serializeStrokeList(strokes) {
         : Number.isFinite(Number(element.style.opacity))
         ? clamp(Number(element.style.opacity), 0, 1)
         : 1,
-      imageRendering: element.style.imageRendering === "auto" ? "auto" : "pixelated",
+      imageRendering:
+        (element.dataset.sequenceBaseImageRendering || element.style.imageRendering) === "auto"
+          ? "auto"
+          : "pixelated",
       tintColor: normalizeHexColor(element.dataset.tintColor, "#ffffff"),
       tintAmount: clamp(Number(element.dataset.tintAmount) || 0, 0, 100)
     }))
-  }));
+  };
+}
+
+function createStrokeBrushSourceDescriptors(stroke) {
+  const descriptors = new Map();
+  for (const element of stroke?.elements || []) {
+    const brushId = Number(element.dataset.brushId);
+    const brushUrl = element.dataset.brushUrl || element.dataset.sequenceBaseSrc || "";
+    if (!Number.isFinite(brushId) || !brushUrl || descriptors.has(brushId)) {
+      continue;
+    }
+    descriptors.set(brushId, {
+      id: brushId,
+      url: brushUrl,
+      name: `brush-${brushId}`,
+      width: Math.max(1, parseFloat(element.style.width) || 1),
+      height: Math.max(1, parseFloat(element.style.height) || 1)
+    });
+  }
+  return Array.from(descriptors.values());
+}
+
+function getStrokeSerializationEntry(stroke) {
+  const revision = Number(stroke?.serializationRevision) || 0;
+  const cached = strokeSerializationCache.get(stroke);
+  if (cached && cached.revision === revision) {
+    return cached;
+  }
+  const entry = {
+    revision,
+    snapshot: createSerializedStroke(stroke),
+    brushSources: createStrokeBrushSourceDescriptors(stroke)
+  };
+  strokeSerializationCache.set(stroke, entry);
+  return entry;
+}
+
+function serializeStrokeList(strokes) {
+  return strokes.map((stroke) => getStrokeSerializationEntry(stroke).snapshot);
 }
 
 function getRedoDrawStrokes() {
@@ -7570,8 +10786,8 @@ function collectStrokeBrushSources() {
 
   for (const strokeList of strokeLists) {
     for (const stroke of strokeList) {
-      for (const element of stroke.elements) {
-        const brushId = Number(element.dataset.brushId);
+      for (const descriptor of getStrokeSerializationEntry(stroke).brushSources) {
+        const brushId = Number(descriptor.id);
         if (!Number.isFinite(brushId) || currentBrushIds.has(brushId)) {
           continue;
         }
@@ -7580,7 +10796,7 @@ function collectStrokeBrushSources() {
           continue;
         }
 
-        const brushUrl = element.dataset.brushUrl || element.getAttribute("src") || "";
+        const brushUrl = descriptor.url;
         if (!brushUrl) {
           continue;
         }
@@ -7588,9 +10804,9 @@ function collectStrokeBrushSources() {
         byId.set(brushId, {
           id: brushId,
           url: brushUrl,
-          name: `brush-${brushId}`,
-          width: Math.max(1, parseFloat(element.style.width) || 1),
-          height: Math.max(1, parseFloat(element.style.height) || 1)
+          name: descriptor.name,
+          width: descriptor.width,
+          height: descriptor.height
         });
       }
     }
@@ -7599,9 +10815,10 @@ function collectStrokeBrushSources() {
   return Array.from(byId.values());
 }
 
-function buildSessionSnapshot() {
+function buildSessionSnapshotBase() {
   return {
     version: 1,
+    stockBrushAssetRevision: STOCK_BRUSH_ASSET_REVISION,
     soloBrushId: Number.isFinite(Number(state.soloBrushId))
       ? Number(state.soloBrushId)
       : null,
@@ -7614,6 +10831,7 @@ function buildSessionSnapshot() {
       ? state.activeStockBrushFolderId
       : null,
     activeStockBrushFolderIds: Array.from(getActiveStockBrushFolderIdSet()),
+    browsingAllStockBrushes: state.browsingAllStockBrushes,
     camera: {
       x: state.camera.x,
       y: state.camera.y,
@@ -7643,11 +10861,15 @@ function buildSessionSnapshot() {
       sidebarTab: state.sidebarTab === "export" ? "draw" : state.sidebarTab,
       brushGalleryCollapsed: state.brushGalleryCollapsed,
       brushGallerySort: normalizeBrushGallerySort(state.brushGallerySort),
+      brushGallerySearch: normalizeBrushGallerySearch(state.brushGallerySearch),
+      brushGalleryRandomSeed: state.brushGalleryRandomSeed,
+      brushGalleryPage: normalizeBrushGalleryPage(state.brushGalleryPage),
       customBrushPresetSources: getCustomBrushPresetSourcesSnapshot(),
       activeCustomBrushPresetIndex: normalizeCustomBrushPresetIndex(state.activeCustomBrushPresetIndex),
       canvasBackgroundColor: normalizeHexColor(state.canvasBackgroundColor, "#ffffff"),
       exportBackgroundEnabled: state.exportBackgroundEnabled !== false,
       exportSeeBeyondEnabled: state.exportSeeBeyondEnabled !== false,
+      exportGuidelinesEnabled: Boolean(state.exportGuidelinesEnabled),
       exportBgImageUrl: typeof state.exportBgImageUrl === "string" &&
         state.exportBgImageUrl.startsWith("data:image/")
         ? state.exportBgImageUrl
@@ -7680,6 +10902,9 @@ function buildSessionSnapshot() {
       originalWidth: brush.originalWidth || brush.width,
       originalHeight: brush.originalHeight || brush.height,
       frameCount: normalizeBrushFrameCount(brush.frameCount),
+      durationMs: Math.max(0, Math.round(Number(brush.durationMs) || 0)),
+      animated: brush.animated === true,
+      opaque: brush.opaque === true,
       frameRange: brush.frameRange && Number.isFinite(Number(brush.frameRange.end))
         ? {
             start: Math.max(0, Math.floor(Number(brush.frameRange.start) || 0)),
@@ -7694,12 +10919,78 @@ function buildSessionSnapshot() {
             height: Math.max(1, Number(brush.cropRect.height) || brush.height)
           }
         : null,
+      tags: getBrushTags(brush),
+      stockAssetRevision:
+        typeof brush.stockAssetRevision === "string" ? brush.stockAssetRevision : "",
       enabled: brush.enabled,
       weightMode: normalizeBrushWeightMode(brush.weightMode)
-    })),
+    }))
+  };
+}
+
+function buildSessionSnapshot() {
+  const redoDrawStrokes = getRedoDrawStrokes();
+  return {
+    ...buildSessionSnapshotBase(),
     strokeBrushes: collectStrokeBrushSources(),
     strokes: serializeStrokeList(state.strokes),
-    redoStrokes: serializeStrokeList(getRedoDrawStrokes())
+    redoStrokes: serializeStrokeList(redoDrawStrokes)
+  };
+}
+
+function getSessionStrokeToken(stroke) {
+  if (!stroke || typeof stroke !== "object") {
+    return "";
+  }
+  let token = sessionStrokeTokenByObject.get(stroke);
+  if (!token) {
+    token = `stroke-${nextSessionStrokeToken++}`;
+    sessionStrokeTokenByObject.set(stroke, token);
+  }
+  return token;
+}
+
+function buildSessionSerializePatch() {
+  const currentStrokes = state.strokes.slice();
+  const redoStrokes = getRedoDrawStrokes();
+  const strokeOrder = currentStrokes.map(getSessionStrokeToken);
+  const redoStrokeOrder = redoStrokes.map(getSessionStrokeToken);
+  const activeTokens = new Set([...strokeOrder, ...redoStrokeOrder]);
+  const updateRevisions = new Map();
+  const updates = [];
+  const seenTokens = new Set();
+
+  for (const stroke of [...currentStrokes, ...redoStrokes]) {
+    const token = getSessionStrokeToken(stroke);
+    if (!token || seenTokens.has(token)) {
+      continue;
+    }
+    seenTokens.add(token);
+    const entry = getStrokeSerializationEntry(stroke);
+    const acknowledged = sessionSerializerAcknowledgedRevisions.get(token);
+    if (acknowledged === entry.revision) {
+      continue;
+    }
+    updates.push({
+      token,
+      revision: entry.revision,
+      snapshot: entry.snapshot,
+      brushSources: entry.brushSources
+    });
+    updateRevisions.set(token, entry.revision);
+  }
+
+  return {
+    base: buildSessionSnapshotBase(),
+    strokeOrder,
+    redoStrokeOrder,
+    updates,
+    updateRevisions,
+    activeTokens,
+    stampCount: currentStrokes.reduce(
+      (total, stroke) => total + (Array.isArray(stroke?.elements) ? stroke.elements.length : 0),
+      0
+    )
   };
 }
 
@@ -7737,31 +11028,26 @@ function fitBoundsToAspect(bounds, aspectRatio) {
 async function createSavedCompositionThumbnail() {
   const outputWidth = 240;
   const outputHeight = 150;
-  restoreAllCulledStampSources();
-  const bounds = fitBoundsToAspect(computeInitialExportSelectionBounds(), outputWidth / outputHeight);
+  const frameTimeMs = SAVED_PREVIEW_FRAME_TIME_MS;
+  const bounds = fitBoundsToAspect(
+    computeInitialExportSelectionBounds(),
+    outputWidth / outputHeight
+  );
   const entries = await collectExportStampEntries(bounds);
-  await loadExportStampSourceImages(entries);
-  const canvas = document.createElement("canvas");
-  canvas.width = outputWidth;
-  canvas.height = outputHeight;
-  const ctx = canvas.getContext("2d", { alpha: true });
-  if (!ctx) {
-    return "";
-  }
-  await drawExportFrameAsync(
-    ctx,
+  const blob = await renderExportPngBlob(
     bounds,
     outputWidth,
     outputHeight,
     entries,
-    null,
-    0,
     {
       includeBackground: true,
-      backgroundColor: state.canvasBackgroundColor
+      backgroundColor: state.canvasBackgroundColor,
+      frameTimeMs,
+      singleGifFrameTimeMs: frameTimeMs,
+      releaseSourceImagesAfterRender: true
     }
   );
-  return canvas.toDataURL("image/png");
+  return readBlobAsDataUrl(blob);
 }
 
 function formatSavedCompositionDate(timestamp) {
@@ -7865,6 +11151,7 @@ async function saveCurrentComposition() {
   saveCompositionButton.disabled = true;
   setSavedCompositionsStatus("saving...");
   try {
+    const snapshotSaveRevision = state.saveRevision;
     const snapshot = buildSessionSnapshot();
     const snapshotJson = JSON.stringify(snapshot);
     const savedAt = Date.now();
@@ -7873,10 +11160,18 @@ async function saveCurrentComposition() {
       ? state.savedCompositions
       : await getSavedCompositionIndex();
     let thumbnailUrl = "";
+    let thumbnailError = null;
     try {
       thumbnailUrl = await createSavedCompositionThumbnail();
+      if (state.saveRevision !== snapshotSaveRevision) {
+        const error = new Error("The scene changed while its saved preview was rendering.");
+        error.code = "SAVED_PREVIEW_STALE";
+        throw error;
+      }
     } catch (error) {
       thumbnailUrl = "";
+      thumbnailError = error;
+      console.error("Could not create saved composition preview.", error);
     }
     const entry = {
       id,
@@ -7897,7 +11192,7 @@ async function saveCurrentComposition() {
     state.savedCompositions = nextIndex;
     state.savedCompositionsLoaded = true;
     renderSavedCompositionsGallery();
-    setSavedCompositionsStatus("saved");
+    setSavedCompositionsStatus(thumbnailError ? "saved (preview unavailable)" : "saved");
   } catch (error) {
     setSavedCompositionsStatus("could not save");
   } finally {
@@ -7917,19 +11212,23 @@ async function loadSavedComposition(id) {
       setSavedCompositionsStatus("missing saved scene");
       return;
     }
-    if (state.saveTimerId !== null) {
-      window.clearTimeout(state.saveTimerId);
-      state.saveTimerId = null;
-    }
+    state.saveEpoch += 1;
+    cancelScheduledSessionSave(true);
+    state.savedRevision = state.saveRevision;
+    const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
     try {
       sessionStorage.setItem(SESSION_STORAGE_KEY, snapshotJson);
       removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+      removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+      cleanupSupersededLifecycleSnapshot(previousPointer);
     } catch (error) {
       removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
       setSessionStorageItemSafe(
         SESSION_STORAGE_POINTER_KEY,
         `${SESSION_IDB_PREFIX}${SAVED_COMPOSITION_KEY_PREFIX}${id}`
       );
+      removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+      cleanupSupersededLifecycleSnapshot(previousPointer);
     }
     await yieldToMainThread();
     const restored = await restoreSessionState(snapshotJson);
@@ -7937,6 +11236,7 @@ async function loadSavedComposition(id) {
       setSavedCompositionsStatus("could not load");
       return;
     }
+    refreshLayerSequenceLoop();
     setSavedCompositionsStatus("loaded");
   } catch (error) {
     setSavedCompositionsStatus("could not load");
@@ -7987,58 +11287,398 @@ async function confirmDeleteSavedComposition() {
   }
 }
 
-async function saveSessionStateNow() {
-  const snapshot = buildSessionSnapshot();
-  const snapshotJson = JSON.stringify(snapshot);
+function disposeSessionSerializerWorker(error = null) {
+  if (sessionSerializerWorker) {
+    sessionSerializerWorker.terminate();
+    sessionSerializerWorker = null;
+  }
+  sessionSerializerAcknowledgedRevisions.clear();
+  if (error) {
+    for (const request of sessionSerializerRequests.values()) {
+      request.reject(error);
+    }
+  }
+  sessionSerializerRequests.clear();
+}
+
+function getSessionSerializerWorker() {
+  if (sessionSerializerWorker || typeof Worker !== "function") {
+    return sessionSerializerWorker;
+  }
+  try {
+    const worker = new Worker(SESSION_SERIALIZE_WORKER_URL);
+    worker.addEventListener("message", (event) => {
+      const requestId = Number(event.data?.requestId);
+      const request = sessionSerializerRequests.get(requestId);
+      if (!request) {
+        return;
+      }
+      sessionSerializerRequests.delete(requestId);
+      if (event.data?.type === "serialized" && typeof event.data.json === "string") {
+        for (const [token, revision] of request.updateRevisions || []) {
+          sessionSerializerAcknowledgedRevisions.set(token, revision);
+        }
+        for (const token of Array.from(sessionSerializerAcknowledgedRevisions.keys())) {
+          if (!request.activeTokens?.has(token)) {
+            sessionSerializerAcknowledgedRevisions.delete(token);
+          }
+        }
+        request.resolve(event.data.json);
+      } else {
+        request.reject(new Error(event.data?.message || "Session serialization failed."));
+      }
+    });
+    worker.addEventListener("error", () => {
+      disposeSessionSerializerWorker(new Error("Session serialization worker failed."));
+    });
+    sessionSerializerWorker = worker;
+  } catch (error) {
+    sessionSerializerWorker = null;
+  }
+  return sessionSerializerWorker;
+}
+
+async function serializeSessionStateIncrementally() {
+  const worker = getSessionSerializerWorker();
+  if (!worker) {
+    const snapshot = buildSessionSnapshot();
+    return {
+      json: JSON.stringify(snapshot),
+      stampCount: getSnapshotStampCount(snapshot)
+    };
+  }
+  const patch = buildSessionSerializePatch();
+  const requestId = ++sessionSerializerRequestId;
+  try {
+    const json = await new Promise((resolve, reject) => {
+      sessionSerializerRequests.set(requestId, {
+        resolve,
+        reject,
+        updateRevisions: patch.updateRevisions,
+        activeTokens: patch.activeTokens
+      });
+      try {
+        worker.postMessage({
+          type: "serialize-incremental",
+          requestId,
+          base: patch.base,
+          strokeOrder: patch.strokeOrder,
+          redoStrokeOrder: patch.redoStrokeOrder,
+          updates: patch.updates
+        });
+      } catch (error) {
+        sessionSerializerRequests.delete(requestId);
+        reject(error);
+      }
+    });
+    return { json, stampCount: patch.stampCount };
+  } catch (error) {
+    disposeSessionSerializerWorker();
+    const snapshot = buildSessionSnapshot();
+    return {
+      json: JSON.stringify(snapshot),
+      stampCount: getSnapshotStampCount(snapshot)
+    };
+  }
+}
+
+async function persistSessionSnapshotJson(snapshotJson, stampCount, epoch, revision) {
+  const tabId = getSessionTabId();
+  const canCommitSnapshot = () =>
+    epoch === state.saveEpoch &&
+    (!Number.isFinite(Number(revision)) || Number(revision) >= state.savedRevision) &&
+    !(getSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY) || "")
+      .startsWith(SESSION_IDB_PREFIX);
+  const shouldUseIndexedDb =
+    Math.max(0, Number(stampCount) || 0) >= SAVE_DIRECT_IDB_STAMP_THRESHOLD ||
+    snapshotJson.length >= 1_000_000;
+
+  if (!shouldUseIndexedDb) {
+    try {
+      if (!canCommitSnapshot()) {
+        return false;
+      }
+      const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+      sessionStorage.setItem(SESSION_STORAGE_KEY, snapshotJson);
+      removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+      removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+      cleanupSupersededLifecycleSnapshot(previousPointer);
+      return true;
+    } catch (error) {
+      // Large snapshots and restrictive storage modes fall through to IndexedDB.
+    }
+  }
 
   try {
-    sessionStorage.setItem(SESSION_STORAGE_KEY, snapshotJson);
-    removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    await writeSnapshotToIndexedDb(tabId, snapshotJson);
+    if (!canCommitSnapshot()) {
+      return false;
+    }
+    const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
+    setSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY, `${SESSION_IDB_PREFIX}${tabId}`);
+    removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+    cleanupSupersededLifecycleSnapshot(previousPointer, tabId);
+    return true;
   } catch (error) {
-    const tabId = getSessionTabId();
-    try {
-      await writeSnapshotToIndexedDb(tabId, snapshotJson);
-      removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
-      setSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY, `${SESSION_IDB_PREFIX}${tabId}`);
-    } catch (secondaryError) {
-      // Ignore transient quota/storage issues and continue app runtime.
+    if (shouldUseIndexedDb && canCommitSnapshot()) {
+      try {
+        const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+        sessionStorage.setItem(SESSION_STORAGE_KEY, snapshotJson);
+        removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+        removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+        cleanupSupersededLifecycleSnapshot(previousPointer);
+        return true;
+      } catch (secondaryError) {
+        // Ignore transient quota/storage issues and continue app runtime.
+      }
+    }
+  }
+  return false;
+}
+
+async function saveSessionStateNow() {
+  if (state.saveInFlight) {
+    return;
+  }
+  const revision = state.saveRevision;
+  const epoch = state.saveEpoch;
+  state.saveUrgentPending = false;
+  state.saveInFlight = true;
+  try {
+    const serialized = await serializeSessionStateIncrementally();
+    if (epoch !== state.saveEpoch) {
+      return;
+    }
+    const persisted = await persistSessionSnapshotJson(
+      serialized.json,
+      serialized.stampCount,
+      epoch,
+      revision
+    );
+    if (persisted && epoch === state.saveEpoch) {
+      state.savedRevision = Math.max(state.savedRevision, revision);
+      state.saveFailureCount = 0;
+    } else if (epoch === state.saveEpoch) {
+      state.saveFailureCount = Math.min(8, state.saveFailureCount + 1);
+    }
+  } finally {
+    state.saveInFlight = false;
+    if (state.savedRevision < state.saveRevision) {
+      if (state.saveUrgentPending && state.saveFailureCount === 0) {
+        queueUrgentSessionSave();
+      } else {
+        queueSessionSave();
+      }
     }
   }
 }
 
-function scheduleSessionSave() {
-  if (state.saveTimerId !== null) {
-    return;
-  }
-  state.saveTimerId = window.setTimeout(() => {
-    state.saveTimerId = null;
-    void saveSessionStateNow();
-  }, SAVE_DEBOUNCE_MS);
-}
-
-function flushSessionSaveNow() {
+function cancelDeferredSessionSave() {
   if (state.saveTimerId !== null) {
     window.clearTimeout(state.saveTimerId);
     state.saveTimerId = null;
   }
+  if (state.saveIdleCallbackId !== null) {
+    if (typeof window.cancelIdleCallback === "function") {
+      window.cancelIdleCallback(state.saveIdleCallbackId);
+    } else {
+      window.clearTimeout(state.saveIdleCallbackId);
+    }
+    state.saveIdleCallbackId = null;
+  }
+}
+
+function cancelUrgentSessionSaveSchedule(clearPending = false) {
+  if (state.saveUrgentTimerId !== null) {
+    window.clearTimeout(state.saveUrgentTimerId);
+    state.saveUrgentTimerId = null;
+  }
+  if (clearPending) {
+    state.saveUrgentPending = false;
+  }
+}
+
+function cancelScheduledSessionSave(clearUrgentPending = false) {
+  cancelDeferredSessionSave();
+  cancelUrgentSessionSaveSchedule(clearUrgentPending);
+}
+
+function queueSessionSave() {
+  if (
+    state.saveTimerId !== null ||
+    state.saveIdleCallbackId !== null ||
+    state.saveInFlight
+  ) {
+    return;
+  }
+  const retryDelay = state.saveFailureCount > 0
+    ? Math.min(30000, SAVE_DEBOUNCE_MS * 2 ** state.saveFailureCount)
+    : SAVE_DEBOUNCE_MS;
+  state.saveTimerId = window.setTimeout(() => {
+    state.saveTimerId = null;
+    const runSave = () => {
+      state.saveIdleCallbackId = null;
+      void saveSessionStateNow();
+    };
+    state.saveIdleCallbackId = typeof window.requestIdleCallback === "function"
+      ? window.requestIdleCallback(runSave, { timeout: SAVE_IDLE_TIMEOUT_MS })
+      : window.setTimeout(runSave, 0);
+  }, retryDelay);
+}
+
+function queueUrgentSessionSave() {
+  state.saveUrgentPending = true;
+  if (
+    state.saveInFlight ||
+    state.saveUrgentMicrotaskQueued ||
+    state.saveUrgentTimerId !== null
+  ) {
+    return;
+  }
+  cancelDeferredSessionSave();
+  const now = performance.now();
+  const lastStartedAt = Number(state.saveUrgentLastStartedAt);
+  const elapsed = Number.isFinite(lastStartedAt) ? now - lastStartedAt : Infinity;
+  const throttleDelay = Math.max(0, SAVE_URGENT_MIN_INTERVAL_MS - elapsed);
+  if (throttleDelay > 0) {
+    state.saveUrgentTimerId = window.setTimeout(() => {
+      state.saveUrgentTimerId = null;
+      if (state.saveUrgentPending) {
+        queueUrgentSessionSave();
+      }
+    }, throttleDelay);
+    return;
+  }
+  state.saveUrgentMicrotaskQueued = true;
+  window.queueMicrotask(() => {
+    state.saveUrgentMicrotaskQueued = false;
+    if (!state.saveUrgentPending || state.saveInFlight) {
+      return;
+    }
+    state.saveUrgentPending = false;
+    state.saveUrgentLastStartedAt = performance.now();
+    void saveSessionStateNow();
+  });
+}
+
+function scheduleSessionSave() {
+  state.saveRevision += 1;
+  if (state.stampCount >= SAVE_DIRECT_IDB_STAMP_THRESHOLD && state.saveFailureCount === 0) {
+    queueUrgentSessionSave();
+  } else {
+    cancelUrgentSessionSaveSchedule(true);
+    queueSessionSave();
+  }
+}
+
+function saveSessionStateSynchronously(snapshotJson = null, revision = state.saveRevision) {
+  try {
+    const serialized = typeof snapshotJson === "string"
+      ? snapshotJson
+      : JSON.stringify(buildSessionSnapshot());
+    const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+    cleanupSupersededLifecycleSnapshot(previousPointer);
+    state.savedRevision = Math.max(state.savedRevision, Number(revision) || 0);
+    state.saveFailureCount = 0;
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function persistLifecycleSessionSnapshot(snapshotJson, revision) {
+  const tabId = getSessionTabId();
+  const lifecycleKey = `${tabId}:lifecycle:${Number(revision) || 0}:${Date.now()}`;
+  const lifecyclePointer = `${SESSION_IDB_PREFIX}${lifecycleKey}`;
+  if (!setSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY, lifecyclePointer)) {
+    return false;
+  }
+
+  const writePromise = snapshotDbConnection
+    ? beginSnapshotWriteToIndexedDb(snapshotDbConnection, lifecycleKey, snapshotJson)
+    : writeSnapshotToIndexedDb(lifecycleKey, snapshotJson);
+  void writePromise.then(() => {
+    if (getSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY) !== lifecyclePointer) {
+      return;
+    }
+    if (state.saveRevision !== revision) {
+      removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+      cleanupSupersededLifecycleSnapshot(
+        lifecyclePointer,
+        getLifecycleSnapshotKeyFromPointer(
+          getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY)
+        )
+      );
+      return;
+    }
+    const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    if (setSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY, lifecyclePointer)) {
+      removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
+      removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+      cleanupSupersededLifecycleSnapshot(previousPointer, lifecycleKey);
+    }
+    state.savedRevision = Math.max(state.savedRevision, revision);
+    state.saveFailureCount = 0;
+  }).catch(() => {
+    if (getSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY) === lifecyclePointer) {
+      removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+    }
+    if (lastLifecycleFlushRevision === revision) {
+      lastLifecycleFlushRevision = -1;
+    }
+    state.saveFailureCount = Math.min(8, state.saveFailureCount + 1);
+  });
+  return true;
+}
+
+function flushSessionSaveNow(event = null) {
+  const isLifecycleFlush = event?.type === "pagehide" || event?.type === "beforeunload";
+  if (isLifecycleFlush) {
+    const revision = state.saveRevision;
+    if (lastLifecycleFlushRevision === revision) {
+      return;
+    }
+    lastLifecycleFlushRevision = revision;
+    cancelScheduledSessionSave(true);
+    let snapshotJson;
+    try {
+      snapshotJson = JSON.stringify(buildSessionSnapshot());
+    } catch (error) {
+      lastLifecycleFlushRevision = -1;
+      return;
+    }
+    if (!saveSessionStateSynchronously(snapshotJson, revision)) {
+      if (!persistLifecycleSessionSnapshot(snapshotJson, revision)) {
+        lastLifecycleFlushRevision = -1;
+      }
+    }
+    return;
+  }
+  state.saveRevision += 1;
+  cancelScheduledSessionSave(true);
+  // If another save is already serializing, preserve an immediate trailing
+  // flush instead of letting a hidden-page idle callback carry the update.
+  state.saveUrgentPending = true;
+  state.saveUrgentLastStartedAt = -Infinity;
   void saveSessionStateNow();
 }
 
-function createStampElement(stampData, brush, fallbackTintSettings = null) {
+function createStampElement(stampData, brush, fallbackTintSettings = null, deferSource = false) {
   const width = Math.max(1, Number(stampData.width) || brush.width);
   const height = Math.max(1, Number(stampData.height) || brush.height);
   const stamp = document.createElement("img");
 
   stamp.className = "stamp";
-  stamp.src = brush.url;
-  markGifPlaybackStart(stamp, brush.url);
   stamp.alt = "";
   stamp.draggable = false;
   stamp.loading = "lazy";
   stamp.decoding = "async";
   stamp.dataset.brushUrl = brush.url;
   stamp.dataset.brushId = String(brush.id);
-  applyGifPauseStateToImage(stamp);
   stamp.style.width = `${width}px`;
   stamp.style.height = `${height}px`;
   stamp.style.left = `${Number(stampData.left) || 0}px`;
@@ -8064,6 +11704,26 @@ function createStampElement(stampData, brush, fallbackTintSettings = null) {
   setElementTintData(stamp, tintSettings);
   applyBrushTintStyle(stamp, false, tintSettings);
 
+  const initialBounds = getStampWorldBoundsFromLayout(
+    Number(stampData.left) || 0,
+    Number(stampData.top) || 0,
+    width,
+    height,
+    rotation
+  );
+  const shouldDeferSource =
+    deferSource ||
+    !rectsIntersect(initialBounds, getViewportWorldBounds(STAMP_VIEWPORT_CULL_MARGIN_PX));
+  if (shouldDeferSource) {
+    stamp.dataset.viewportCulled = "true";
+    stamp.classList.add("is-culled");
+    stamp.src = TRANSPARENT_STAMP_SRC;
+  } else {
+    stamp.src = brush.url;
+    markGifPlaybackStart(stamp, brush.url);
+    applyGifPauseStateToImage(stamp);
+  }
+
   return stamp;
 }
 
@@ -8071,7 +11731,13 @@ function resolveBrushForStamp(stampData, brushById) {
   const brushId = Number(stampData?.brushId);
   let brush = Number.isFinite(brushId) ? brushById.get(brushId) : null;
   if (!brush && typeof stampData?.url === "string") {
-    brush = state.brushes.find((entry) => entry.url === stampData.url) || null;
+    const source = getCanonicalStockBrushSource(stampData.url);
+    brush =
+      state.brushes.find(
+        (entry) =>
+          getBrushPrimarySourceUrl(entry) === source ||
+          normalizeFavoriteBrushSource(entry.url) === normalizeFavoriteBrushSource(stampData.url)
+      ) || null;
   }
   return brush;
 }
@@ -8085,6 +11751,10 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
   for (const strokeData of list) {
     const snapshotStrokeId = Number(strokeData?.id);
     const strokeId = Number.isFinite(snapshotStrokeId) ? snapshotStrokeId : state.nextStrokeId;
+    const sequenceEffect = normalizeLayerSequenceValue(
+      strokeData?.sequenceEffect || strokeData?.sequenceEffects,
+      LAYER_SEQUENCE_EFFECT_OPTIONS
+    );
     const stroke = {
       id: strokeId,
       layerNumber: Number.isFinite(Number(strokeData?.layerNumber))
@@ -8102,6 +11772,7 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
 	        : null,
 	      layerScale: normalizeLayerScaleValue(strokeData?.layerScale),
 	      layerRotation: normalizeLayerRotationDegrees(strokeData?.layerRotation),
+	      hidden: Boolean(strokeData?.hidden),
 	      animationPaused: Boolean(strokeData?.animationPaused),
 	      sequenceOpen: Boolean(strokeData?.sequenceOpen),
 	      sequenceConfigured:
@@ -8114,13 +11785,10 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
 	          ? strokeData.sequenceEnabled
 	          : Boolean(strokeData?.sequenceOpen),
 	      sequenceUserDisabled: Boolean(strokeData?.sequenceUserDisabled),
-	      sequenceEffect: normalizeLayerSequenceValue(
-	        strokeData?.sequenceEffect || strokeData?.sequenceEffects,
-	        LAYER_SEQUENCE_EFFECT_OPTIONS
-	      ),
-	      sequenceTimingStyle: normalizeLayerSequenceValue(
+	      sequenceEffect,
+	      sequenceTimingStyle: normalizeLayerSequenceTimingStyle(
 	        strokeData?.sequenceTimingStyle || strokeData?.sequenceTimingStyles,
-	        LAYER_SEQUENCE_TIMING_OPTIONS
+	        sequenceEffect
 	      ),
 	      sequenceSettings: normalizeLayerSequenceSettings(strokeData?.sequenceSettings),
 	      sequenceEffectSlots: normalizeExtraLayerSequenceSlots(strokeData?.sequenceEffectSlots),
@@ -8139,14 +11807,19 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
         continue;
       }
 
-      const stamp = createStampElement(stampData, brush, fallbackTintSettings);
+      const stamp = createStampElement(
+        stampData,
+        brush,
+        fallbackTintSettings,
+        !appendToWorld
+      );
       stamp.dataset.strokeId = String(stroke.id);
       if (appendToWorld) {
         fragment.appendChild(stamp);
         state.stampCount += 1;
         cacheStampWorldBounds(stamp);
         incrementUrlRef(brush.url);
-        restoredStampRefs.push(stamp);
+        restoredStampRefs.push({ stamp, stroke });
       }
       stroke.elements.push(stamp);
     }
@@ -8161,16 +11834,74 @@ function restoreStrokeList(serializedStrokes, brushById, appendToWorld, fallback
   if (appendToWorld && restoredStampRefs.length) {
     world.appendChild(fragment);
     const viewportBounds = getViewportVisibilityBounds();
-    for (const stamp of restoredStampRefs) {
-      updateStampViewportVisibility(stamp, viewportBounds);
+    for (const { stamp, stroke } of restoredStampRefs) {
+      const hidden = Boolean(stroke.hidden);
+      stamp.classList.toggle("is-layer-hidden", hidden);
+      if (!hidden) {
+        registerStampSpatialCells(stamp);
+        updateStampViewportVisibility(stamp, viewportBounds);
+      }
     }
     scheduleStampVisibilityRefresh();
   }
   return restored;
 }
 
+async function readPendingLifecycleSessionSnapshot() {
+  const pendingPointer = getSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY) || "";
+  if (!pendingPointer.startsWith(SESSION_IDB_PREFIX)) {
+    return null;
+  }
+  const pendingTabId = pendingPointer.slice(SESSION_IDB_PREFIX.length);
+  let raw = null;
+  if (pendingTabId) {
+    for (let attempt = 0; attempt <= SESSION_PENDING_SNAPSHOT_RETRY_DELAYS_MS.length; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, SESSION_PENDING_SNAPSHOT_RETRY_DELAYS_MS[attempt - 1]);
+        });
+      }
+      try {
+        raw = await readSnapshotFromIndexedDb(pendingTabId);
+      } catch (error) {
+        raw = null;
+      }
+      if (raw) {
+        break;
+      }
+    }
+  }
+  let keepPendingPointer = false;
+  if (raw) {
+    const previousPointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    if (setSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY, pendingPointer)) {
+      removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
+      cleanupSupersededLifecycleSnapshot(previousPointer, pendingTabId);
+    } else {
+      keepPendingPointer = true;
+    }
+  } else {
+    cleanupSupersededLifecycleSnapshot(
+      pendingPointer,
+      getLifecycleSnapshotKeyFromPointer(
+        getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY)
+      )
+    );
+  }
+  if (!keepPendingPointer) {
+    removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
+  }
+  return raw;
+}
+
 async function restoreSessionState(rawSnapshot = null) {
-  let raw = typeof rawSnapshot === "string" ? rawSnapshot : getSessionStorageItemSafe(SESSION_STORAGE_KEY);
+  let raw = typeof rawSnapshot === "string" ? rawSnapshot : null;
+  if (!raw) {
+    raw = await readPendingLifecycleSessionSnapshot();
+  }
+  if (!raw) {
+    raw = getSessionStorageItemSafe(SESSION_STORAGE_KEY);
+  }
   if (!raw) {
     const pointer = getSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY) || "";
     if (pointer.startsWith(SESSION_IDB_PREFIX)) {
@@ -8194,45 +11925,69 @@ async function restoreSessionState(rawSnapshot = null) {
     if (!snapshot || snapshot.version !== 1) {
       return false;
     }
+    const stockBrushAssetRevisionChanged =
+      snapshot.stockBrushAssetRevision !== STOCK_BRUSH_ASSET_REVISION;
 
     const restoredBrushes = Array.isArray(snapshot.brushes) ? snapshot.brushes : [];
     state.brushes = restoredBrushes
       .filter((brush) => brush && typeof brush.url === "string" && Number.isFinite(Number(brush.id)))
-      .map((brush) => ({
-        id: Number(brush.id),
-        url: brush.url,
-        name: String(brush.name || "brush"),
-        width: Math.max(1, Number(brush.width) || 1),
-        height: Math.max(1, Number(brush.height) || 1),
-        originalUrl: typeof brush.originalUrl === "string" && brush.originalUrl
-          ? brush.originalUrl
-          : brush.url,
-        originalWidth: Math.max(1, Number(brush.originalWidth) || Number(brush.width) || 1),
-        originalHeight: Math.max(1, Number(brush.originalHeight) || Number(brush.height) || 1),
-        frameCount:
-          normalizeBrushFrameCount(brush.frameCount) ||
-          (getBrushSourceIsGif(brush) ? null : 1),
-        frameRange: brush.frameRange && Number.isFinite(Number(brush.frameRange.end))
-          ? {
-              start: Math.max(0, Math.floor(Number(brush.frameRange.start) || 0)),
-              end: Math.max(1, Math.floor(Number(brush.frameRange.end) || 1))
-            }
-          : null,
-        cropRect:
-          brush.cropRect &&
-          Number.isFinite(Number(brush.cropRect.width)) &&
-          Number.isFinite(Number(brush.cropRect.height))
+      .map((brush) => {
+        const originalUrl = getCanonicalStockBrushSource(
+          typeof brush.originalUrl === "string" && brush.originalUrl
+            ? brush.originalUrl
+            : brush.url
+        );
+        const restoredBrush = {
+          id: Number(brush.id),
+          url: resolveRestoredBrushUrl(brush.url, originalUrl),
+          name: String(brush.name || "brush"),
+          width: Math.max(1, Number(brush.width) || 1),
+          height: Math.max(1, Number(brush.height) || 1),
+          originalUrl,
+          originalWidth: Math.max(1, Number(brush.originalWidth) || Number(brush.width) || 1),
+          originalHeight: Math.max(1, Number(brush.originalHeight) || Number(brush.height) || 1),
+          frameCount:
+            normalizeBrushFrameCount(brush.frameCount) ||
+            (getBrushSourceIsGif(brush) ? null : 1),
+          durationMs: Math.max(0, Math.round(Number(brush.durationMs) || 0)),
+          animated: brush.animated === true,
+          opaque: brush.opaque === true,
+          frameRange: brush.frameRange && Number.isFinite(Number(brush.frameRange.end))
             ? {
-                x: Number(brush.cropRect.x) || 0,
-                y: Number(brush.cropRect.y) || 0,
-                width: Math.max(1, Number(brush.cropRect.width)),
-                height: Math.max(1, Number(brush.cropRect.height))
+                start: Math.max(0, Math.floor(Number(brush.frameRange.start) || 0)),
+                end: Math.max(1, Math.floor(Number(brush.frameRange.end) || 1))
               }
             : null,
-        enabled: brush.enabled !== false,
-        weightMode: normalizeBrushWeightMode(brush.weightMode)
-      }));
+          cropRect:
+            brush.cropRect &&
+            Number.isFinite(Number(brush.cropRect.width)) &&
+            Number.isFinite(Number(brush.cropRect.height))
+              ? {
+                  x: Number(brush.cropRect.x) || 0,
+                  y: Number(brush.cropRect.y) || 0,
+                  width: Math.max(1, Number(brush.cropRect.width)),
+                  height: Math.max(1, Number(brush.cropRect.height))
+                }
+              : null,
+          tags: normalizeBrushTags(brush.tags),
+          stockAssetRevision:
+            typeof brush.stockAssetRevision === "string" ? brush.stockAssetRevision : "",
+          enabled: brush.enabled !== false,
+          weightMode: normalizeBrushWeightMode(brush.weightMode)
+        };
+        const stockMetadata = getStockBrushMetadataForSource(restoredBrush.originalUrl);
+        if (stockMetadata) {
+          restoredBrush.name = stockMetadata.name;
+          restoredBrush.frameCount = stockMetadata.frameCount || restoredBrush.frameCount;
+          restoredBrush.durationMs = stockMetadata.durationMs;
+          restoredBrush.animated = stockMetadata.animated;
+          restoredBrush.opaque = stockMetadata.opaque;
+        }
+        restoredBrush.tags = getBrushTags(restoredBrush);
+        return restoredBrush;
+      });
     clearBrushFrameCountJobs();
+    const refreshedStockBrushCount = await refreshRestoredStockBrushes(state.brushes);
 
     const snapshotSoloBrushId = Number(snapshot.soloBrushId);
     state.soloBrushId = Number.isFinite(snapshotSoloBrushId) ? snapshotSoloBrushId : null;
@@ -8260,15 +12015,15 @@ async function restoreSessionState(rawSnapshot = null) {
     const snapshotStockFolderIds = Array.isArray(snapshot.activeStockBrushFolderIds)
       ? snapshot.activeStockBrushFolderIds
       : [];
-    if (snapshotStockFolderIds.length) {
-      setActiveStockBrushFolders(snapshotStockFolderIds);
-    } else if (snapshotStockFolderId === "all") {
+    if (snapshotStockFolderId === "all") {
       setActiveStockBrushFolders(
         getOrderedStockBrushFolders()
           .filter((folder) => getStockBrushFiles(folder).length)
           .map((folder) => folder.id),
         "all"
       );
+    } else if (snapshotStockFolderIds.length) {
+      setActiveStockBrushFolders(snapshotStockFolderIds);
     } else if (snapshotStockFolderId === "favorites") {
       clearActiveStockBrushFolders();
       state.activeStockBrushFolderId = "favorites";
@@ -8277,6 +12032,7 @@ async function restoreSessionState(rawSnapshot = null) {
     } else {
       clearActiveStockBrushFolders();
     }
+    state.browsingAllStockBrushes = Boolean(snapshot.browsingAllStockBrushes);
     clearActiveCustomBrushPreset();
     const soloBrush = getSoloBrush();
     if (soloBrush) {
@@ -8291,10 +12047,17 @@ async function restoreSessionState(rawSnapshot = null) {
     }
     state.nextBrushId = maxBrushId + 1;
 
+    if (sceneRendererWorker || state.sceneRendererActive || state.sceneRendererPreparing) {
+      deactivateSceneRenderer({ dispose: true });
+    }
+    sceneRendererUnsupportedSources.clear();
     world.innerHTML = "";
     if (exportBgImageLayer) {
       world.appendChild(exportBgImageLayer);
     }
+    state.viewportRenderedStamps.clear();
+    state.occlusionCulledStamps.clear();
+    cancelStampOcclusionRefresh();
     clearStampSpatialIndex();
     state.stampCount = 0;
     state.urlRefCounts.clear();
@@ -8310,7 +12073,10 @@ async function restoreSessionState(rawSnapshot = null) {
     const restoredStrokeBrushes = Array.isArray(snapshot.strokeBrushes) ? snapshot.strokeBrushes : [];
     for (const source of restoredStrokeBrushes) {
       const sourceId = Number(source?.id);
-      const sourceUrl = typeof source?.url === "string" ? source.url : "";
+      const sourceUrl =
+        typeof source?.url === "string"
+          ? resolveRestoredBrushUrl(source.url, source.url)
+          : "";
       if (!Number.isFinite(sourceId) || !sourceUrl || brushById.has(sourceId)) {
         continue;
       }
@@ -8357,8 +12123,15 @@ async function restoreSessionState(rawSnapshot = null) {
         applyStrokeAnimationPaused(stroke);
       }
     }
+    resetKeyboardHistoryTracking();
     state.history = state.strokes.map((stroke) => ({ type: "draw", stroke }));
     state.redoHistory = restoredRedoStrokes.map((stroke) => ({ type: "draw", stroke }));
+    for (const action of state.history) {
+      markKeyboardHistoryActionPerformed(action);
+    }
+    for (const action of state.redoHistory) {
+      markKeyboardHistoryActionUndone(action);
+    }
 
     setInputNumericValue(sizeSlider, controls.size);
     consistentToggle.checked = Boolean(controls.consistent);
@@ -8399,9 +12172,14 @@ async function restoreSessionState(rawSnapshot = null) {
     state.exportDrag = null;
     state.exportTask = null;
     state.brushGalleryCollapsed = Boolean(controls.brushGalleryCollapsed);
-    state.brushGallerySort = normalizeBrushGallerySort(controls.brushGallerySort);
+    state.brushGallerySort = DEFAULT_BRUSH_GALLERY_SORT;
+    state.brushGallerySearch = normalizeBrushGallerySearch(controls.brushGallerySearch);
+    state.brushGalleryRandomSeed =
+      normalizeBrushGalleryRandomSeed(controls.brushGalleryRandomSeed) ?? createBrushGalleryRandomSeed();
+    state.brushGalleryPage = 0;
     state.exportBackgroundEnabled = controls.exportBackgroundEnabled !== false;
     state.exportSeeBeyondEnabled = controls.exportSeeBeyondEnabled !== false;
+    state.exportGuidelinesEnabled = Boolean(controls.exportGuidelinesEnabled);
     revokeExportBackgroundImageUrl();
     state.exportBgImageUrl = typeof controls.exportBgImageUrl === "string" &&
       controls.exportBgImageUrl.startsWith("data:image/")
@@ -8457,10 +12235,18 @@ async function restoreSessionState(rawSnapshot = null) {
     renderStockBrushButtons();
     refreshBrushTintOnVisibleElements();
     renderCamera();
+    if (stockBrushAssetRevisionChanged || refreshedStockBrushCount > 0) {
+      scheduleSessionSave();
+    }
+    if (snapshot.browsingAllStockBrushes) {
+      await browseAllStockBrushFolders({ preserveGalleryState: true });
+    }
+    scheduleSceneRendererEvaluation();
     return true;
   } catch (error) {
     removeSessionStorageItemSafe(SESSION_STORAGE_KEY);
     removeSessionStorageItemSafe(SESSION_STORAGE_POINTER_KEY);
+    removeSessionStorageItemSafe(SESSION_STORAGE_PENDING_POINTER_KEY);
     return false;
   }
 }
@@ -8546,8 +12332,320 @@ function getStockBrushFiles(folder) {
   );
 }
 
+function normalizeBrushTags(value) {
+  const rawTags = Array.isArray(value)
+    ? value
+    : value instanceof Set
+    ? Array.from(value)
+    : [];
+  const seen = new Set();
+  const tags = [];
+  for (const rawTag of rawTags) {
+    const tag = String(rawTag || "").trim().replace(/^#+/, "").trim();
+    const key = tag.toLocaleLowerCase();
+    if (!tag || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+function getStockBrushSourceLookupKey(source) {
+  const normalizedSource = normalizeFavoriteBrushSource(source);
+  if (!normalizedSource || /^(?:blob|data):/i.test(normalizedSource)) {
+    return "";
+  }
+  try {
+    const resolvedUrl = new URL(normalizedSource, document.baseURI);
+    const documentUrl = new URL(document.baseURI);
+    if (
+      /^https?:$/i.test(resolvedUrl.protocol) &&
+      resolvedUrl.origin !== documentUrl.origin
+    ) {
+      return `${resolvedUrl.origin}${resolvedUrl.pathname}`;
+    }
+    return resolvedUrl.pathname;
+  } catch (error) {
+    return normalizedSource.split(/[?#]/)[0];
+  }
+}
+
+function getStockBrushSourceInfoMap() {
+  if (stockBrushSourceInfoByLookupKey instanceof Map) {
+    return stockBrushSourceInfoByLookupKey;
+  }
+
+  const sourceInfoByLookupKey = new Map();
+  for (const folder of getOrderedStockBrushFolders()) {
+    for (const filePath of getStockBrushFiles(folder)) {
+      const canonicalSource = normalizeFavoriteBrushSource(encodeStockBrushPath(filePath));
+      const sourceKey = getStockBrushSourceLookupKey(canonicalSource);
+      if (!sourceKey || sourceInfoByLookupKey.has(sourceKey)) {
+        continue;
+      }
+      sourceInfoByLookupKey.set(sourceKey, {
+        canonicalSource,
+        folderId: folder.id
+      });
+    }
+  }
+  for (const [legacyFilePath, currentFilePath] of STOCK_BRUSH_SOURCE_ALIASES) {
+    const legacyKey = getStockBrushSourceLookupKey(encodeStockBrushPath(legacyFilePath));
+    const currentKey = getStockBrushSourceLookupKey(encodeStockBrushPath(currentFilePath));
+    const currentInfo = currentKey ? sourceInfoByLookupKey.get(currentKey) : null;
+    if (legacyKey && currentInfo) {
+      sourceInfoByLookupKey.set(legacyKey, currentInfo);
+    }
+  }
+  stockBrushSourceInfoByLookupKey = sourceInfoByLookupKey;
+  return stockBrushSourceInfoByLookupKey;
+}
+
+function getStockBrushSourceInfo(source) {
+  const sourceKey = getStockBrushSourceLookupKey(source);
+  return sourceKey ? getStockBrushSourceInfoMap().get(sourceKey) || null : null;
+}
+
+function getCanonicalStockBrushSource(source) {
+  const normalizedSource = normalizeFavoriteBrushSource(source);
+  if (!normalizedSource) {
+    return "";
+  }
+  return getStockBrushSourceInfo(normalizedSource)?.canonicalSource || normalizedSource;
+}
+
+function getStockBrushAssetRevisionForSource(source) {
+  const folderId = getStockBrushSourceInfo(source)?.folderId;
+  return folderId
+    ? STOCK_BRUSH_ASSET_REVISIONS_BY_FOLDER.get(folderId) || STOCK_BRUSH_ASSET_REVISION
+    : "";
+}
+
+function getStockBrushRequestUrl(source) {
+  const canonicalSource = getCanonicalStockBrushSource(source);
+  if (!canonicalSource) {
+    return "";
+  }
+  const revision = getStockBrushAssetRevisionForSource(canonicalSource);
+  if (!revision) {
+    return canonicalSource;
+  }
+  const separator = canonicalSource.includes("?") ? "&" : "?";
+  return `${canonicalSource}${separator}brushv=${encodeURIComponent(revision)}`;
+}
+
+function resolveRestoredBrushUrl(url, originalSource = url) {
+  const normalizedUrl = normalizeFavoriteBrushSource(url);
+  const canonicalOriginalSource = getCanonicalStockBrushSource(originalSource);
+  if (!normalizedUrl || !getStockBrushSourceInfo(canonicalOriginalSource)) {
+    return normalizedUrl;
+  }
+  if (
+    !/^(?:blob|data):/i.test(normalizedUrl) &&
+    getStockBrushSourceLookupKey(getCanonicalStockBrushSource(normalizedUrl)) ===
+      getStockBrushSourceLookupKey(canonicalOriginalSource)
+  ) {
+    return getStockBrushRequestUrl(canonicalOriginalSource);
+  }
+  return normalizedUrl;
+}
+
+function getStockBrushCategoryTagMap() {
+  if (stockBrushCategoryTagsBySource instanceof Map) {
+    return stockBrushCategoryTagsBySource;
+  }
+
+  const tagsBySource = new Map();
+  for (const folder of getOrderedStockBrushFolders()) {
+    const tag = String(folder?.name || folder?.id || "").trim();
+    if (!tag) {
+      continue;
+    }
+    for (const filePath of getStockBrushFiles(folder)) {
+      const sourceKey = getStockBrushSourceLookupKey(encodeStockBrushPath(filePath));
+      if (!sourceKey) {
+        continue;
+      }
+      const tags = tagsBySource.get(sourceKey) || [];
+      if (!tags.some((existingTag) => existingTag.toLocaleLowerCase() === tag.toLocaleLowerCase())) {
+        tags.push(tag);
+      }
+      tagsBySource.set(sourceKey, tags);
+    }
+  }
+  stockBrushCategoryTagsBySource = tagsBySource;
+  return stockBrushCategoryTagsBySource;
+}
+
+function getStockBrushTagsForSource(source) {
+  const canonicalSource = getCanonicalStockBrushSource(source);
+  const metadata = getStockBrushMetadataForSource(canonicalSource);
+  const sourceKey = getStockBrushSourceLookupKey(canonicalSource);
+  const categoryTags = sourceKey
+    ? getStockBrushCategoryTagMap().get(sourceKey) || []
+    : [];
+  return normalizeBrushTags([
+    ...categoryTags,
+    ...(metadata?.tags || [])
+  ]);
+}
+
+function getStockBrushMetadataMap() {
+  if (stockBrushMetadataBySource instanceof Map) {
+    return stockBrushMetadataBySource;
+  }
+
+  const metadataBySource = new Map();
+  for (const [filePath, rawMetadata] of Object.entries(STOCK_BRUSH_METADATA)) {
+    const sourceKey = getStockBrushSourceLookupKey(encodeStockBrushPath(filePath));
+    if (!sourceKey || !rawMetadata || typeof rawMetadata !== "object") {
+      continue;
+    }
+    const name = String(rawMetadata.name || "").trim();
+    const tags = normalizeBrushTags(rawMetadata.tags).filter((tag) =>
+      STOCK_BRUSH_METADATA_TAGS.has(tag.toLocaleLowerCase())
+    );
+    const width = Math.max(0, Math.round(Number(rawMetadata.width) || 0));
+    const height = Math.max(0, Math.round(Number(rawMetadata.height) || 0));
+    const frameCount = normalizeBrushFrameCount(rawMetadata.frameCount);
+    const durationMs = Math.max(0, Math.round(Number(rawMetadata.durationMs) || 0));
+    metadataBySource.set(sourceKey, {
+      name: name || getBrushSourceFileName(filePath),
+      tags,
+      width,
+      height,
+      frameCount,
+      durationMs,
+      animated: rawMetadata.animated === true || Boolean(frameCount && frameCount > 1),
+      opaque: rawMetadata.opaque === true
+    });
+  }
+  stockBrushMetadataBySource = metadataBySource;
+  return stockBrushMetadataBySource;
+}
+
+function getStockBrushMetadataForSource(source) {
+  const sourceKey = getStockBrushSourceLookupKey(getCanonicalStockBrushSource(source));
+  return sourceKey ? getStockBrushMetadataMap().get(sourceKey) || null : null;
+}
+
+function getBrushTags(brush) {
+  const source = brush?.originalUrl || brush?.url || "";
+  const metadata = getStockBrushMetadataForSource(source);
+  const stockSourceInfo = getStockBrushSourceInfo(source);
+  const stockTags = getStockBrushTagsForSource(source);
+  if (metadata || stockSourceInfo) {
+    return stockTags;
+  }
+  const explicitTags = normalizeBrushTags(brush?.tags).map((tag) =>
+    STOCK_BRUSH_FOLDER_ID_ALIASES.get(tag.toLocaleLowerCase()) || tag
+  );
+  return normalizeBrushTags(explicitTags);
+}
+
+function getAvailableBrushTags() {
+  return getAvailableBrushTagEntries().map((entry) => entry.tag);
+}
+
+function getAvailableBrushTagEntries() {
+  const tagsByKey = new Map();
+  for (const brush of state.brushes) {
+    for (const tag of getBrushTags(brush)) {
+      const key = tag.toLocaleLowerCase();
+      if (!tagsByKey.has(key)) {
+        tagsByKey.set(key, { tag, count: 0 });
+      }
+      tagsByKey.get(key).count += 1;
+    }
+  }
+  return Array.from(tagsByKey.values()).sort((a, b) =>
+    a.tag.localeCompare(b.tag, undefined, { numeric: true, sensitivity: "base" })
+  );
+}
+
+function renderBrushTagMenu(allowOpen = true) {
+  if (!brushTagMenuButton || !brushTagMenu) {
+    return;
+  }
+
+  const tagEntries = getAvailableBrushTagEntries();
+  const menuOpen = Boolean(allowOpen && state.brushTagMenuOpen && tagEntries.length);
+  state.brushTagMenuOpen = menuOpen;
+  brushTagMenuButton.disabled = tagEntries.length === 0;
+  brushTagMenuButton.setAttribute("aria-expanded", String(menuOpen));
+  brushTagMenuButton.classList.toggle("is-open", menuOpen);
+  brushTagMenu.hidden = !menuOpen;
+  brushTagMenu.replaceChildren();
+  if (!menuOpen) {
+    return;
+  }
+
+  const currentSearch = normalizeBrushGallerySearch(state.brushGallerySearch).trim();
+  const activeSearch = currentSearch.startsWith("#")
+    ? currentSearch.slice(1).trim().toLocaleLowerCase()
+    : "";
+  const fragment = document.createDocumentFragment();
+  for (const { tag, count } of tagEntries) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "brush-tag-menu-item";
+    button.dataset.brushTag = tag;
+    button.setAttribute("role", "menuitem");
+    button.title = `Search for #${tag}`;
+    const label = document.createElement("span");
+    label.className = "brush-tag-menu-label";
+    label.textContent = `#${tag}`;
+    const countLabel = document.createElement("span");
+    countLabel.className = "brush-tag-menu-count";
+    countLabel.textContent = `(${count.toLocaleString()})`;
+    button.appendChild(label);
+    button.appendChild(countLabel);
+    const isActive = activeSearch === tag.toLocaleLowerCase();
+    button.classList.toggle("is-active", isActive);
+    if (isActive) {
+      button.setAttribute("aria-current", "true");
+    }
+    fragment.appendChild(button);
+  }
+  brushTagMenu.appendChild(fragment);
+}
+
+function setBrushTagMenuOpen(nextOpen, options = {}) {
+  state.brushTagMenuOpen = Boolean(nextOpen && getAvailableBrushTags().length);
+  renderBrushTagMenu(true);
+  if (state.brushTagMenuOpen && options.focusFirst) {
+    brushTagMenu?.querySelector(".brush-tag-menu-item")?.focus();
+  }
+}
+
+function applyBrushTagSearch(tag) {
+  const normalizedTag = normalizeBrushTags([tag])[0];
+  if (!normalizedTag) {
+    return;
+  }
+  state.brushGallerySearch = normalizeBrushGallerySearch(`#${normalizedTag}`);
+  resetBrushGalleryPage();
+  setBrushTagMenuOpen(false);
+  renderBrushGallery();
+  brushGallery.scrollTop = 0;
+  if (brushGallerySearchInput) {
+    brushGallerySearchInput.focus();
+    const cursorPosition = brushGallerySearchInput.value.length;
+    brushGallerySearchInput.setSelectionRange(cursorPosition, cursorPosition);
+  }
+  scheduleSessionSave();
+}
+
+function normalizeStockBrushFolderId(folderId) {
+  const normalizedId = String(folderId || "").trim();
+  return STOCK_BRUSH_FOLDER_ID_ALIASES.get(normalizedId.toLocaleLowerCase()) || normalizedId;
+}
+
 function getStockBrushFolderById(folderId) {
-  return STOCK_BRUSH_FOLDERS.find((folder) => folder && folder.id === folderId) || null;
+  const normalizedId = normalizeStockBrushFolderId(folderId);
+  return STOCK_BRUSH_FOLDERS.find((folder) => folder && folder.id === normalizedId) || null;
 }
 
 function getActiveStockBrushFolderIdSet() {
@@ -8650,11 +12748,20 @@ function renderStockBrushButtons() {
   const showBrushData = !state.brushGalleryCollapsed;
   stockBrushButtons.hidden = !showBrushData || folders.length === 0;
   stockBrushButtons.innerHTML = "";
+  if (stockBrushBrowseRow) {
+    stockBrushBrowseRow.hidden = !showBrushData || folders.length === 0;
+  }
+  if (browseAllStockBrushesButton) {
+    browseAllStockBrushesButton.disabled = Boolean(state.stockBrushLoadingFolderId) || folders.length === 0;
+    browseAllStockBrushesButton.classList.toggle("is-active", state.browsingAllStockBrushes);
+    browseAllStockBrushesButton.classList.toggle("is-loading", state.stockBrushLoadingFolderId === "browse-all");
+    browseAllStockBrushesButton.setAttribute("aria-pressed", state.browsingAllStockBrushes ? "true" : "false");
+  }
   if (loadAllStockBrushesButton) {
-    loadAllStockBrushesButton.hidden = !showBrushData || folders.length === 0;
     loadAllStockBrushesButton.disabled = Boolean(state.stockBrushLoadingFolderId) || folders.length === 0;
     loadAllStockBrushesButton.classList.toggle("is-active", state.activeStockBrushFolderId === "all");
     loadAllStockBrushesButton.classList.toggle("is-loading", state.stockBrushLoadingFolderId === "all");
+    loadAllStockBrushesButton.setAttribute("aria-pressed", state.activeStockBrushFolderId === "all" ? "true" : "false");
   }
   updateFavoriteBrushButtons();
   if (!showBrushData || !folders.length) {
@@ -8681,7 +12788,7 @@ function renderStockBrushButtons() {
     if (iconPath) {
       const icon = document.createElement("img");
       icon.className = "stock-brush-icon";
-      icon.src = encodeStockBrushPath(iconPath);
+      icon.src = getStockBrushRequestUrl(encodeStockBrushPath(iconPath));
       icon.alt = "";
       icon.draggable = false;
       icon.loading = "lazy";
@@ -8693,16 +12800,51 @@ function renderStockBrushButtons() {
     fragment.appendChild(button);
   }
 
+  if (loadAllStockBrushesButton) {
+    fragment.appendChild(loadAllStockBrushesButton);
+  }
+
   stockBrushButtons.appendChild(fragment);
 }
 
 function getSortedBrushGalleryBrushes() {
   const sortMode = normalizeBrushGallerySort(state.brushGallerySort);
-  const brushes = state.brushes.slice();
+  const searchNeedle = normalizeBrushGallerySearch(state.brushGallerySearch)
+    .trim()
+    .toLocaleLowerCase();
+  const exactTagNeedle = searchNeedle.startsWith("#")
+    ? searchNeedle.slice(1).trim()
+    : "";
+  const brushes = searchNeedle
+    ? state.brushes.filter((brush) => {
+        const tags = getBrushTags(brush).map((tag) => tag.toLocaleLowerCase());
+        if (searchNeedle.startsWith("#")) {
+          return Boolean(exactTagNeedle && tags.includes(exactTagNeedle));
+        }
+        return (
+          String(brush.name || "").toLocaleLowerCase().includes(searchNeedle) ||
+          tags.some((tag) => tag.includes(searchNeedle))
+        );
+      })
+    : state.brushes.slice();
   const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, {
     numeric: true,
     sensitivity: "base"
   });
+
+  if (sortMode === "random") {
+    const seed = normalizeBrushGalleryRandomSeed(state.brushGalleryRandomSeed);
+    if (seed === null) {
+      state.brushGalleryRandomSeed = createBrushGalleryRandomSeed();
+    }
+    const stableSeed = normalizeBrushGalleryRandomSeed(state.brushGalleryRandomSeed) ?? 0;
+    brushes.sort((a, b) => {
+      const rankDelta =
+        getBrushGalleryRandomRank(a, stableSeed) - getBrushGalleryRandomRank(b, stableSeed);
+      return rankDelta || byName(a, b) || Number(a.id) - Number(b.id);
+    });
+    return brushes;
+  }
 
   if (sortMode === "area-asc" || sortMode === "area-desc") {
     brushes.sort((a, b) => {
@@ -8733,7 +12875,52 @@ function createBrushActionButton(action, label, isActive, title) {
   return button;
 }
 
+function updateBrushGalleryPagination(totalBrushes, totalPages, pageIndex, showGallery) {
+  if (!brushGalleryPagination) {
+    return;
+  }
+
+  const showPagination = showGallery && totalPages > 1;
+  brushGalleryPagination.hidden = !showPagination;
+  if (!showPagination) {
+    return;
+  }
+
+  const rangeStart = pageIndex * BRUSH_GALLERY_PAGE_SIZE + 1;
+  const rangeEnd = Math.min(totalBrushes, rangeStart + BRUSH_GALLERY_PAGE_SIZE - 1);
+  if (brushGalleryPageStatus) {
+    brushGalleryPageStatus.textContent =
+      `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${totalBrushes.toLocaleString()}` +
+      ` · page ${(pageIndex + 1).toLocaleString()}/${totalPages.toLocaleString()}`;
+  }
+  if (brushGalleryPreviousPageButton) {
+    brushGalleryPreviousPageButton.disabled = pageIndex === 0;
+  }
+  if (brushGalleryNextPageButton) {
+    brushGalleryNextPageButton.disabled = pageIndex >= totalPages - 1;
+  }
+}
+
+function setBrushGalleryPage(pageIndex) {
+  const totalPages = Math.max(
+    1,
+    Math.ceil(getSortedBrushGalleryBrushes().length / BRUSH_GALLERY_PAGE_SIZE)
+  );
+  const nextPage = clamp(normalizeBrushGalleryPage(pageIndex), 0, totalPages - 1);
+  if (nextPage === state.brushGalleryPage) {
+    return;
+  }
+  state.brushGalleryPage = nextPage;
+  state.pendingBrushGallerySelectionScroll = false;
+  renderBrushGallery();
+  brushGallery.scrollTop = 0;
+  scheduleSessionSave();
+}
+
 function renderBrushGallery() {
+  // Every brush/selection mutation is reflected through this renderer. Keep the
+  // per-stamp weighted picker hot by rebuilding its pool only after such a change.
+  invalidateBrushChoicePool();
   updateBrushDataToggleUI();
   brushGallery.innerHTML = "";
   const showBrushFileMeta = state.sidebarTab === "brushes";
@@ -8741,19 +12928,30 @@ function renderBrushGallery() {
   if (brushSortSelect) {
     brushSortSelect.value = normalizeBrushGallerySort(state.brushGallerySort);
   }
+  if (brushGallerySearchInput) {
+    const searchValue = normalizeBrushGallerySearch(state.brushGallerySearch);
+    if (brushGallerySearchInput.value !== searchValue) {
+      brushGallerySearchInput.value = searchValue;
+    }
+  }
 
   const showBrushData = !state.brushGalleryCollapsed;
   dropZone.hidden = !showBrushData;
   dropZone.style.display = showBrushData ? "" : "none";
   dropZonePrompt.hidden = !showBrushData;
   unloadBrushDataButton.hidden = !showBrushData;
+  if (brushSearchControls) {
+    brushSearchControls.hidden = !showBrushData;
+  }
   if (brushSortControls) {
     brushSortControls.hidden = !showBrushData;
   }
+  renderBrushTagMenu(showBrushData && state.sidebarTab === "brushes");
   if (!showBrushData) {
     dropZone.classList.remove("has-gallery");
     dropZoneHeader.classList.add("no-unload");
     brushGallery.hidden = true;
+    updateBrushGalleryPagination(0, 1, 0, false);
     return;
   }
 
@@ -8766,6 +12964,8 @@ function renderBrushGallery() {
   brushGallery.hidden = !showGallery;
 
   if (!showGallery) {
+    state.brushGalleryPage = 0;
+    updateBrushGalleryPagination(0, 1, 0, false);
     return;
   }
 
@@ -8773,19 +12973,50 @@ function renderBrushGallery() {
   const soloBrush = getSoloBrush();
   const selectedBrushes = getSelectedBrushes();
   const selectedBrushIds = new Set(selectedBrushes.map((brush) => brush.id));
-  for (const brush of getSortedBrushGalleryBrushes()) {
+  const sortedBrushes = getSortedBrushGalleryBrushes();
+  if (!sortedBrushes.length) {
+    state.brushGalleryPage = 0;
+    updateBrushGalleryPagination(0, 1, 0, false);
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "brush-gallery-empty";
+    emptyMessage.setAttribute("role", "status");
+    emptyMessage.setAttribute("aria-live", "polite");
+    const searchQuery = normalizeBrushGallerySearch(state.brushGallerySearch).trim();
+    emptyMessage.textContent = searchQuery
+      ? `No GIFs match “${searchQuery}”.`
+      : "No GIFs to show.";
+    brushGallery.appendChild(emptyMessage);
+    return;
+  }
+  const totalPages = Math.max(1, Math.ceil(sortedBrushes.length / BRUSH_GALLERY_PAGE_SIZE));
+  let pageIndex = clamp(normalizeBrushGalleryPage(state.brushGalleryPage), 0, totalPages - 1);
+  if (state.pendingBrushGallerySelectionScroll) {
+    const pendingBrushId = getSingleSelectedBrushIdForScroll();
+    const pendingBrushIndex = sortedBrushes.findIndex((brush) => brush.id === pendingBrushId);
+    if (pendingBrushIndex >= 0) {
+      pageIndex = Math.floor(pendingBrushIndex / BRUSH_GALLERY_PAGE_SIZE);
+    }
+  }
+  state.brushGalleryPage = pageIndex;
+  updateBrushGalleryPagination(sortedBrushes.length, totalPages, pageIndex, true);
+  const pageStart = pageIndex * BRUSH_GALLERY_PAGE_SIZE;
+  const pageBrushes = sortedBrushes.slice(pageStart, pageStart + BRUSH_GALLERY_PAGE_SIZE);
+  for (const brush of pageBrushes) {
     const card = document.createElement("div");
     card.className = "brush-item";
     const isSolo = soloBrush && soloBrush.id === brush.id;
     const isSelected = selectedBrushIds.has(brush.id);
-    if (!brush.enabled) {
+    const isBrowseOnly = state.browsingAllStockBrushes && !brush.enabled;
+    if (!brush.enabled && !isBrowseOnly) {
       card.classList.add("is-disabled");
+    } else if (isBrowseOnly) {
+      card.classList.add("is-browse-only");
     }
     if (isSolo) {
       card.classList.add("is-solo");
     } else if (isSelected) {
       card.classList.add("is-selected");
-    } else if (soloBrush || selectedBrushIds.size) {
+    } else if (!state.browsingAllStockBrushes && (soloBrush || selectedBrushIds.size)) {
       card.classList.add("is-solo-muted");
     }
     card.dataset.brushId = String(brush.id);
@@ -8798,8 +13029,8 @@ function renderBrushGallery() {
     preview.draggable = true;
     preview.loading = "lazy";
     preview.decoding = "async";
-    applyBrushGalleryPreviewAnimationState(preview, brush);
-    applyBrushTintStyle(preview, !brush.enabled, NO_TINT_SETTINGS);
+    applyBrushGalleryPreviewAnimationState(preview, brush, isBrowseOnly);
+    applyBrushTintStyle(preview, !brush.enabled && !isBrowseOnly, NO_TINT_SETTINGS);
 
     const drawingFavoriteButton = document.createElement("button");
     drawingFavoriteButton.type = "button";
@@ -8969,6 +13200,7 @@ function startLayerNameEdit(stroke, nameElement) {
       stroke.customName = normalizeLayerCustomName(input.value);
       scheduleSessionSave();
     }
+    markStrokeSerializationDirty(stroke);
     if (row) {
       row.classList.remove("is-renaming");
     }
@@ -8980,6 +13212,7 @@ function startLayerNameEdit(stroke, nameElement) {
   input.addEventListener("dblclick", (event) => event.stopPropagation());
   input.addEventListener("input", () => {
     stroke.customName = normalizeLayerCustomName(input.value);
+    markStrokeSerializationDirty(stroke);
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -9063,14 +13296,18 @@ function applyStrokeVisibility(stroke) {
   if (!stroke || !Array.isArray(stroke.elements)) {
     return;
   }
+  markStrokeSerializationDirty(stroke);
+  invalidateStampOcclusion();
 
   const hidden = Boolean(stroke.hidden);
+  resetLayerSequencePreviewRuntime(stroke);
   resetStrokeSequenceRuntime(stroke);
   const viewportBounds = getViewportVisibilityBounds();
   for (const element of stroke.elements) {
     resetStampSequenceStyle(element);
     element.classList.toggle("is-layer-hidden", hidden);
     if (hidden) {
+      state.viewportRenderedStamps.delete(element);
       unregisterStampSpatialCells(element);
     } else if (element.parentElement === world) {
       registerStampSpatialCells(element);
@@ -9079,12 +13316,20 @@ function applyStrokeVisibility(stroke) {
   }
   updateUndoState();
   scheduleStampVisibilityRefresh();
+  refreshLayerSequenceLoop();
+  syncSceneRendererElements(stroke.elements);
 }
 
 function applyStrokeAnimationPaused(stroke) {
   if (!stroke || !Array.isArray(stroke.elements)) {
     return;
   }
+  markStrokeSerializationDirty(stroke);
+  setStrokeSequenceClockPaused(
+    stroke,
+    Boolean(stroke.animationPaused || state.gifAnimationsPaused),
+    performance.now()
+  );
 
   const elements = stroke.elements.filter((element) => element instanceof HTMLImageElement);
   window.requestAnimationFrame(() => {
@@ -9097,6 +13342,8 @@ function applyStrokeAnimationPaused(stroke) {
     }
     scheduleStampVisibilityRefresh();
   });
+  refreshLayerSequenceLoop();
+  syncSceneRendererElements(stroke.elements);
 }
 
 function applyGlobalGifPauseState(paused) {
@@ -9242,6 +13489,46 @@ function resetStrokeSequenceRuntime(stroke) {
   delete stroke.sequencePauseStartTime;
 }
 
+function invalidateStrokeSequenceTopology(stroke) {
+  if (!stroke || typeof stroke !== "object") {
+    return;
+  }
+  stroke.sequenceTopologyRevision =
+    (Math.max(0, Math.floor(Number(stroke.sequenceTopologyRevision)) || 0) + 1) %
+    Number.MAX_SAFE_INTEGER;
+  stroke.sequenceRuntime = null;
+  stroke.sequenceSlotRuntimes = null;
+  resetLayerSequencePreviewRuntime(stroke);
+}
+
+function resetLayerSequencePreviewRuntime(stroke) {
+  if (stroke) {
+    layerSequencePreviewRuntimeByStroke.delete(stroke);
+  }
+}
+
+function shiftSequenceDatasetClock(dataset, offsetMs) {
+  if (!dataset || typeof dataset !== "object" || !Number.isFinite(offsetMs) || offsetMs <= 0) {
+    return;
+  }
+  for (const key of Object.keys(dataset)) {
+    if (
+      key.endsWith("Start") ||
+      key.endsWith("StartTime") ||
+      key.endsWith("MoveStart") ||
+      key.endsWith("RotateStart") ||
+      key.endsWith("ScaleStart") ||
+      key.endsWith("ColorStart") ||
+      key.endsWith("VisibilityStart")
+    ) {
+      const value = Number(dataset[key]);
+      if (Number.isFinite(value)) {
+        dataset[key] = String(value + offsetMs);
+      }
+    }
+  }
+}
+
 function shiftSequenceRuntimeClock(runtime, offsetMs) {
   if (!runtime || typeof runtime !== "object" || !Number.isFinite(offsetMs) || offsetMs <= 0) {
     return;
@@ -9255,6 +13542,7 @@ function shiftSequenceRuntimeClock(runtime, offsetMs) {
   if (Number.isFinite(Number(runtime.nextTriggerTime))) {
     runtime.nextTriggerTime += offsetMs;
   }
+  shiftSequenceDatasetClock(runtime.groupDataset, offsetMs);
 }
 
 function shiftStrokeSequenceClock(stroke, offsetMs) {
@@ -9268,22 +13556,46 @@ function shiftStrokeSequenceClock(stroke, offsetMs) {
     }
   }
   for (const stamp of stroke.elements || []) {
-    for (const key of Object.keys(stamp?.dataset || {})) {
-      if (
-        key.endsWith("Start") ||
-        key.endsWith("StartTime") ||
-        key.endsWith("MoveStart") ||
-        key.endsWith("RotateStart") ||
-        key.endsWith("ScaleStart") ||
-        key.endsWith("ColorStart") ||
-        key.endsWith("VisibilityStart")
-      ) {
-        const value = Number(stamp.dataset[key]);
-        if (Number.isFinite(value)) {
-          stamp.dataset[key] = String(value + offsetMs);
-        }
+    shiftSequenceDatasetClock(stamp?.dataset, offsetMs);
+  }
+}
+
+function shiftLayerSequencePreviewClock(stroke, offsetMs) {
+  if (!stroke || !Number.isFinite(offsetMs) || offsetMs <= 0) {
+    return;
+  }
+  const slots = layerSequencePreviewRuntimeByStroke.get(stroke);
+  if (!Array.isArray(slots)) {
+    return;
+  }
+  for (const slotState of slots) {
+    if (!slotState || !Array.isArray(slotState.buckets)) {
+      continue;
+    }
+    for (const bucket of slotState.buckets) {
+      if (Number.isFinite(bucket.firedAt)) {
+        bucket.firedAt += offsetMs;
       }
     }
+    slotState.pausedAt = null;
+  }
+}
+
+function setStrokeSequenceClockPaused(stroke, paused, now = performance.now()) {
+  if (!stroke) {
+    return;
+  }
+  if (paused) {
+    if (!Number.isFinite(Number(stroke.sequencePauseStartTime))) {
+      stroke.sequencePauseStartTime = now;
+    }
+    return;
+  }
+  if (Number.isFinite(Number(stroke.sequencePauseStartTime))) {
+    const pausedDuration = Math.max(0, now - Number(stroke.sequencePauseStartTime));
+    shiftStrokeSequenceClock(stroke, pausedDuration);
+    shiftLayerSequencePreviewClock(stroke, pausedDuration);
+    delete stroke.sequencePauseStartTime;
   }
 }
 
@@ -9296,12 +13608,41 @@ function shiftAllLayerSequenceClocks(offsetMs) {
   }
 }
 
+function cancelScheduledStrokeSequenceEffectRefresh(stroke) {
+  const timeoutId = pendingLayerSequenceRefreshByStroke.get(stroke);
+  if (timeoutId === undefined) {
+    return;
+  }
+  window.clearTimeout(timeoutId);
+  pendingLayerSequenceRefreshByStroke.delete(stroke);
+}
+
+function scheduleStrokeSequenceEffectRefresh(stroke) {
+  if (!stroke) {
+    return;
+  }
+  cancelScheduledStrokeSequenceEffectRefresh(stroke);
+  const timeoutId = window.setTimeout(() => {
+    pendingLayerSequenceRefreshByStroke.delete(stroke);
+    if (state.strokeById.get(Number(stroke.id)) === stroke) {
+      refreshStrokeSequenceEffect(stroke);
+    }
+  }, LAYER_SEQUENCE_SETTING_RESET_DEBOUNCE_MS);
+  pendingLayerSequenceRefreshByStroke.set(stroke, timeoutId);
+}
+
 function refreshStrokeSequenceEffect(stroke) {
   if (!stroke) {
     return;
   }
+  cancelScheduledStrokeSequenceEffectRefresh(stroke);
+  markStrokeSerializationDirty(stroke);
+  invalidateStampOcclusion();
+  resetLayerSequencePreviewRuntime(stroke);
   resetStrokeSequenceEffect(stroke);
-  startLayerSequenceLoop();
+  refreshLayerSequenceLoop();
+  scheduleStampOcclusionRefresh();
+  syncSceneRendererElements(stroke.elements);
 }
 
 function resetStrokeSequenceEffect(stroke) {
@@ -9343,79 +13684,281 @@ function getSequenceRuntimeBaseTime(runtime, now) {
   return baseTime;
 }
 
+function getStrokeSequenceTopologyKey(stroke) {
+  return Math.max(0, Math.floor(Number(stroke?.sequenceTopologyRevision)) || 0);
+}
+
+function createSequenceTriggerKey(stroke, style, ...parts) {
+  return `${style}:t${getStrokeSequenceTopologyKey(stroke)}:${parts.join(":")}`;
+}
+
+function getPulseLayerSequenceTriggers(
+  stroke,
+  index,
+  total,
+  settings,
+  now,
+  effectDuration,
+  runtimeHost
+) {
+  if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "pulse") {
+    runtimeHost.sequenceRuntime = {
+      style: "pulse",
+      pulseBaseTime: now,
+      triggeredPulseByIndex: [],
+      frameTime: NaN,
+      remainingCatchUpTriggers: LAYER_SEQUENCE_MAX_PULSE_CATCH_UP_PER_FRAME
+    };
+  }
+  const runtime = runtimeHost.sequenceRuntime;
+  if (!Array.isArray(runtime.triggeredPulseByIndex)) {
+    runtime.triggeredPulseByIndex = [];
+  }
+  if (runtime.frameTime !== now) {
+    runtime.frameTime = now;
+    runtime.remainingCatchUpTriggers = LAYER_SEQUENCE_MAX_PULSE_CATCH_UP_PER_FRAME;
+  }
+  if (Number(runtime.pulseBaseTime) > now) {
+    runtime.pulseBaseTime = now;
+  }
+  const spacing = getPulseSpacingMs(settings);
+  const interval = Math.max(16, getPulseIntervalMs(settings));
+  const maxDuePulseId = Math.floor(
+    (now - runtime.pulseBaseTime - index * spacing) / interval
+  );
+  const lastPulseForIndex = Number.isFinite(Number(runtime.triggeredPulseByIndex[index]))
+    ? Number(runtime.triggeredPulseByIndex[index])
+    : -1;
+  const availableTriggerCount = Math.max(0, maxDuePulseId - lastPulseForIndex);
+  const triggerCount = Math.min(
+    availableTriggerCount,
+    LAYER_SEQUENCE_MAX_PULSE_CATCH_UP_PER_STAMP,
+    Math.max(0, Math.floor(Number(runtime.remainingCatchUpTriggers)) || 0)
+  );
+  if (!triggerCount) {
+    return [];
+  }
+
+  const triggers = [];
+  for (let offset = 1; offset <= triggerCount; offset += 1) {
+    const pulseId = lastPulseForIndex + offset;
+    const startTime = runtime.pulseBaseTime + pulseId * interval + index * spacing;
+    triggers.push({
+      active: true,
+      key: createSequenceTriggerKey(stroke, "pulse", pulseId, index),
+      startTime,
+      endTime: startTime + Math.max(16, effectDuration)
+    });
+  }
+  runtime.triggeredPulseByIndex[index] = lastPulseForIndex + triggerCount;
+  runtime.remainingCatchUpTriggers -= triggerCount;
+  return triggers;
+}
+
+function advanceWaveSequenceRuntime(runtime, safeTotal, settings) {
+  const triggerIndex = clamp(
+    Math.floor(Number(runtime.nextIndex)) || 0,
+    0,
+    safeTotal - 1
+  );
+  runtime.nextIndex = triggerIndex;
+  const bounceId = Math.max(0, Math.floor(Number(runtime.bounceId)) || 0);
+  runtime.bounceId = bounceId + 1;
+  if (safeTotal <= 1) {
+    runtime.nextIndex = 0;
+    runtime.direction = settings.waveReverse ? -1 : 1;
+    runtime.repeatEndpointIndex = 0;
+    runtime.hasLeftInitialEndpoint = true;
+    return { triggerIndex, bounceId };
+  }
+
+  const initialIndex = clamp(
+    Math.floor(Number(runtime.initialIndex)) || 0,
+    0,
+    safeTotal - 1
+  );
+  runtime.initialIndex = initialIndex;
+  const isEndpoint = triggerIndex <= 0 || triggerIndex >= safeTotal - 1;
+  const isInitialEndpoint =
+    triggerIndex === initialIndex && runtime.hasLeftInitialEndpoint !== true;
+  if (Number(runtime.repeatEndpointIndex) === triggerIndex) {
+    runtime.repeatEndpointIndex = null;
+    if (triggerIndex <= 0) {
+      runtime.direction = 1;
+      runtime.nextIndex = 1;
+    } else {
+      runtime.direction = -1;
+      runtime.nextIndex = safeTotal - 2;
+    }
+  } else if (isEndpoint && !isInitialEndpoint) {
+    runtime.repeatEndpointIndex = triggerIndex;
+    runtime.nextIndex = triggerIndex;
+  } else {
+    runtime.hasLeftInitialEndpoint =
+      runtime.hasLeftInitialEndpoint || triggerIndex !== initialIndex;
+    let nextIndex = triggerIndex + (Number(runtime.direction) < 0 ? -1 : 1);
+    if (nextIndex >= safeTotal) {
+      runtime.direction = -1;
+      nextIndex = safeTotal - 1;
+    } else if (nextIndex < 0) {
+      runtime.direction = 1;
+      nextIndex = 0;
+    }
+    runtime.nextIndex = clamp(nextIndex, 0, safeTotal - 1);
+  }
+  return { triggerIndex, bounceId };
+}
+
+function getWaveLayerSequenceTriggers(
+  stroke,
+  index,
+  total,
+  settings,
+  now,
+  effectDuration,
+  runtimeHost
+) {
+  const safeTotal = Math.max(1, total);
+  if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "wave") {
+    const initialIndex = settings.waveReverse ? safeTotal - 1 : 0;
+    runtimeHost.sequenceRuntime = {
+      style: "wave",
+      bounceId: 0,
+      initialIndex,
+      nextIndex: initialIndex,
+      direction: settings.waveReverse ? -1 : 1,
+      repeatEndpointIndex: null,
+      hasLeftInitialEndpoint: false,
+      nextTriggerTime: now,
+      frameTime: NaN,
+      frameTriggersByIndex: new Map(),
+      total: safeTotal
+    };
+  }
+  const runtime = runtimeHost.sequenceRuntime;
+  if (runtime.total !== safeTotal) {
+    runtime.total = safeTotal;
+    runtime.nextIndex = clamp(
+      Math.floor(Number(runtime.nextIndex)) || 0,
+      0,
+      safeTotal - 1
+    );
+    runtime.initialIndex = clamp(
+      Math.floor(Number(runtime.initialIndex)) || 0,
+      0,
+      safeTotal - 1
+    );
+    runtime.repeatEndpointIndex = null;
+  }
+  if (runtime.frameTime !== now) {
+    runtime.frameTime = now;
+    runtime.frameTriggersByIndex = new Map();
+    const spacing = getWaveSpacingMs(settings);
+    if (
+      !Number.isFinite(Number(runtime.nextTriggerTime)) ||
+      Number(runtime.nextTriggerTime) > now + spacing * 2
+    ) {
+      runtime.nextTriggerTime = now;
+    }
+    const oldestCatchUpTime = now - spacing * (LAYER_SEQUENCE_MAX_WAVE_CATCH_UP_PER_FRAME - 1);
+    if (runtime.nextTriggerTime < oldestCatchUpTime) {
+      runtime.nextTriggerTime = oldestCatchUpTime;
+    }
+    let triggerCount = 0;
+    while (
+      runtime.nextTriggerTime <= now &&
+      triggerCount < LAYER_SEQUENCE_MAX_WAVE_CATCH_UP_PER_FRAME
+    ) {
+      const startTime = runtime.nextTriggerTime;
+      const { triggerIndex, bounceId } = advanceWaveSequenceRuntime(
+        runtime,
+        safeTotal,
+        settings
+      );
+      const triggers = runtime.frameTriggersByIndex.get(triggerIndex) || [];
+      triggers.push({
+        active: true,
+        key: createSequenceTriggerKey(stroke, "wave", bounceId, triggerIndex),
+        startTime,
+        endTime: startTime + Math.max(16, effectDuration)
+      });
+      runtime.frameTriggersByIndex.set(triggerIndex, triggers);
+      runtime.nextTriggerTime = startTime + spacing;
+      triggerCount += 1;
+    }
+  }
+  return runtime.frameTriggersByIndex instanceof Map
+    ? runtime.frameTriggersByIndex.get(index) || []
+    : [];
+}
+
+function getLayerSequenceTriggers(
+  stroke,
+  index,
+  total,
+  style,
+  settings,
+  now,
+  effectDuration,
+  runtimeHost = stroke
+) {
+  if (style === "pulse") {
+    return getPulseLayerSequenceTriggers(
+      stroke,
+      index,
+      total,
+      settings,
+      now,
+      effectDuration,
+      runtimeHost
+    );
+  }
+  if (style === "wave") {
+    return getWaveLayerSequenceTriggers(
+      stroke,
+      index,
+      total,
+      settings,
+      now,
+      effectDuration,
+      runtimeHost
+    );
+  }
+  const trigger = getLayerSequenceTrigger(
+    stroke,
+    index,
+    total,
+    style,
+    settings,
+    now,
+    effectDuration,
+    runtimeHost
+  );
+  return trigger.active ? [trigger] : [];
+}
+
 function getLayerSequenceTrigger(stroke, index, total, style, settings, now, effectDuration, runtimeHost = stroke) {
   const safeTotal = Math.max(1, total);
   if (style === "pulse") {
-    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "pulse") {
-      runtimeHost.sequenceRuntime = {
-        style: "pulse",
-        pulseBaseTime: now,
-        triggeredPulseByIndex: [],
-        lastTriggeredIndexByPulse: new Map(),
-        frameTime: 0,
-        triggeredPulseIdsThisFrame: new Set()
-      };
-    }
-    const runtime = runtimeHost.sequenceRuntime;
-    if (!Array.isArray(runtime.triggeredPulseByIndex)) {
-      runtime.triggeredPulseByIndex = [];
-    }
-    if (!(runtime.lastTriggeredIndexByPulse instanceof Map)) {
-      runtime.lastTriggeredIndexByPulse = new Map();
-    }
-    if (runtime.frameTime !== now) {
-      runtime.frameTime = now;
-      runtime.triggeredPulseIdsThisFrame = new Set();
-    }
-    if (Number(runtime.pulseBaseTime) > now) {
-      runtime.pulseBaseTime = now;
-    }
-    const spacing = getPulseSpacingMs(settings);
-    const interval = Math.max(16, getPulseIntervalMs(settings));
-    const maxDuePulseId = Math.floor((now - runtime.pulseBaseTime - index * spacing) / interval);
-    const lastPulseForIndex = Number.isFinite(Number(runtime.triggeredPulseByIndex[index]))
-      ? Number(runtime.triggeredPulseByIndex[index])
-      : -1;
-    const pulseId = lastPulseForIndex + 1;
-    const previousIndex = index <= 0
-      ? index - 1
-      : Number(runtime.lastTriggeredIndexByPulse.get(pulseId));
-
-    if (
-      maxDuePulseId < pulseId ||
-      previousIndex < index - 1 ||
-      runtime.triggeredPulseIdsThisFrame.has(pulseId)
-    ) {
-      return { active: false, key: "", startTime: 0, endTime: 0 };
-    }
-
-    runtime.triggeredPulseByIndex[index] = pulseId;
-    runtime.lastTriggeredIndexByPulse.set(pulseId, index);
-    runtime.triggeredPulseIdsThisFrame.add(pulseId);
-
-    const stalePulseThreshold = pulseId - Math.max(12, safeTotal * 2);
-    for (const [storedPulseId] of runtime.lastTriggeredIndexByPulse) {
-      if (storedPulseId < stalePulseThreshold) {
-        runtime.lastTriggeredIndexByPulse.delete(storedPulseId);
-      }
-    }
-
-    return {
-      active: true,
-      key: `${style}:${pulseId}:${index}`,
-      startTime: now,
-      endTime: now + Math.max(16, effectDuration)
-    };
+    return getPulseLayerSequenceTriggers(
+      stroke,
+      index,
+      total,
+      settings,
+      now,
+      effectDuration,
+      runtimeHost
+    )[0] || { active: false, key: "", startTime: 0, endTime: 0 };
   }
 
   if (runtimeHost.sequenceRuntime && runtimeHost.sequenceRuntime.style !== style) {
     resetStrokeSequenceRuntime(runtimeHost);
   }
 
-  if (style === "all") {
-    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "all") {
+  if (style === "all" || style === "grouped") {
+    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== style) {
       runtimeHost.sequenceRuntime = {
-        style: "all",
+        style,
         baseTime: now
       };
     }
@@ -9427,87 +13970,22 @@ function getLayerSequenceTrigger(stroke, index, total, style, settings, now, eff
     const startTime = baseTime + tick * interval;
     return {
       active: true,
-      key: `${style}:${tick}`,
+      key: createSequenceTriggerKey(stroke, style, tick),
       startTime,
       endTime: startTime + interval
     };
   }
 
   if (style === "wave") {
-    if (!runtimeHost.sequenceRuntime || runtimeHost.sequenceRuntime.style !== "wave") {
-      const initialIndex = settings.waveReverse ? safeTotal - 1 : 0;
-      runtimeHost.sequenceRuntime = {
-        style: "wave",
-        bounceId: 0,
-        initialIndex,
-        nextIndex: initialIndex,
-        direction: settings.waveReverse ? -1 : 1,
-        repeatEndpointIndex: null,
-        hasLeftInitialEndpoint: false,
-        nextTriggerTime: now,
-        frameTime: 0,
-        triggeredThisFrame: false
-      };
-    }
-    const runtime = runtimeHost.sequenceRuntime;
-    if (runtime.frameTime !== now) {
-      runtime.frameTime = now;
-      runtime.triggeredThisFrame = false;
-    }
-    const spacing = getWaveSpacingMs(settings);
-    if (Number(runtime.nextTriggerTime) > now + spacing * 2) {
-      runtime.nextTriggerTime = now;
-    }
-    if (runtime.triggeredThisFrame || now < runtime.nextTriggerTime || index !== runtime.nextIndex) {
-      return { active: false, key: "", startTime: 0, endTime: 0 };
-    }
-
-    const triggerIndex = runtime.nextIndex;
-    const bounceId = runtime.bounceId;
-    runtime.triggeredThisFrame = true;
-    runtime.bounceId += 1;
-    if (safeTotal <= 1) {
-      runtime.nextIndex = 0;
-      runtime.direction = settings.waveReverse ? -1 : 1;
-      runtime.repeatEndpointIndex = 0;
-      runtime.hasLeftInitialEndpoint = true;
-    } else {
-      const isEndpoint = triggerIndex <= 0 || triggerIndex >= safeTotal - 1;
-      const isInitialEndpoint =
-        triggerIndex === runtime.initialIndex && runtime.hasLeftInitialEndpoint !== true;
-      if (runtime.repeatEndpointIndex === triggerIndex) {
-        runtime.repeatEndpointIndex = null;
-        if (triggerIndex <= 0) {
-          runtime.direction = 1;
-          runtime.nextIndex = 1;
-        } else {
-          runtime.direction = -1;
-          runtime.nextIndex = safeTotal - 2;
-        }
-      } else if (isEndpoint && !isInitialEndpoint) {
-        runtime.repeatEndpointIndex = triggerIndex;
-        runtime.nextIndex = triggerIndex;
-      } else {
-        runtime.hasLeftInitialEndpoint =
-          runtime.hasLeftInitialEndpoint || triggerIndex !== runtime.initialIndex;
-        let nextIndex = triggerIndex + runtime.direction;
-        if (nextIndex >= safeTotal) {
-          runtime.direction = -1;
-          nextIndex = safeTotal - 1;
-        } else if (nextIndex < 0) {
-          runtime.direction = 1;
-          nextIndex = 0;
-        }
-        runtime.nextIndex = clamp(nextIndex, 0, safeTotal - 1);
-      }
-    }
-    runtime.nextTriggerTime = now + spacing;
-    return {
-      active: true,
-      key: `${style}:${bounceId}:${triggerIndex}`,
-      startTime: now,
-      endTime: now + Math.max(16, effectDuration)
-    };
+    return getWaveLayerSequenceTriggers(
+      stroke,
+      index,
+      total,
+      settings,
+      now,
+      effectDuration,
+      runtimeHost
+    )[0] || { active: false, key: "", startTime: 0, endTime: 0 };
   }
 
   if (style === "step") {
@@ -9531,7 +14009,7 @@ function getLayerSequenceTrigger(stroke, index, total, style, settings, now, eff
     const startTime = baseTime + tick * stepRate;
     return {
       active,
-      key: `${style}:${tick}`,
+      key: createSequenceTriggerKey(stroke, style, tick),
       startTime,
       endTime: startTime + stepLength
     };
@@ -9553,7 +14031,7 @@ function getLayerSequenceTrigger(stroke, index, total, style, settings, now, eff
     const startTime = baseTime + tick * speed;
     return {
       active,
-      key: `${style}:${tick}`,
+      key: createSequenceTriggerKey(stroke, style, tick),
       startTime,
       endTime: startTime + speed
     };
@@ -9611,6 +14089,15 @@ function getIsolatedSequenceGifSource(stamp, src) {
 
 function setStampSequenceImage(stamp, src, isolateGifPlayback = false) {
   if (!src) {
+    return;
+  }
+  if (!state.sequenceExportActive && isRenderCulledStamp(stamp)) {
+    stamp.dataset.sequenceDisplayedSource = src;
+    return;
+  }
+  if (!state.sequenceExportActive && isSceneRendererStampSuppressed(stamp)) {
+    stamp.dataset.sequenceDisplayedSource = src;
+    markGifPlaybackStart(stamp, src);
     return;
   }
   if (
@@ -9956,7 +14443,7 @@ function getCurrentSequenceRotation(stamp, settings, now) {
 
 function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, index, now, currentSource = "") {
   if (!trigger.active || !trigger.key || stamp.dataset.sequenceTriggerKey === trigger.key) {
-    return;
+    return false;
   }
   stamp.dataset.sequenceTriggerKey = trigger.key;
   const rawTriggerStartTime = Number.isFinite(Number(trigger.startTime))
@@ -10075,11 +14562,55 @@ function triggerStampSequenceEffect(stamp, effect, trigger, settings, pool, inde
   } else if (effect === "image-cycle") {
     triggerImageCycleSequence(stamp, trigger, settings, pool, index, currentSource);
   }
+  return true;
 }
 
-function runLayerSequences(now = performance.now()) {
-  const imageCyclePool = getSequenceBrushPool();
-  for (const stroke of state.strokes) {
+function ensureGroupedSequenceTransform(visual) {
+  if (!visual.groupedTransform) {
+    visual.groupedTransform = {
+      moveX: 0,
+      moveY: 0,
+      rotationOffset: 0,
+      scale: 1
+    };
+  }
+  return visual.groupedTransform;
+}
+
+function applyGroupedSequenceEffectToVisual(visual, effect, groupStamp, settings, now) {
+  if (!visual) {
+    return;
+  }
+  if (effect === "move") {
+    const move = getCurrentSequenceMove(groupStamp, settings, now);
+    const transform = ensureGroupedSequenceTransform(visual);
+    transform.moveX += move.x;
+    transform.moveY += move.y;
+  } else if (effect === "rotate") {
+    const transform = ensureGroupedSequenceTransform(visual);
+    transform.rotationOffset += getCurrentSequenceRotation(groupStamp, settings, now);
+  } else if (effect === "scale") {
+    const transform = ensureGroupedSequenceTransform(visual);
+    transform.scale *= getCurrentSequenceScale(groupStamp, settings, now);
+  } else if (effect === "pixelate") {
+    visual.pixelateAmount = Math.max(
+      visual.pixelateAmount,
+      Math.round(getCurrentSequencePixelateAmount(groupStamp, settings, now))
+    );
+  } else if (effect === "blur") {
+    visual.blurAmount += getCurrentSequenceBlurAmount(groupStamp, settings, now);
+  }
+}
+
+function runLayerSequences(now = performance.now(), activeStrokes = null) {
+  const strokes = Array.isArray(activeStrokes) ? activeStrokes : state.strokes;
+  const rendererElementsToSync = [];
+  const needsImageCyclePool = strokes.some((stroke) =>
+    isLayerSequenceEnabled(stroke) &&
+      getLayerSequenceSlots(stroke).some((slot) => slot.effect === "image-cycle")
+  );
+  const imageCyclePool = needsImageCyclePool ? getSequenceBrushPool() : [];
+  for (const stroke of strokes) {
     try {
       if (!stroke || !Array.isArray(stroke.elements)) {
         continue;
@@ -10091,9 +14622,7 @@ function runLayerSequences(now = performance.now()) {
         continue;
       }
       if (Number.isFinite(Number(stroke.sequencePauseStartTime))) {
-        const pausedDuration = Math.max(0, now - Number(stroke.sequencePauseStartTime));
-        shiftStrokeSequenceClock(stroke, pausedDuration);
-        delete stroke.sequencePauseStartTime;
+        setStrokeSequenceClockPaused(stroke, false, now);
       }
       const slots = getLayerSequenceSlots(stroke).filter((slot) =>
         isImplementedLayerSequenceEffect(slot.effect)
@@ -10120,13 +14649,16 @@ function runLayerSequences(now = performance.now()) {
           return null;
         }
         ensureStampSequenceBase(stamp);
-        stamp.dataset.sequenceActive = "1";
+        if (stamp.dataset.sequenceActive !== "1") {
+          stamp.dataset.sequenceActive = "1";
+        }
         return {
           opacity: layerBaseOpacity,
           moveX: 0,
           moveY: 0,
           rotationOffset: 0,
           scale: 1,
+          groupedTransform: null,
           tintSettings: getStampBaseTintSettings(stamp),
           pixelateAmount: 0,
           blurAmount: 0,
@@ -10147,8 +14679,68 @@ function runLayerSequences(now = performance.now()) {
         const settings = normalizeLayerSequenceSettings(slot.settings);
         const effectDuration = getSequenceEffectDuration(effect, settings);
         const runtimeHost = {
-          sequenceRuntime: cloneSequenceRuntime(stroke.sequenceSlotRuntimes[slotIndex])
+          sequenceRuntime: stroke.sequenceSlotRuntimes[slotIndex] || null
         };
+        const previewCapture = createLayerSequencePreviewCapture(
+          stroke,
+          slotIndex,
+          total,
+          effect,
+          timingStyle,
+          settings,
+          effectDuration
+        );
+        let recordedAllPreviewImpulse = false;
+
+        if (timingStyle === "grouped" && isGroupedLayerSequenceEffect(effect)) {
+          const trigger = getLayerSequenceTrigger(
+            stroke,
+            0,
+            total,
+            timingStyle,
+            settings,
+            now,
+            effectDuration,
+            runtimeHost
+          );
+          if (!runtimeHost.sequenceRuntime) {
+            runtimeHost.sequenceRuntime = {
+              style: "grouped",
+              baseTime: now
+            };
+          }
+          if (
+            !runtimeHost.sequenceRuntime.groupDataset ||
+            typeof runtimeHost.sequenceRuntime.groupDataset !== "object"
+          ) {
+            runtimeHost.sequenceRuntime.groupDataset = {};
+          }
+          const groupStamp = { dataset: runtimeHost.sequenceRuntime.groupDataset };
+          const didTrigger = triggerStampSequenceEffect(
+            groupStamp,
+            effect,
+            trigger,
+            settings,
+            imageCyclePool,
+            0,
+            now,
+            ""
+          );
+          if (didTrigger && claimLayerSequencePreviewImpulse(previewCapture, 0, trigger, true)) {
+            recordLayerSequencePreviewImpulse(
+              previewCapture,
+              0,
+              trigger,
+              now,
+              true
+            );
+          }
+          for (const visual of visuals) {
+            applyGroupedSequenceEffectToVisual(visual, effect, groupStamp, settings, now);
+          }
+          stroke.sequenceSlotRuntimes[slotIndex] = runtimeHost.sequenceRuntime;
+          continue;
+        }
 
         for (let index = 0; index < total; index += 1) {
           const stamp = stroke.elements[index];
@@ -10156,12 +14748,12 @@ function runLayerSequences(now = performance.now()) {
           if (!stamp || stamp.parentElement !== world || !visual) {
             continue;
           }
-          loadSequenceSlotScratch(stamp, slotIndex);
-          const currentImageCycleSource = effect === "image-cycle"
-            ? getCurrentSequenceImageSource(stamp, visual.sourceUrl)
+          const runtimeStamp = createSequenceSlotRuntimeStamp(stamp, slotIndex);
+          let currentImageCycleSource = effect === "image-cycle"
+            ? getCurrentSequenceImageSource(runtimeStamp, visual.sourceUrl)
             : visual.sourceUrl;
 
-          const trigger = getLayerSequenceTrigger(
+          const triggers = getLayerSequenceTriggers(
             stroke,
             index,
             total,
@@ -10171,32 +14763,53 @@ function runLayerSequences(now = performance.now()) {
             effectDuration,
             runtimeHost
           );
-          triggerStampSequenceEffect(
-            stamp,
-            effect,
-            trigger,
-            settings,
-            imageCyclePool,
-            index,
-            now,
-            currentImageCycleSource
-          );
+          for (const trigger of triggers) {
+            const didTrigger = triggerStampSequenceEffect(
+              runtimeStamp,
+              effect,
+              trigger,
+              settings,
+              imageCyclePool,
+              index,
+              now,
+              currentImageCycleSource
+            );
+            if (didTrigger && effect === "image-cycle") {
+              currentImageCycleSource = getCurrentSequenceImageSource(
+                runtimeStamp,
+                currentImageCycleSource
+              );
+            }
+            if (didTrigger && (timingStyle !== "all" || !recordedAllPreviewImpulse)) {
+              const activateAll = timingStyle === "all";
+              if (claimLayerSequencePreviewImpulse(previewCapture, index, trigger, activateAll)) {
+                recordLayerSequencePreviewImpulse(
+                  previewCapture,
+                  index,
+                  trigger,
+                  now,
+                  activateAll
+                );
+              }
+              recordedAllPreviewImpulse = recordedAllPreviewImpulse || activateAll;
+            }
+          }
 
           if (effect === "show-hide") {
             const baseOpacity = layerBaseOpacity;
-            const currentOpacity = clamp(getCurrentSequenceOpacity(stamp, settings, now), 0, 1);
+            const currentOpacity = clamp(getCurrentSequenceOpacity(runtimeStamp, settings, now), 0, 1);
             const opacityFactor = baseOpacity > 0 ? currentOpacity / baseOpacity : currentOpacity;
             visual.opacity *= clamp(opacityFactor, 0, 1);
           } else if (effect === "move") {
-            const move = getCurrentSequenceMove(stamp, settings, now);
+            const move = getCurrentSequenceMove(runtimeStamp, settings, now);
             visual.moveX += move.x;
             visual.moveY += move.y;
           } else if (effect === "rotate") {
-            visual.rotationOffset += getCurrentSequenceRotation(stamp, settings, now);
+            visual.rotationOffset += getCurrentSequenceRotation(runtimeStamp, settings, now);
           } else if (effect === "scale") {
-            visual.scale *= getCurrentSequenceScale(stamp, settings, now);
+            visual.scale *= getCurrentSequenceScale(runtimeStamp, settings, now);
           } else if (effect === "color-cycle") {
-            const amount = getCurrentSequenceColorAmount(stamp, settings, now);
+            const amount = getCurrentSequenceColorAmount(runtimeStamp, settings, now);
             if (amount > 0) {
               visual.tintSettings = createLayeredTintSettings(visual.tintSettings, {
                 color: settings.colorCycleColor,
@@ -10206,47 +14819,86 @@ function runLayerSequences(now = performance.now()) {
           } else if (effect === "pixelate") {
             visual.pixelateAmount = Math.max(
               visual.pixelateAmount,
-              Math.round(getCurrentSequencePixelateAmount(stamp, settings, now))
+              Math.round(getCurrentSequencePixelateAmount(runtimeStamp, settings, now))
             );
           } else if (effect === "blur") {
-            visual.blurAmount += getCurrentSequenceBlurAmount(stamp, settings, now);
+            visual.blurAmount += getCurrentSequenceBlurAmount(runtimeStamp, settings, now);
           } else if (effect === "image-cycle") {
-            visual.sourceUrl = getCurrentSequenceImageSource(stamp, currentImageCycleSource);
+            visual.sourceUrl = getCurrentSequenceImageSource(runtimeStamp, currentImageCycleSource);
             visual.imageCycleSource = true;
           }
 
-          commitSequenceSlotScratch(stamp, slotIndex);
+          commitSequenceSlotRuntimeStamp(stamp, slotIndex, runtimeStamp);
         }
 
-        stroke.sequenceSlotRuntimes[slotIndex] = cloneSequenceRuntime(runtimeHost.sequenceRuntime);
+        stroke.sequenceSlotRuntimes[slotIndex] = runtimeHost.sequenceRuntime;
       }
 
+      const sequenceVisibilityBounds =
+        !state.sequenceExportActive && strokeHasActiveSequenceTransform(stroke)
+          ? getViewportVisibilityBounds()
+          : null;
       for (let index = 0; index < total; index += 1) {
         const stamp = stroke.elements[index];
         const visual = visuals[index];
         if (!stamp || stamp.parentElement !== world || !visual) {
           continue;
         }
+        if (sequenceVisibilityBounds) {
+          setStampOcclusionCulled(stamp, false);
+          const targetBounds = isViewportCulledStamp(stamp)
+            ? sequenceVisibilityBounds.show
+            : sequenceVisibilityBounds.hide;
+          setStampViewportRendered(
+            stamp,
+            rectsIntersect(
+              getStampSequenceVisualWorldBounds(stroke, stamp, visual),
+              targetBounds
+            )
+          );
+        }
+        if (!state.sequenceExportActive && isRenderCulledStamp(stamp)) {
+          continue;
+        }
         setStampSequenceImage(stamp, visual.sourceUrl, visual.imageCycleSource);
-        stamp.style.imageRendering = visual.pixelateAmount > 0 ? "pixelated" : visual.baseImageRendering;
-        const layerTransform = getStampLayerTransform(stroke, stamp);
+        setInlineStyleIfChanged(
+          stamp,
+          "imageRendering",
+          visual.pixelateAmount > 0 ? "pixelated" : visual.baseImageRendering
+        );
+        const layerTransform = visual.groupedTransform
+          ? getStampGroupedLayerTransform(stroke, stamp, visual.groupedTransform)
+          : getStampLayerTransform(stroke, stamp);
         const baseRotation = Number(stamp.dataset.rotation) || 0;
         const moveX = layerTransform.x + visual.moveX;
         const moveY = layerTransform.y + visual.moveY;
         const rotation = baseRotation + layerTransform.rotation + visual.rotationOffset;
         const scale = layerTransform.scale * visual.scale;
-        stamp.style.transform =
-          `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`;
+        setInlineStyleIfChanged(
+          stamp,
+          "transform",
+          `translate(${moveX}px, ${moveY}px) rotate(${rotation}deg) scale(${scale})`
+        );
         const usingPixelateProxy = syncSequencePixelateProxy(stamp, visual);
         applyBrushTintStyle(stamp, false, visual.tintSettings, {
           blurAmount: usingPixelateProxy ? 0 : visual.blurAmount
         });
-        stamp.style.opacity = usingPixelateProxy ? "0" : String(clamp(visual.opacity, 0, 1));
+        setInlineStyleIfChanged(
+          stamp,
+          "opacity",
+          usingPixelateProxy ? "0" : String(clamp(visual.opacity, 0, 1))
+        );
+      }
+      if (state.sceneRendererActive || state.sceneRendererPreparing) {
+        rendererElementsToSync.push(...stroke.elements);
       }
     } catch (error) {
       console.warn("Layer sequence skipped for stroke.", error);
       resetStrokeSequenceRuntime(stroke);
     }
+  }
+  if (rendererElementsToSync.length) {
+    syncSceneRendererElements(rendererElementsToSync);
   }
 }
 
@@ -10256,27 +14908,70 @@ function applyLayerSequences(now = performance.now()) {
     if (state.sequenceExportActive && !state.exportTask) {
       state.sequenceExportActive = false;
     }
-    state.sequenceLastFrameTime = now;
     if (!state.sequenceExportActive) {
-      runLayerSequences(now);
+      const activeStrokes = getTrackedActiveSequenceStrokes();
+      const frameInterval = getAdaptiveSequenceFrameIntervalMs(activeStrokes);
+      const lastFrameTime = Number(state.sequenceLastFrameTime);
+      const frameIsDue =
+        !Number.isFinite(lastFrameTime) ||
+        frameInterval <= 0 ||
+        now - lastFrameTime >= frameInterval;
+      if (activeStrokes.length && frameIsDue) {
+        runLayerSequences(now, activeStrokes);
+        state.sequenceLastFrameTime = now;
+      }
     }
-    state.sequenceLastFrameTime = now;
   } catch (error) {
     console.warn("Layer sequence frame skipped.", error);
   } finally {
-    state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
+    renderLayerSequencePreviews(now);
+    if (!state.sequenceExportActive && state.sequenceActiveStrokeIds.size) {
+      state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
+    }
   }
 }
 
 function startLayerSequenceLoop() {
-  if (state.sequenceRafId !== null) {
+  if (!state.sequenceActiveStrokeIds.size) {
+    const activeStrokes = getActiveSequenceStrokes();
+    state.sequenceActiveStrokeIds = new Set(activeStrokes.map((stroke) => stroke.id));
+  }
+  if (
+    state.sequenceRafId !== null ||
+    state.sequenceExportActive ||
+    !state.sequenceActiveStrokeIds.size
+  ) {
     return;
   }
   state.sequenceRafId = window.requestAnimationFrame(applyLayerSequences);
 }
 
+function stopLayerSequenceLoop() {
+  if (state.sequenceRafId !== null) {
+    window.cancelAnimationFrame(state.sequenceRafId);
+    state.sequenceRafId = null;
+  }
+  state.sequenceActiveStrokeIds.clear();
+  state.sequenceLastFrameTime = null;
+  renderLayerSequencePreviews(performance.now(), { force: true });
+}
+
+function refreshLayerSequenceLoop() {
+  if (state.sequenceExportActive) {
+    stopLayerSequenceLoop();
+    return;
+  }
+  const activeStrokes = getActiveSequenceStrokes();
+  state.sequenceActiveStrokeIds = new Set(activeStrokes.map((stroke) => stroke.id));
+  if (!activeStrokes.length) {
+    stopLayerSequenceLoop();
+    return;
+  }
+  startLayerSequenceLoop();
+}
+
 function renderEditLayers() {
-  if (!editLayerList) {
+  if (!editLayerList || state.sidebarTab !== "edit") {
     return;
   }
 
@@ -10325,18 +15020,6 @@ function renderEditLayers() {
     sequenceIcon.setAttribute("aria-hidden", "true");
     sequenceButton.appendChild(sequenceIcon);
 
-    const animationButton = document.createElement("button");
-    animationButton.type = "button";
-    animationButton.className = "edit-layer-animation-button";
-    animationButton.dataset.layerAction = "animation";
-    animationButton.title = stroke.animationPaused ? "Resume layer animation" : "Pause layer animation";
-    animationButton.setAttribute("aria-label", animationButton.title);
-    animationButton.setAttribute("aria-pressed", String(Boolean(stroke.animationPaused)));
-    const animationIcon = document.createElement("span");
-    animationIcon.className = "edit-layer-animation-symbol";
-    animationIcon.setAttribute("aria-hidden", "true");
-    animationButton.appendChild(animationIcon);
-
     const eyeButton = document.createElement("button");
     eyeButton.type = "button";
     eyeButton.className = "edit-layer-eye-button";
@@ -10349,7 +15032,6 @@ function renderEditLayers() {
     row.appendChild(createEditLayerPreview(stroke));
     row.appendChild(name);
     row.appendChild(sequenceButton);
-    row.appendChild(animationButton);
     row.appendChild(eyeButton);
 
     entry.appendChild(row);
@@ -10389,7 +15071,7 @@ function renderEditLayers() {
           enabledButton.type = "button";
           enabledButton.className = "edit-layer-sequence-enable-button";
           enabledButton.dataset.layerAction = "sequence-enabled";
-          enabledButton.textContent = "×";
+          enabledButton.textContent = isLayerSequenceEnabled(stroke) ? "👁" : "○";
           enabledButton.title = isLayerSequenceEnabled(stroke) ? "Disable sequence effect" : "Enable sequence effect";
           enabledButton.setAttribute("aria-label", enabledButton.title);
           enabledButton.setAttribute("aria-pressed", String(isLayerSequenceEnabled(stroke)));
@@ -10413,9 +15095,11 @@ function renderEditLayers() {
   }
 
   editLayerList.appendChild(fragment);
+  renderLayerSequencePreviews(performance.now(), { force: true });
 }
 
 function reflowStrokeDomOrder(save = true) {
+  invalidateStampOcclusion();
   for (const stroke of state.strokes) {
     if (!stroke || !Array.isArray(stroke.elements)) {
       continue;
@@ -10429,6 +15113,8 @@ function reflowStrokeDomOrder(save = true) {
   if (save) {
     scheduleSessionSave();
   }
+  syncSceneRendererOrder();
+  scheduleStampOcclusionRefresh();
 }
 
 function moveStrokeToVisualIndex(stroke, visualIndex, options = {}) {
@@ -10824,13 +15510,87 @@ function updateEditLayerHoverCursor(clientX = state.lastPointerClientX, clientY 
   viewport.classList.toggle("is-edit-layer-clickable", Boolean(stamp && stroke && !stroke.hidden));
 }
 
-function setStampWorldPosition(element, left, top) {
+function setStampWorldPosition(element, left, top, options = {}) {
   element.style.left = `${left}px`;
   element.style.top = `${top}px`;
   delete element.dataset.worldLeft;
   delete element.dataset.worldTop;
   delete element.dataset.worldRight;
   delete element.dataset.worldBottom;
+  if (options.markDirty !== false) {
+    markStrokeSerializationDirty(getStampLayerStroke(element));
+  }
+}
+
+function createLayerMoveHistoryAction(move, dx, dy) {
+  if (!move?.stroke || !Array.isArray(move.originals) || (!dx && !dy)) {
+    return null;
+  }
+  const elements = [];
+  const beforePositions = new Float64Array(move.originals.length * 2);
+  for (let index = 0; index < move.originals.length; index += 1) {
+    const original = move.originals[index];
+    elements.push(original.element);
+    beforePositions[index * 2] = original.left;
+    beforePositions[index * 2 + 1] = original.top;
+  }
+  return {
+    type: "layer-move",
+    keyboardOnly: true,
+    stroke: move.stroke,
+    elements,
+    beforePositions,
+    dx,
+    dy
+  };
+}
+
+function applyLayerMoveHistoryAction(action, useAfterPositions) {
+  if (
+    !action?.stroke ||
+    !Array.isArray(action.elements) ||
+    !(action.beforePositions instanceof Float64Array) ||
+    action.beforePositions.length !== action.elements.length * 2
+  ) {
+    return false;
+  }
+
+  invalidateStampOcclusion();
+  const viewportBounds = getViewportVisibilityBounds();
+  for (const element of action.elements) {
+    if (element instanceof HTMLImageElement && element.parentElement === world) {
+      unregisterStampSpatialCells(element);
+    }
+  }
+  const offsetX = useAfterPositions ? Number(action.dx) || 0 : 0;
+  const offsetY = useAfterPositions ? Number(action.dy) || 0 : 0;
+  for (let index = 0; index < action.elements.length; index += 1) {
+    const element = action.elements[index];
+    if (!(element instanceof HTMLImageElement)) {
+      continue;
+    }
+    setStampWorldPosition(
+      element,
+      action.beforePositions[index * 2] + offsetX,
+      action.beforePositions[index * 2 + 1] + offsetY,
+      { markDirty: false }
+    );
+  }
+  markStrokeSerializationDirty(action.stroke);
+  for (const element of action.elements) {
+    if (
+      element instanceof HTMLImageElement &&
+      !action.stroke.hidden &&
+      element.parentElement === world
+    ) {
+      registerStampSpatialCells(element);
+      updateStampViewportVisibility(element, viewportBounds);
+    }
+  }
+  syncSceneRendererElements(action.elements);
+  scheduleStampVisibilityRefresh();
+  scheduleStampOcclusionRefresh();
+  return true;
 }
 
 function startEditLayerMove(event) {
@@ -10843,6 +15603,8 @@ function startEditLayerMove(event) {
   if (!stroke || stroke.hidden) {
     return false;
   }
+
+  invalidateStampOcclusion();
 
   event.preventDefault();
   hideBrushCursorPreview();
@@ -10892,11 +15654,21 @@ function updateEditLayerMove(event) {
   const point = screenToWorld(event.clientX, event.clientY);
   move.dx = point.x - move.startPoint.x;
   move.dy = point.y - move.startPoint.y;
+  let changed = false;
   for (const original of move.originals) {
     if (!move.liveSet.has(original.element)) {
       continue;
     }
-    setStampWorldPosition(original.element, original.left + move.dx, original.top + move.dy);
+    setStampWorldPosition(
+      original.element,
+      original.left + move.dx,
+      original.top + move.dy,
+      { markDirty: false }
+    );
+    changed = true;
+  }
+  if (changed) {
+    markStrokeSerializationDirty(move.stroke);
   }
   scheduleStampVisibilityRefresh();
 }
@@ -10911,10 +15683,23 @@ function stopEditLayerMove(pointerId) {
     viewport.releasePointerCapture(pointerId);
   }
 
+  const dx = Math.abs(Number(move.dx) || 0) > 0.001 ? Number(move.dx) : 0;
+  const dy = Math.abs(Number(move.dy) || 0) > 0.001 ? Number(move.dy) : 0;
+  const historyAction = createLayerMoveHistoryAction(move, dx, dy);
   const viewportBounds = getViewportVisibilityBounds();
   for (const original of move.originals) {
     unregisterStampSpatialCells(original.element);
-    setStampWorldPosition(original.element, original.left + move.dx, original.top + move.dy);
+    setStampWorldPosition(
+      original.element,
+      original.left + dx,
+      original.top + dy,
+      { markDirty: false }
+    );
+  }
+  if (historyAction) {
+    markStrokeSerializationDirty(move.stroke);
+  }
+  for (const original of move.originals) {
     if (!move.stroke.hidden && original.element.parentElement === world) {
       registerStampSpatialCells(original.element);
       updateStampViewportVisibility(original.element, viewportBounds);
@@ -10924,7 +15709,10 @@ function stopEditLayerMove(pointerId) {
   state.editLayerMove = null;
   updateEditLayerHoverCursor();
   scheduleStampVisibilityRefresh();
-  scheduleSessionSave();
+  if (historyAction) {
+    syncSceneRendererElements(historyAction.elements);
+    pushLayerMoveHistoryAction(historyAction);
+  }
 }
 
 function onBrushGalleryClick(event) {
@@ -11115,7 +15903,7 @@ function getDraggedBrushForPresetDrop(event) {
       return brush;
     }
   }
-  const source = normalizeFavoriteBrushSource(
+  const source = getCanonicalStockBrushSource(
     event.dataTransfer.getData("application/x-image-draw-brush-source") ||
       event.dataTransfer.getData("text/plain")
   );
@@ -11172,8 +15960,23 @@ function screenToWorld(clientX, clientY) {
 }
 
 function renderCamera() {
-  world.style.transform =
-    `translate(${state.camera.x}px, ${state.camera.y}px) scale(${state.camera.scale})`;
+  state.sceneRendererLastCameraChangeAt = performance.now();
+  if (sceneRendererCameraIdleTimerId !== null) {
+    window.clearTimeout(sceneRendererCameraIdleTimerId);
+  }
+  sceneRendererCameraIdleTimerId = window.setTimeout(() => {
+    sceneRendererCameraIdleTimerId = null;
+    scheduleSceneRendererEvaluation();
+  }, 180);
+  setInlineStyleIfChanged(
+    world,
+    "transform",
+    `translate(${state.camera.x}px, ${state.camera.y}px) scale(${state.camera.scale})`
+  );
+  if (state.sceneRendererPreparing) {
+    noteSceneRendererMutation();
+  }
+  syncSceneRendererCamera();
   scheduleStampVisibilityRefresh();
   if (state.exportMode) {
     updateExportOverlayGeometry();
@@ -11230,8 +16033,11 @@ function decrementUrlRef(url) {
 }
 
 function detachStrokeFromWorld(stroke) {
+  invalidateStampOcclusion();
+  removeSceneRendererElements(stroke.elements);
   for (const element of stroke.elements) {
     unregisterStampSpatialCells(element);
+    state.viewportRenderedStamps.delete(element);
     decrementUrlRef(element.dataset.brushUrl);
     if (element.parentElement === world) {
       removeSequencePixelateProxy(element);
@@ -11240,6 +16046,7 @@ function detachStrokeFromWorld(stroke) {
     }
   }
   scheduleStampVisibilityRefresh();
+  refreshLayerSequenceLoop();
 }
 
 function appendStrokeToWorld(stroke) {
@@ -11251,6 +16058,9 @@ function appendStrokeToWorld(stroke) {
       state.stampCount += 1;
     }
     world.appendChild(element);
+    if (!state.sceneRendererActive) {
+      restoreSceneRendererStamp(element);
+    }
     element.classList.toggle("is-layer-hidden", hidden);
     if (!hidden) {
       registerStampSpatialCells(element);
@@ -11261,15 +16071,122 @@ function appendStrokeToWorld(stroke) {
   }
   applyStrokeLayerVisuals(stroke);
   scheduleStampVisibilityRefresh();
+  scheduleStampOcclusionRefresh();
+  refreshLayerSequenceLoop();
+  scheduleSceneRendererFullSync();
+}
+
+function markKeyboardHistoryActionPerformed(action) {
+  if (!action || typeof action !== "object") {
+    return;
+  }
+  action.keyboardHistoryOrder = state.nextKeyboardHistoryOrder;
+  state.nextKeyboardHistoryOrder += 1;
+  delete action.keyboardUndoOrder;
+}
+
+function markKeyboardHistoryActionUndone(action) {
+  if (!action || typeof action !== "object") {
+    return;
+  }
+  action.keyboardUndoOrder = state.nextKeyboardUndoOrder;
+  state.nextKeyboardUndoOrder += 1;
+}
+
+function clearLayerMoveHistory() {
+  state.layerMoveHistory = [];
+  state.layerMoveRedoHistory = [];
+}
+
+function resetKeyboardHistoryTracking() {
+  clearLayerMoveHistory();
+  resetExportCropHistory();
+  state.nextKeyboardHistoryOrder = 1;
+  state.nextKeyboardUndoOrder = 1;
+}
+
+function finishLayerMoveHistoryChange() {
+  updateUndoState();
+  updateBrushStatus();
+  renderEditLayers();
+  scheduleSessionSave();
+  scheduleStampOcclusionRefresh();
+  scheduleSceneRendererEvaluation();
+}
+
+function pushLayerMoveHistoryAction(action) {
+  if (!action || action.type !== "layer-move") {
+    return false;
+  }
+  state.redoHistory = [];
+  state.layerMoveRedoHistory = [];
+  markKeyboardHistoryActionPerformed(action);
+  state.layerMoveHistory.push(action);
+  if (state.layerMoveHistory.length > LAYER_MOVE_HISTORY_LIMIT) {
+    state.layerMoveHistory.splice(
+      0,
+      state.layerMoveHistory.length - LAYER_MOVE_HISTORY_LIMIT
+    );
+  }
+  finishLayerMoveHistoryChange();
+  return true;
+}
+
+function undoLastLayerMove() {
+  const action = state.layerMoveHistory[state.layerMoveHistory.length - 1];
+  if (!action || !applyLayerMoveHistoryAction(action, false)) {
+    return false;
+  }
+  state.layerMoveHistory.pop();
+  markKeyboardHistoryActionUndone(action);
+  state.layerMoveRedoHistory.push(action);
+  finishLayerMoveHistoryChange();
+  return true;
+}
+
+function redoLastLayerMove() {
+  const action = state.layerMoveRedoHistory[state.layerMoveRedoHistory.length - 1];
+  if (!action || !applyLayerMoveHistoryAction(action, true)) {
+    return false;
+  }
+  state.layerMoveRedoHistory.pop();
+  markKeyboardHistoryActionPerformed(action);
+  state.layerMoveHistory.push(action);
+  finishLayerMoveHistoryChange();
+  return true;
+}
+
+function getLastHistoryAction(history) {
+  return Array.isArray(history) && history.length ? history[history.length - 1] : null;
+}
+
+function undoKeyboardHistoryAction() {
+  const sceneAction = getLastHistoryAction(state.history);
+  const layerAction = getLastHistoryAction(state.layerMoveHistory);
+  const sceneOrder = Number(sceneAction?.keyboardHistoryOrder) || 0;
+  const layerOrder = Number(layerAction?.keyboardHistoryOrder) || 0;
+  return layerOrder > sceneOrder ? undoLastLayerMove() : undoLastStroke();
+}
+
+function redoKeyboardHistoryAction() {
+  const sceneAction = getLastHistoryAction(state.redoHistory);
+  const layerAction = getLastHistoryAction(state.layerMoveRedoHistory);
+  const sceneOrder = Number(sceneAction?.keyboardUndoOrder) || 0;
+  const layerOrder = Number(layerAction?.keyboardUndoOrder) || 0;
+  return layerOrder > sceneOrder ? redoLastLayerMove() : redoLastStroke();
 }
 
 function pushHistoryAction(action) {
   state.redoHistory = [];
+  state.layerMoveRedoHistory = [];
+  markKeyboardHistoryActionPerformed(action);
   state.history.push(action);
   updateUndoState();
   updateBrushStatus();
   renderEditLayers();
   scheduleSessionSave();
+  scheduleStampOcclusionRefresh();
+  scheduleSceneRendererEvaluation();
 }
 
 function pushStroke(stroke) {
@@ -11312,6 +16229,11 @@ function pushLayerDeleteAction(stroke) {
 }
 
 function undoEraseAction(action) {
+  if (state.sceneRendererActive || state.sceneRendererPreparing) {
+    // Restored stamps can return at arbitrary z positions. Use the DOM renderer
+    // for this interaction so no temporary hybrid ordering can be visible.
+    deactivateSceneRenderer();
+  }
   const removals = Array.isArray(action.removals) ? action.removals.slice() : [];
   removals.sort((left, right) => {
     const leftIndex = Number.isFinite(Number(left.worldIndex)) && Number(left.worldIndex) >= 0
@@ -11322,6 +16244,8 @@ function undoEraseAction(action) {
       : Number.MAX_SAFE_INTEGER;
     return leftIndex - rightIndex;
   });
+  const currentWorldStampOrder = getSceneRendererStampsInOrder();
+  const restoredStrokes = new Set();
 
   for (const removal of removals) {
     if (!removal || !removal.element) {
@@ -11346,25 +16270,38 @@ function undoEraseAction(action) {
         : stroke.elements.length;
       const insertStampIndex = Math.max(0, Math.min(preferredStampIndex, stroke.elements.length));
       stroke.elements.splice(insertStampIndex, 0, removal.element);
+      markStrokeSerializationDirty(stroke);
       removal.element.dataset.strokeId = String(stroke.id);
+      restoredStrokes.add(stroke);
     }
 
     if (removal.element.parentElement !== world) {
       const preferredWorldIndex =
         Number.isFinite(Number(removal.worldIndex)) && Number(removal.worldIndex) >= 0
         ? Number(removal.worldIndex)
-        : world.childElementCount;
-      const insertWorldIndex = Math.max(0, Math.min(preferredWorldIndex, world.childElementCount));
-      const beforeNode = world.children[insertWorldIndex] || null;
+        : currentWorldStampOrder.length;
+      const insertWorldIndex = Math.max(0, Math.min(preferredWorldIndex, currentWorldStampOrder.length));
+      const beforeNode = currentWorldStampOrder[insertWorldIndex] || null;
       world.insertBefore(removal.element, beforeNode);
+      currentWorldStampOrder.splice(insertWorldIndex, 0, removal.element);
+      if (!state.sceneRendererActive) {
+        restoreSceneRendererStamp(removal.element);
+      }
       state.stampCount += 1;
       registerStampSpatialCells(removal.element);
       updateStampViewportVisibility(removal.element);
       applyGifPauseStateToImage(removal.element);
       incrementUrlRef(removal.element.dataset.brushUrl);
+      syncSceneRendererElements([removal.element]);
     }
   }
+  for (const stroke of restoredStrokes) {
+    invalidateStrokeSequenceTopology(stroke);
+  }
   scheduleStampVisibilityRefresh();
+  refreshLayerSequenceLoop();
+  scheduleStampOcclusionRefresh();
+  syncSceneRendererOrder();
 }
 
 function redoEraseAction(action) {
@@ -11375,6 +16312,8 @@ function redoEraseAction(action) {
     }
     removeStampElementFromState(removal.element);
   }
+  scheduleStampOcclusionRefresh();
+  scheduleSceneRendererEvaluation();
 }
 
 function undoDrawAction(action) {
@@ -11440,7 +16379,7 @@ function redoLayerDeleteAction(action) {
 function undoLastStroke() {
   const action = state.history.pop();
   if (!action) {
-    return;
+    return false;
   }
 
   if (action.type === "draw") {
@@ -11451,20 +16390,24 @@ function undoLastStroke() {
     undoLayerDeleteAction(action);
   } else {
     state.history.push(action);
-    return;
+    return false;
   }
 
+  markKeyboardHistoryActionUndone(action);
   state.redoHistory.push(action);
   updateUndoState();
   updateBrushStatus();
   renderEditLayers();
   scheduleSessionSave();
+  scheduleStampOcclusionRefresh();
+  scheduleSceneRendererEvaluation();
+  return true;
 }
 
 function redoLastStroke() {
   const action = state.redoHistory[state.redoHistory.length - 1];
   if (!action) {
-    return;
+    return false;
   }
 
   let applied = false;
@@ -11478,15 +16421,19 @@ function redoLastStroke() {
   }
 
   if (!applied) {
-    return;
+    return false;
   }
 
   state.redoHistory.pop();
+  markKeyboardHistoryActionPerformed(action);
   state.history.push(action);
   updateUndoState();
   updateBrushStatus();
   renderEditLayers();
   scheduleSessionSave();
+  scheduleStampOcclusionRefresh();
+  scheduleSceneRendererEvaluation();
+  return true;
 }
 
 function clearAllStrokes() {
@@ -11503,16 +16450,52 @@ function clearAllStrokes() {
   state.strokeById.clear();
   state.history = [];
   state.redoHistory = [];
+  resetKeyboardHistoryTracking();
   clearCursorTrail();
   updateUndoState();
   updateBrushStatus();
   renderEditLayers();
   scheduleSessionSave();
+  scheduleStampOcclusionRefresh();
+  scheduleSceneRendererEvaluation();
 }
 
 function getBrushWeight(brush) {
   const mode = normalizeBrushWeightMode(brush?.weightMode);
   return BRUSH_WEIGHT_MULTIPLIERS[mode] || 1;
+}
+
+function getBrushChoicePool() {
+  if (
+    brushChoicePoolCache &&
+    brushChoicePoolCache.revision === brushChoiceCacheRevision &&
+    brushChoicePoolCache.brushesSource === state.brushes &&
+    brushChoicePoolCache.selectedSource === state.selectedBrushIds &&
+    brushChoicePoolCache.soloBrushId === state.soloBrushId
+  ) {
+    return brushChoicePoolCache;
+  }
+
+  const selectedBrushes = getSelectedBrushes();
+  const candidates = selectedBrushes.length
+    ? selectedBrushes
+    : state.brushes.filter((brush) => brush.enabled);
+  const cumulativeWeights = new Float64Array(candidates.length);
+  let totalWeight = 0;
+  for (let index = 0; index < candidates.length; index += 1) {
+    totalWeight += getBrushWeight(candidates[index]);
+    cumulativeWeights[index] = totalWeight;
+  }
+  brushChoicePoolCache = {
+    revision: brushChoiceCacheRevision,
+    brushesSource: state.brushes,
+    selectedSource: state.selectedBrushIds,
+    soloBrushId: state.soloBrushId,
+    candidates,
+    cumulativeWeights,
+    totalWeight
+  };
+  return brushChoicePoolCache;
 }
 
 function pickRandomBrush() {
@@ -11521,28 +16504,23 @@ function pickRandomBrush() {
     return soloBrush;
   }
 
-  const selectedBrushes = getSelectedBrushes();
-  const candidates = selectedBrushes.length
-    ? selectedBrushes
-    : state.brushes.filter((brush) => brush.enabled);
+  const { candidates, cumulativeWeights, totalWeight } = getBrushChoicePool();
   if (!candidates.length) {
     return null;
   }
 
-  let totalWeight = 0;
-  for (const brush of candidates) {
-    totalWeight += getBrushWeight(brush);
-  }
-
-  let randomWeight = Math.random() * totalWeight;
-  for (const brush of candidates) {
-    randomWeight -= getBrushWeight(brush);
-    if (randomWeight <= 0) {
-      return brush;
+  const randomWeight = Math.random() * totalWeight;
+  let low = 0;
+  let high = cumulativeWeights.length - 1;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (randomWeight <= cumulativeWeights[middle]) {
+      high = middle;
+    } else {
+      low = middle + 1;
     }
   }
-
-  return candidates[candidates.length - 1];
+  return candidates[low] || candidates[candidates.length - 1];
 }
 
 function ensureDrawableBrushes() {
@@ -11619,6 +16597,8 @@ function placeBrush(x, y, stroke) {
   updateStampViewportVisibility(stamp);
   incrementUrlRef(brush.url);
   stroke.elements.push(stamp);
+  markStrokeSerializationDirty(stroke);
+  scheduleSceneRendererElementsSync([stamp]);
   scheduleStampVisibilityRefresh();
   return true;
 }
@@ -11738,6 +16718,41 @@ async function placeRectBrushes(stroke, startX, startY, endX, endY, task = null)
   return placedAny;
 }
 
+async function placeRectOutlineBrushes(stroke, startX, startY, endX, endY, task = null) {
+  const bounds = getRectBoundsFromPoints(startX, startY, endX, endY);
+  const spacing = getSpacingValue();
+  const xPositions = getGridAxisPositions(bounds.left, bounds.right, spacing);
+  const yPositions = getGridAxisPositions(bounds.top, bounds.bottom, spacing);
+  const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
+  let placedAny = false;
+  if (capacity <= 0) {
+    notifyStampLimitReached();
+    return false;
+  }
+
+  for (let yIndex = 0; yIndex < yPositions.length; yIndex += 1) {
+    const y = yPositions[yIndex];
+    const isEdgeY = yIndex === 0 || yIndex === yPositions.length - 1;
+    for (let xIndex = 0; xIndex < xPositions.length; xIndex += 1) {
+      const isEdgeX = xIndex === 0 || xIndex === xPositions.length - 1;
+      if (!isEdgeX && !isEdgeY) {
+        continue;
+      }
+      throwIfTaskCancelled(task);
+      if (stroke.elements.length >= capacity) {
+        return placedAny;
+      }
+      if (!placeBrush(xPositions[xIndex], y, stroke)) {
+        return placedAny;
+      }
+      placedAny = true;
+      await maybeYieldForPlacement(task, stroke.elements.length);
+    }
+  }
+
+  return placedAny;
+}
+
 async function placeCircleBrushes(stroke, startX, startY, endX, endY, task = null) {
   const bounds = getCircleBoundsFromPoints(startX, startY, endX, endY);
   const spacing = getSpacingValue();
@@ -11780,6 +16795,51 @@ async function placeCircleBrushes(stroke, startX, startY, endX, endY, task = nul
   return placedAny;
 }
 
+async function placeCircleOutlineBrushes(stroke, startX, startY, endX, endY, task = null) {
+  const bounds = getCircleBoundsFromPoints(startX, startY, endX, endY);
+  const spacing = getSpacingValue();
+  const xPositions = getGridAxisPositions(bounds.left, bounds.right, spacing);
+  const yPositions = getGridAxisPositions(bounds.top, bounds.bottom, spacing);
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  const radius = Math.max(0, (bounds.right - bounds.left) / 2);
+  const radiusSq = radius * radius;
+  const innerRadius = Math.max(0, radius - spacing);
+  const innerRadiusSq = innerRadius * innerRadius;
+  const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
+  let placedAny = false;
+  if (capacity <= 0) {
+    notifyStampLimitReached();
+    return false;
+  }
+
+  for (const y of yPositions) {
+    for (const x of xPositions) {
+      throwIfTaskCancelled(task);
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq > radiusSq || distanceSq < innerRadiusSq) {
+        continue;
+      }
+      if (stroke.elements.length >= capacity) {
+        return placedAny;
+      }
+      if (!placeBrush(x, y, stroke)) {
+        return placedAny;
+      }
+      placedAny = true;
+      await maybeYieldForPlacement(task, stroke.elements.length);
+    }
+  }
+
+  throwIfTaskCancelled(task);
+  if (!placedAny) {
+    placedAny = placeBrush(centerX, centerY, stroke);
+  }
+  return placedAny;
+}
+
 function setShapePreviewBox(bounds, className) {
   const topLeft = worldToScreen(bounds.left, bounds.top);
   const bottomRight = worldToScreen(bounds.right, bounds.bottom);
@@ -11796,7 +16856,8 @@ function setShapePreviewBox(bounds, className) {
 }
 
 function updateShapePreview(mode, startX, startY, endX, endY) {
-  if (mode === "line") {
+  const baseMode = getBaseDrawMode(mode);
+  if (baseMode === "line") {
     const start = worldToScreen(startX, startY);
     const end = worldToScreen(endX, endY);
     const dx = end.x - start.x;
@@ -11810,12 +16871,12 @@ function updateShapePreview(mode, startX, startY, endX, endY) {
     return;
   }
 
-  if (mode === "box") {
+  if (baseMode === "box") {
     setShapePreviewBox(getRectBoundsFromPoints(startX, startY, endX, endY), "is-box");
     return;
   }
 
-  if (mode === "circle") {
+  if (baseMode === "circle") {
     setShapePreviewBox(getCircleBoundsFromPoints(startX, startY, endX, endY), "is-circle");
   }
 }
@@ -11825,6 +16886,8 @@ async function commitShapeStroke(mode, startX, startY, endX, endY) {
     return false;
   }
 
+  const baseMode = getBaseDrawMode(mode);
+  const isOutlineMode = isOutlineShapeDrawMode(mode);
   const task = createCancellableTask("placement");
   const stroke = {
     id: state.nextStrokeId,
@@ -11840,12 +16903,20 @@ async function commitShapeStroke(mode, startX, startY, endX, endY) {
   updateUndoState();
 
   try {
-    if (mode === "line") {
+    if (baseMode === "line") {
       await placeLineBrushes(stroke, startX, startY, endX, endY, task);
-    } else if (mode === "box") {
-      await placeRectBrushes(stroke, startX, startY, endX, endY, task);
-    } else if (mode === "circle") {
-      await placeCircleBrushes(stroke, startX, startY, endX, endY, task);
+    } else if (baseMode === "box") {
+      if (isOutlineMode) {
+        await placeRectOutlineBrushes(stroke, startX, startY, endX, endY, task);
+      } else {
+        await placeRectBrushes(stroke, startX, startY, endX, endY, task);
+      }
+    } else if (baseMode === "circle") {
+      if (isOutlineMode) {
+        await placeCircleOutlineBrushes(stroke, startX, startY, endX, endY, task);
+      } else {
+        await placeCircleBrushes(stroke, startX, startY, endX, endY, task);
+      }
     }
 
     throwIfTaskCancelled(task);
@@ -11866,6 +16937,7 @@ async function commitShapeStroke(mode, startX, startY, endX, endY) {
     updateUndoState();
     updateBrushCursorPreview();
     scheduleStampVisibilityRefresh();
+    scheduleSceneRendererEvaluation();
   }
 }
 
@@ -11920,7 +16992,9 @@ function updateActiveStrokeTailRotation() {
   const rotation = parseNumericInputValue(rotationSlider, 0);
   tail.dataset.rotation = String(rotation);
   tail.style.transform = `rotate(${rotation}deg)`;
+  markStrokeSerializationDirty(state.drawing.stroke);
   registerStampSpatialCells(tail);
+  scheduleSceneRendererElementsSync([tail]);
 }
 
 function rectsIntersect(a, b) {
@@ -11939,6 +17013,7 @@ function getExportSequenceVisualState(element, now = performance.now()) {
     move: { x: 0, y: 0 },
     rotationOffset: 0,
     scale: 1,
+    groupedTransform: null,
     tintSettings: getStampBaseTintSettings(element),
     pixelateAmount: 0,
     blurAmount: 0,
@@ -11954,6 +17029,18 @@ function getExportSequenceVisualState(element, now = performance.now()) {
     const slot = slots[slotIndex];
     const effect = slot.effect;
     const settings = normalizeLayerSequenceSettings(slot.settings);
+    if (slot.timingStyle === "grouped" && isGroupedLayerSequenceEffect(effect)) {
+      const runtime = Array.isArray(stroke.sequenceSlotRuntimes)
+        ? stroke.sequenceSlotRuntimes[slotIndex]
+        : null;
+      const groupStamp = {
+        dataset: runtime?.groupDataset && typeof runtime.groupDataset === "object"
+          ? { ...runtime.groupDataset }
+          : {}
+      };
+      applyGroupedSequenceEffectToVisual(visual, effect, groupStamp, settings, now);
+      continue;
+    }
     loadSequenceSlotScratch(element, slotIndex);
     if (effect === "show-hide") {
       const currentOpacity = clamp(getCurrentSequenceOpacity(element, settings, now), 0, 1);
@@ -11993,7 +17080,7 @@ function getExportSequenceVisualState(element, now = performance.now()) {
   return visual;
 }
 
-function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
+function createExportStampEntry(element, selectionBounds, sequenceNow = null, options = {}) {
   const stroke = getStampLayerStroke(element);
   const left = parseFloat(element.style.left) || 0;
   const top = parseFloat(element.style.top) || 0;
@@ -12010,7 +17097,9 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
   const rotation = (Number(element.dataset.rotation) || 0) + (Number(sequenceState?.rotationOffset) || 0);
   const moveX = Number(sequenceState?.move?.x) || 0;
   const moveY = Number(sequenceState?.move?.y) || 0;
-  const layerTransform = getStampLayerTransform(stroke, element);
+  const layerTransform = sequenceState?.groupedTransform
+    ? getStampGroupedLayerTransform(stroke, element, sequenceState.groupedTransform)
+    : getStampLayerTransform(stroke, element);
   const totalScale = visualScale * layerTransform.scale;
   const totalWidth = width * totalScale;
   const totalHeight = height * totalScale;
@@ -12024,12 +17113,20 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
     totalHeight,
     totalRotation
   );
-  if (!rectsIntersect(bounds, selectionBounds)) {
+  const isInSelection = rectsIntersect(bounds, selectionBounds);
+  const sequenceCandidate = Boolean(
+    options.includeSequenceCandidates === true &&
+    stroke &&
+    isLayerSequenceEnabled(stroke)
+  );
+  if (!isInSelection && !sequenceCandidate) {
     return null;
   }
 
   return {
     element,
+    isInSelection,
+    sequenceCandidate,
     sourceUrl: sequenceState?.sourceUrl || element.dataset.brushUrl || element.currentSrc || element.getAttribute("src") || "",
     centerX,
     centerY,
@@ -12050,14 +17147,14 @@ function createExportStampEntry(element, selectionBounds, sequenceNow = null) {
   };
 }
 
-async function collectExportStampEntries(selectionBounds, task = null, progress = null) {
+async function collectExportStampEntries(selectionBounds, task = null, progress = null, options = {}) {
   const entries = [];
   const stamps = getVisibleStampElements();
   const total = Math.max(1, stamps.length);
 
   for (let index = 0; index < stamps.length; index += 1) {
     throwIfTaskCancelled(task);
-    const entry = createExportStampEntry(stamps[index], selectionBounds);
+    const entry = createExportStampEntry(stamps[index], selectionBounds, null, options);
     if (entry) {
       entries.push(entry);
     }
@@ -12077,10 +17174,20 @@ function refreshExportSequenceEntries(entries, selectionBounds, sequenceNow) {
     return;
   }
   for (const entry of entries) {
-    const nextEntry = createExportStampEntry(entry.element, selectionBounds, sequenceNow);
+    if (!entry?.sequenceCandidate) {
+      continue;
+    }
+    const nextEntry = createExportStampEntry(
+      entry.element,
+      selectionBounds,
+      sequenceNow,
+      { includeSequenceCandidates: true }
+    );
     if (nextEntry) {
       nextEntry.imageElement = entry.sourceUrl === nextEntry.sourceUrl ? entry.imageElement : null;
       Object.assign(entry, nextEntry);
+    } else {
+      entry.isInSelection = false;
     }
   }
 }
@@ -12112,12 +17219,34 @@ function resolveGifFrameSource(animation, timeMs) {
   return animation.frames[animation.frames.length - 1];
 }
 
+function getGifLogicalBackgroundColor(parsed) {
+  const imageFrames = Array.isArray(parsed?.frames)
+    ? parsed.frames.filter((frame) => frame?.image)
+    : [];
+  const hasTransparentFrames = imageFrames.some(
+    (frame) => frame?.gce?.extras?.transparentColorGiven === true
+  );
+  if (hasTransparentFrames || !Array.isArray(parsed?.gct)) {
+    return "";
+  }
+  const backgroundIndex = Number(parsed?.lsd?.backgroundColorIndex);
+  const color = Number.isInteger(backgroundIndex) ? parsed.gct[backgroundIndex] : null;
+  if (!Array.isArray(color) || color.length < 3) {
+    return "";
+  }
+  const red = clamp(Math.round(Number(color[0]) || 0), 0, 255);
+  const green = clamp(Math.round(Number(color[1]) || 0), 0, 255);
+  const blue = clamp(Math.round(Number(color[2]) || 0), 0, 255);
+  return `rgb(${red}, ${green}, ${blue})`;
+}
+
 async function decodeGifAnimation(url) {
   const bytes = await readImageBytes(url);
   const gifuctModule = await loadGifuctModule();
   const parseInput = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const parsed = gifuctModule.parseGIF(parseInput);
   const decodedFrames = gifuctModule.decompressFrames(parsed, true);
+  const logicalBackgroundColor = getGifLogicalBackgroundColor(parsed);
 
   if (!decodedFrames.length) {
     throw new Error("No GIF frames decoded.");
@@ -12151,6 +17280,10 @@ async function decodeGifAnimation(url) {
   }
 
   compositeCtx.clearRect(0, 0, width, height);
+  if (logicalBackgroundColor) {
+    compositeCtx.fillStyle = logicalBackgroundColor;
+    compositeCtx.fillRect(0, 0, width, height);
+  }
 
   const frames = [];
   const durations = [];
@@ -12198,7 +17331,12 @@ async function decodeGifAnimation(url) {
     );
 
     if (disposalType === 2) {
-      compositeCtx.clearRect(left, top, frameWidth, frameHeight);
+      if (logicalBackgroundColor) {
+        compositeCtx.fillStyle = logicalBackgroundColor;
+        compositeCtx.fillRect(left, top, frameWidth, frameHeight);
+      } else {
+        compositeCtx.clearRect(left, top, frameWidth, frameHeight);
+      }
     } else if (disposalType === 3 && restoreBeforeFrame) {
       compositeCtx.putImageData(restoreBeforeFrame, 0, 0);
     }
@@ -12229,21 +17367,43 @@ function getSequenceExportSourceUrls() {
   return urls;
 }
 
+function exportSourceUsesGif(sourceUrl, element = null) {
+  sourceUrl = String(sourceUrl || "");
+  if (isGifUrl(sourceUrl)) {
+    return true;
+  }
+  const brushId = Number(element?.dataset?.brushId);
+  const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+  if (brush && getBrushSourceIsGif(brush)) {
+    return true;
+  }
+  return state.brushes.some(
+    (candidate) =>
+      getBrushSourceIsGif(candidate) &&
+      (candidate.url === sourceUrl || candidate.originalUrl === sourceUrl)
+  );
+}
+
+function exportEntryUsesGif(entry) {
+  return exportSourceUsesGif(entry?.sourceUrl, entry?.element);
+}
+
 async function buildGifAnimationMap(entries, task = null, progress = null, extraUrls = []) {
   const urls = new Set();
   for (const entry of entries) {
-    if (!entry || !isGifUrl(entry.sourceUrl)) {
+    if (!entry || !exportEntryUsesGif(entry)) {
       continue;
     }
     urls.add(entry.sourceUrl);
   }
   for (const url of extraUrls) {
-    if (isGifUrl(url)) {
+    if (exportSourceUsesGif(url)) {
       urls.add(url);
     }
   }
 
   const map = new Map();
+  const failures = [];
   const urlList = Array.from(urls);
   const total = Math.max(1, urlList.length);
   for (let index = 0; index < urlList.length; index += 1) {
@@ -12257,12 +17417,23 @@ async function buildGifAnimationMap(entries, task = null, progress = null, extra
       if (isCancellationError(error)) {
         throw error;
       }
-      // Skip undecodable GIFs and keep static rendering for those entries.
+      failures.push({ url, error });
     }
     if (progress) {
       progress((index + 1) / total);
     }
     await yieldToMainThread(task);
+  }
+
+  if (failures.length) {
+    const error = new Error(
+      failures.length === 1
+        ? "One GIF could not be decoded for rendering."
+        : `${failures.length} GIFs could not be decoded for rendering.`
+    );
+    error.code = "EXPORT_GIF_DECODE_FAILED";
+    error.failedSourceUrls = failures.map((failure) => failure.url);
+    throw error;
   }
 
   return map;
@@ -12486,60 +17657,132 @@ function getVideoExtensionForMimeType(mimeType) {
   return String(mimeType || "").startsWith("video/mp4") ? "mp4" : "webm";
 }
 
-function loadExportBackgroundImageElement(url) {
+function loadExportBackgroundImageElement(url, task = null) {
   if (!url) {
     return Promise.resolve(null);
   }
   if (!exportBackgroundImageCache.has(url)) {
     exportBackgroundImageCache.set(
       url,
-      new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("Could not load export background image."));
-        image.src = url;
-      }).catch((error) => {
+      createExportSourceImageLoadPromise(url).catch((error) => {
         exportBackgroundImageCache.delete(url);
         throw error;
       })
     );
   }
-  return exportBackgroundImageCache.get(url);
+  return waitForExportSourcePromise(exportBackgroundImageCache.get(url), task);
 }
 
-function loadExportSourceImageElement(url) {
+function createExportSourceImageLoadPromise(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeoutId);
+      image.onload = null;
+      image.onerror = null;
+      callback(value);
+    };
+    const timeoutId = window.setTimeout(() => {
+      const error = new Error("Export source image load timed out.");
+      error.code = "EXPORT_SOURCE_LOAD_TIMEOUT";
+      finish(reject, error);
+      image.removeAttribute("src");
+    }, EXPORT_SOURCE_LOAD_TIMEOUT_MS);
+    image.onload = () => finish(resolve, image);
+    image.onerror = () => finish(reject, new Error("Could not load export source image."));
+    image.src = url;
+  });
+}
+
+function waitForExportSourcePromise(promise, task = null) {
+  if (!task) {
+    return promise;
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearInterval(cancelIntervalId);
+      callback(value);
+    };
+    const cancelIntervalId = window.setInterval(() => {
+      if (task.cancelled) {
+        finish(reject, createCancellationError());
+      }
+    }, EXPORT_SOURCE_CANCEL_POLL_MS);
+    promise.then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error)
+    );
+    if (task.cancelled) {
+      finish(reject, createCancellationError());
+    }
+  });
+}
+
+function loadExportSourceImageElement(url, options = {}) {
   if (!url || url === TRANSPARENT_STAMP_SRC) {
     return Promise.resolve(null);
+  }
+  if (options.cache === false) {
+    return createExportSourceImageLoadPromise(url);
   }
   if (!exportSourceImageCache.has(url)) {
     exportSourceImageCache.set(
       url,
-      new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = async () => {
-          try {
-            if (typeof image.decode === "function") {
-              await image.decode();
-            }
-          } catch (error) {
-            // Some browsers reject decode for already-loaded animated sources.
-          }
-          resolve(image);
-        };
-        image.onerror = () => reject(new Error("Could not load export source image."));
-        image.src = url;
-      }).catch((error) => {
+      createExportSourceImageLoadPromise(url).catch((error) => {
         exportSourceImageCache.delete(url);
         throw error;
       })
     );
+    while (exportSourceImageCache.size > EXPORT_SOURCE_IMAGE_CACHE_LIMIT) {
+      const oldestUrl = exportSourceImageCache.keys().next().value;
+      if (!oldestUrl) {
+        break;
+      }
+      exportSourceImageCache.delete(oldestUrl);
+    }
   }
   return exportSourceImageCache.get(url);
 }
 
-async function loadExportStampSourceImages(entries, task = null) {
+async function loadExportSourceImageElementWithRetry(url, task = null, attempts = 2, options = {}) {
+  let lastError = null;
+  const attemptCount = Math.max(1, Math.round(Number(attempts) || 1));
+  for (let attempt = 0; attempt < attemptCount; attempt += 1) {
+    throwIfTaskCancelled(task);
+    try {
+      return await waitForExportSourcePromise(
+        loadExportSourceImageElement(url, options),
+        task
+      );
+    } catch (error) {
+      if (isCancellationError(error)) {
+        throw error;
+      }
+      lastError = error;
+      if (options.cache !== false) {
+        exportSourceImageCache.delete(url);
+      }
+      if (attempt + 1 < attemptCount) {
+        await yieldToMainThread(task);
+      }
+    }
+  }
+  throw lastError || new Error("Could not load export source image.");
+}
+
+async function loadExportStampSourceImages(entries, task = null, options = {}) {
   if (!Array.isArray(entries) || !entries.length) {
-    return;
+    return [];
   }
 
   const urls = Array.from(new Set(
@@ -12548,10 +17791,11 @@ async function loadExportStampSourceImages(entries, task = null) {
       .filter((url) => url && url !== TRANSPARENT_STAMP_SRC)
   ));
   const loadedImages = new Map();
-  await mapWithConcurrency(urls, 8, async (url, index) => {
+  const failures = [];
+  await mapWithConcurrency(urls, 4, async (url, index) => {
     throwIfTaskCancelled(task);
     try {
-      const image = await loadExportSourceImageElement(url);
+      const image = await loadExportSourceImageElementWithRetry(url, task, 2, options);
       if (image) {
         loadedImages.set(url, image);
       }
@@ -12559,6 +17803,7 @@ async function loadExportStampSourceImages(entries, task = null) {
       if (isCancellationError(error)) {
         throw error;
       }
+      failures.push({ url, error });
     }
     if (index > 0 && index % EXPORT_CANCEL_CHECK_INTERVAL === 0) {
       await yieldToMainThread(task);
@@ -12569,6 +17814,33 @@ async function loadExportStampSourceImages(entries, task = null) {
     if (entry && loadedImages.has(entry.sourceUrl)) {
       entry.imageElement = loadedImages.get(entry.sourceUrl);
     }
+  }
+
+  if (failures.length && options.strict !== false) {
+    const error = new Error(
+      failures.length === 1
+        ? "One brush image could not be loaded for rendering."
+        : `${failures.length} brush images could not be loaded for rendering.`
+    );
+    error.code = "EXPORT_SOURCE_LOAD_FAILED";
+    error.failedSourceUrls = failures.map((failure) => failure.url);
+    throw error;
+  }
+  return failures;
+}
+
+function releaseExportEntrySourceImages(entries) {
+  const images = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry?.imageElement instanceof HTMLImageElement) {
+      images.add(entry.imageElement);
+      delete entry.imageElement;
+    }
+  }
+  for (const image of images) {
+    image.onload = null;
+    image.onerror = null;
+    image.removeAttribute("src");
   }
 }
 
@@ -12588,29 +17860,63 @@ function loadExportBackgroundAnimation(url) {
   return exportBackgroundAnimationCache.get(url);
 }
 
-async function getExportBackgroundImageOptions() {
-  const imageUrl = typeof state.exportBgImageUrl === "string" ? state.exportBgImageUrl : "";
-  if (!imageUrl || state.exportBackgroundEnabled === false) {
+async function prepareExportBackgroundAnimation(options = {}, task = null) {
+  if (options.backgroundImageAnimation) {
+    return options.backgroundImageAnimation;
+  }
+  const image = options.backgroundImageElement;
+  const imageUrl = image instanceof HTMLImageElement
+    ? image.currentSrc || image.getAttribute("src") || image.src || ""
+    : "";
+  if (!imageUrl || !isGifUrl(imageUrl)) {
+    return null;
+  }
+  try {
+    const animation = await waitForExportSourcePromise(
+      loadExportBackgroundAnimation(imageUrl),
+      task
+    );
+    throwIfTaskCancelled(task);
+    options.backgroundImageAnimation = animation;
+    return animation;
+  } catch (error) {
+    if (isCancellationError(error)) {
+      throw error;
+    }
+    console.warn("Animated export background fell back to its browser frame.", error);
+    return null;
+  }
+}
+
+async function getExportBackgroundImageOptions(task = null) {
+  const backgroundSnapshot = {
+    imageUrl: typeof state.exportBgImageUrl === "string" ? state.exportBgImageUrl : "",
+    enabled: state.exportBackgroundEnabled !== false,
+    opacity: clamp(Number(state.exportBgImageOpacity) || 0, 0, 100) / 100,
+    mode: state.exportBgImageMode === "tile" ? "tile" : "stretch",
+    tileSize: normalizeExportBgTileSize(state.exportBgImageTileSize)
+  };
+  if (!backgroundSnapshot.imageUrl || !backgroundSnapshot.enabled) {
     return {};
   }
 
   try {
-    const [image, animation] = await Promise.all([
-      loadExportBackgroundImageElement(imageUrl),
-      loadExportBackgroundAnimation(imageUrl).catch(() => null)
-    ]);
+    const image = await loadExportBackgroundImageElement(backgroundSnapshot.imageUrl, task);
     if (!image) {
-      return {};
+      throw new Error("Could not load export background image.");
     }
     return {
       backgroundImageElement: image,
-      backgroundImageAnimation: animation,
-      backgroundImageOpacity: clamp(Number(state.exportBgImageOpacity) || 0, 0, 100) / 100,
-      backgroundImageMode: state.exportBgImageMode === "tile" ? "tile" : "stretch",
-      backgroundImageTileSize: normalizeExportBgTileSize(state.exportBgImageTileSize)
+      backgroundImageOpacity: backgroundSnapshot.opacity,
+      backgroundImageMode: backgroundSnapshot.mode,
+      backgroundImageTileSize: backgroundSnapshot.tileSize
     };
   } catch (error) {
-    return {};
+    if (isCancellationError(error)) {
+      throw error;
+    }
+    error.code ||= "EXPORT_BACKGROUND_LOAD_FAILED";
+    throw error;
   }
 }
 
@@ -12898,6 +18204,41 @@ function getExportLayerScratchContext(outputWidth, outputHeight) {
   return layerCtx;
 }
 
+function getComparableExportSource(source) {
+  const value = String(source || "").trim();
+  if (!value || value === TRANSPARENT_STAMP_SRC) {
+    return "";
+  }
+  if (/^(?:data|blob):/i.test(value)) {
+    return value;
+  }
+  try {
+    return new URL(value, document.baseURI).href;
+  } catch (error) {
+    return value;
+  }
+}
+
+function getRenderableExportEntryElement(entry) {
+  const element = entry?.element;
+  if (
+    !(element instanceof HTMLImageElement) ||
+    !element.complete ||
+    element.naturalWidth <= 0 ||
+    element.naturalHeight <= 0
+  ) {
+    return null;
+  }
+  const currentSource = getComparableExportSource(
+    element.currentSrc || element.getAttribute("src") || ""
+  );
+  const expectedSource = getComparableExportSource(entry.sourceUrl);
+  if (!currentSource || (expectedSource && currentSource !== expectedSource)) {
+    return null;
+  }
+  return element;
+}
+
 function drawExportStampEntry(
   ctx,
   selectionBounds,
@@ -12908,13 +18249,22 @@ function drawExportStampEntry(
   timeMs = 0,
   options = {}
 ) {
-  let frameSource = entry.imageElement || entry.element;
-  if (gifAnimationMap && isGifUrl(entry.sourceUrl)) {
+  if (entry?.isInSelection === false) {
+    return;
+  }
+  let frameSource = entry.imageElement || getRenderableExportEntryElement(entry);
+  if (gifAnimationMap?.has(entry.sourceUrl)) {
     const animation = gifAnimationMap.get(entry.sourceUrl);
     const animatedSource = resolveGifFrameSource(animation, timeMs);
     if (animatedSource) {
       frameSource = animatedSource;
     }
+  }
+  if (!frameSource) {
+    const error = new Error("A brush image was unavailable while rendering.");
+    error.code = "EXPORT_SOURCE_UNAVAILABLE";
+    error.sourceUrl = entry.sourceUrl || "";
+    throw error;
   }
 
   const drawWidth = entry.width * scaleX;
@@ -13120,6 +18470,10 @@ function canvasToPngBlob(canvas) {
 
 function createTransparentGifFrameImageData(ctx, width, height) {
   const imageData = ctx.getImageData(0, 0, width, height);
+  return prepareTransparentGifFrameImageData(imageData);
+}
+
+function prepareTransparentGifFrameImageData(imageData) {
   const data = imageData.data;
   let hasTransparentPixel = false;
   for (let index = 0; index < data.length; index += 4) {
@@ -13139,7 +18493,547 @@ function createTransparentGifFrameImageData(ctx, width, height) {
   return imageData;
 }
 
+function createExportRasterEntryDto(entry) {
+  const sourceUrl = String(entry?.sourceUrl || "");
+  if (!sourceUrl || sourceUrl === TRANSPARENT_STAMP_SRC) {
+    throw new Error("A worker export stamp has no renderable source.");
+  }
+  const width = Number(entry.width);
+  const height = Number(entry.height);
+  const opacity = Number(entry.opacity);
+  if (
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    !Number.isFinite(height) ||
+    height <= 0 ||
+    !Number.isFinite(opacity) ||
+    opacity < 0 ||
+    opacity > 1
+  ) {
+    throw new Error("A worker export stamp has invalid geometry or opacity.");
+  }
+  return {
+    sourceId: sourceUrl,
+    sourceUrl,
+    centerX: Number(entry.centerX) || 0,
+    centerY: Number(entry.centerY) || 0,
+    width,
+    height,
+    rotation: Number(entry.rotation) || 0,
+    opacity,
+    blendMode: normalizeLayerBlendMode(entry.blendMode),
+    imageRendering: entry.imageRendering === "auto" ? "auto" : "pixelated",
+    tintLayers: getTintLayerList(entry.tintSettings).map((layer) => ({
+      color: normalizeHexColor(layer.color, "#ffffff"),
+      amountPercent: clamp(Number(layer.amountPercent) || 0, 0, 100)
+    })),
+    pixelateAmount: clamp(Math.round(Number(entry.pixelateAmount) || 0), 0, 64),
+    blurAmount: clamp(Number(entry.blurAmount) || 0, 0, 64)
+  };
+}
+
+function createExportRasterEntriesDto(entries) {
+  return (Array.isArray(entries) ? entries : []).map(createExportRasterEntryDto);
+}
+
+function getExportRasterBackgroundImageUrl(options = {}) {
+  const image = options.backgroundImageElement;
+  if (!(image instanceof HTMLImageElement)) {
+    return "";
+  }
+  return image.currentSrc || image.getAttribute("src") || image.src || "";
+}
+
+function createExportRasterBackgroundDto(options = {}) {
+  const sourceUrl = getExportRasterBackgroundImageUrl(options);
+  const opacity = clamp(Number(options.backgroundImageOpacity) || 0, 0, 1);
+  return {
+    include: options.includeBackground !== false,
+    color: normalizeHexColor(options.backgroundColor, "#ffffff"),
+    matteColor: typeof options.matteColor === "string" ? options.matteColor : "",
+    image: sourceUrl && opacity > 0
+      ? {
+          sourceId: sourceUrl,
+          sourceUrl,
+          opacity,
+          mode: options.backgroundImageMode === "tile" ? "tile" : "stretch",
+          tileSize: normalizeExportBgTileSize(options.backgroundImageTileSize)
+        }
+      : null
+  };
+}
+
+function createExportRasterScene(
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  options = {}
+) {
+  return {
+    outputWidth,
+    outputHeight,
+    ...(
+      options.singleGifFrameTimeMs != null &&
+      Number.isFinite(Number(options.singleGifFrameTimeMs))
+        ? { singleGifFrameTimeMs: Math.max(0, Number(options.singleGifFrameTimeMs)) }
+        : {}
+    ),
+    selectionBounds: {
+      left: selectionBounds.left,
+      top: selectionBounds.top,
+      right: selectionBounds.right,
+      bottom: selectionBounds.bottom
+    },
+    entries: createExportRasterEntriesDto(entries),
+    background: createExportRasterBackgroundDto(options)
+  };
+}
+
+function createExportRasterTimingMap(preparedMessage, entries = [], options = {}) {
+  const timingMap = new Map();
+  const stampSourceIds = new Set(
+    (Array.isArray(entries) ? entries : []).map((entry) => String(entry?.sourceUrl || ""))
+  );
+  const backgroundSource = getExportRasterBackgroundImageUrl(options);
+  if (backgroundSource) {
+    stampSourceIds.add(String(backgroundSource));
+  }
+  for (const asset of Array.isArray(preparedMessage?.assets) ? preparedMessage.assets : []) {
+    if (asset?.kind !== "gif" || !stampSourceIds.has(String(asset.id || ""))) {
+      continue;
+    }
+    const durations = normalizeFrameDelays(asset.durations);
+    const frameCount = Math.max(1, Number(asset.frameCount) || durations.length || 1);
+    timingMap.set(String(asset.id || ""), {
+      frames: Array.from({ length: frameCount }, () => null),
+      durations: durations.length
+        ? durations
+        : Array.from({ length: frameCount }, () => EXPORT_GIF_FRAME_DELAY_MS),
+      totalDuration: Math.max(
+        EXPORT_GIF_FRAME_DELAY_MS,
+        Number(asset.totalDurationMs) || durations.reduce((sum, duration) => sum + duration, 0)
+      )
+    });
+  }
+  return timingMap;
+}
+
+function createExportRasterWorkerSession(task = null, onProgress = null) {
+  if (typeof Worker !== "function" || typeof window.OffscreenCanvas !== "function") {
+    throw new Error("Worker raster export is unavailable.");
+  }
+
+  const worker = new Worker(EXPORT_RASTER_WORKER_URL, { type: "module" });
+  const sessionNumber = nextExportRasterSessionId++;
+  const jobId = `export-raster-${sessionNumber}`;
+  const pending = new Map();
+  let requestNumber = 0;
+  let closed = false;
+  let startupSettled = false;
+  let startupResolve = null;
+  let startupReject = null;
+  const startupPromise = new Promise((resolve, reject) => {
+    startupResolve = resolve;
+    startupReject = reject;
+  });
+
+  const rejectPending = (error) => {
+    for (const request of pending.values()) {
+      window.clearTimeout(request.timeoutId);
+      window.clearTimeout(request.hardTimeoutId);
+      request.reject(error);
+    }
+    pending.clear();
+  };
+
+  const closeWithError = (error) => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    rejectPending(error);
+    if (!startupSettled) {
+      startupSettled = true;
+      startupReject(error);
+    }
+    try {
+      worker.terminate();
+    } catch (workerError) {
+      // The worker may already have terminated after a capability failure.
+    }
+    if (task?.rasterSession === session) {
+      task.rasterSession = null;
+    }
+  };
+
+  const close = (cancelled = false) => {
+    closeWithError(
+      cancelled
+        ? createCancellationError("Export raster work cancelled.")
+        : new Error("Export raster worker closed.")
+    );
+  };
+
+  const session = {
+    jobId,
+    capabilities: null,
+    preparedMessage: null,
+    get closed() {
+      return closed;
+    },
+    async start(scene, assets = [], requiredOutput = "") {
+      let startupTimeoutId = null;
+      let ready;
+      try {
+        ready = await Promise.race([
+          startupPromise,
+          new Promise((_, reject) => {
+            startupTimeoutId = window.setTimeout(
+              () => reject(new Error("Export raster worker startup timed out.")),
+              EXPORT_RASTER_STARTUP_TIMEOUT_MS
+            );
+          })
+        ]);
+      } finally {
+        if (startupTimeoutId !== null) {
+          window.clearTimeout(startupTimeoutId);
+        }
+      }
+      throwIfTaskCancelled(task);
+      const capabilities = ready?.capabilities || {};
+      if (!capabilities.offscreenCanvas2d || !capabilities.gifDisposal) {
+        throw new Error("This browser cannot rasterize exports in a worker.");
+      }
+      if (requiredOutput && capabilities[requiredOutput] !== true) {
+        throw new Error(`Worker ${requiredOutput} output is unavailable.`);
+      }
+      const requiredBlendModes = new Set(
+        scene.entries.map((entry) => normalizeLayerBlendMode(entry.blendMode))
+      );
+      if (
+        Array.from(requiredBlendModes).some(
+          (blendMode) => !Array.isArray(capabilities.blendModes) || !capabilities.blendModes.includes(blendMode)
+        )
+      ) {
+        throw new Error("This browser cannot reproduce every export blend mode in a worker.");
+      }
+      if (scene.entries.some((entry) => Number(entry.blurAmount) > 0) && !capabilities.canvasFilter) {
+        throw new Error("This browser cannot reproduce blurred exports in a worker.");
+      }
+      session.capabilities = capabilities;
+      session.preparedMessage = await session.request(
+        "prepare",
+        { jobId, scene, assets },
+        EXPORT_RASTER_PREPARE_TIMEOUT_MS
+      );
+      return session.preparedMessage;
+    },
+    request(type, payload = {}, timeoutMs = EXPORT_RASTER_FRAME_TIMEOUT_MS) {
+      if (closed) {
+        return Promise.reject(new Error("Export raster worker is closed."));
+      }
+      const requestId = `${jobId}-request-${++requestNumber}`;
+      return new Promise((resolve, reject) => {
+        const request = {
+          resolve,
+          reject,
+          timeoutId: null,
+          hardTimeoutId: null,
+          timeoutMs,
+          type,
+          refreshTimeout() {
+            window.clearTimeout(request.timeoutId);
+            request.timeoutId = window.setTimeout(() => {
+              pending.delete(requestId);
+              window.clearTimeout(request.hardTimeoutId);
+              reject(new Error(`Export raster ${type} stopped making progress.`));
+            }, timeoutMs);
+          }
+        };
+        request.refreshTimeout();
+        request.hardTimeoutId = window.setTimeout(() => {
+          pending.delete(requestId);
+          window.clearTimeout(request.timeoutId);
+          reject(new Error(`Export raster ${type} exceeded its maximum duration.`));
+        }, Math.max(300000, timeoutMs * 5));
+        pending.set(requestId, request);
+        try {
+          worker.postMessage({
+            protocol: EXPORT_RASTER_PROTOCOL,
+            version: EXPORT_RASTER_VERSION,
+            type,
+            requestId,
+            ...payload
+          });
+        } catch (error) {
+          window.clearTimeout(request.timeoutId);
+          window.clearTimeout(request.hardTimeoutId);
+          pending.delete(requestId);
+          reject(error);
+        }
+      });
+    },
+    async renderFrame(output, timeMs = 0, entries = null, background = null) {
+      const message = await session.request("render-frame", {
+        jobId,
+        output,
+        timeMs,
+        ...(entries ? { entries: createExportRasterEntriesDto(entries) } : {}),
+        ...(background ? { background } : {})
+      });
+      return message.output;
+    },
+    cancel() {
+      if (closed) {
+        return;
+      }
+      try {
+        worker.postMessage({
+          protocol: EXPORT_RASTER_PROTOCOL,
+          version: EXPORT_RASTER_VERSION,
+          type: "cancel",
+          jobId
+        });
+      } catch (error) {
+        // Terminating below is the authoritative cancellation path.
+      }
+      close(true);
+    },
+    release() {
+      if (closed) {
+        return;
+      }
+      try {
+        worker.postMessage({
+          protocol: EXPORT_RASTER_PROTOCOL,
+          version: EXPORT_RASTER_VERSION,
+          type: "release",
+          jobId
+        });
+      } catch (error) {
+        // Terminating below still releases all worker-owned resources.
+      }
+      close(false);
+    }
+  };
+
+  worker.addEventListener("message", (event) => {
+    const message = event.data || {};
+    if (
+      message.protocol !== EXPORT_RASTER_PROTOCOL ||
+      message.version !== EXPORT_RASTER_VERSION
+    ) {
+      return;
+    }
+    if (message.type === "ready" && message.action === "startup") {
+      if (!startupSettled) {
+        startupSettled = true;
+        startupResolve(message);
+      }
+      return;
+    }
+    if (message.type === "error" && message.action === "startup") {
+      if (!startupSettled) {
+        const error = new Error(message.error?.message || "Export raster worker failed to start.");
+        error.code = message.error?.code || "EXPORT_RASTER_STARTUP_FAILURE";
+        error.capability = message.error?.capability === true;
+        startupSettled = true;
+        startupReject(error);
+      }
+      return;
+    }
+    if (message.type === "progress") {
+      const request = pending.get(message.requestId);
+      if (request && (!message.jobId || String(message.jobId) === jobId)) {
+        request.refreshTimeout();
+      }
+      onProgress?.(message);
+      return;
+    }
+    const request = pending.get(message.requestId);
+    if (!request) {
+      return;
+    }
+    pending.delete(message.requestId);
+    window.clearTimeout(request.timeoutId);
+    window.clearTimeout(request.hardTimeoutId);
+    if (message.type === "error") {
+      const error = new Error(message.error?.message || "Export raster worker failed.");
+      error.code = message.error?.code || "EXPORT_RASTER_FAILURE";
+      error.capability = message.error?.capability === true;
+      error.details = message.error?.details || null;
+      if (message.error?.cancelled) {
+        error.name = "AbortError";
+      }
+      request.reject(error);
+    } else {
+      const expectedType = request.type === "prepare"
+        ? "prepared"
+        : request.type === "render-frame"
+        ? "rendered"
+        : "";
+      if (
+        (expectedType && message.type !== expectedType) ||
+        (message.jobId != null && String(message.jobId) !== jobId)
+      ) {
+        request.reject(new Error("Export raster worker returned a mismatched response."));
+      } else {
+        request.resolve(message);
+      }
+    }
+  });
+  worker.addEventListener("error", (event) => {
+    const error = new Error(event.message || "Export raster worker crashed.");
+    closeWithError(error);
+  });
+  worker.addEventListener("messageerror", () => {
+    const error = new Error("Export raster worker returned an unreadable message.");
+    closeWithError(error);
+  });
+
+  if (task) {
+    task.rasterSession = session;
+  }
+  return session;
+}
+
+async function prepareExportRasterWorkerSession(
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  options = {},
+  task = null,
+  requiredOutput = ""
+) {
+  const scene = createExportRasterScene(
+    selectionBounds,
+    outputWidth,
+    outputHeight,
+    entries,
+    options
+  );
+  const session = createExportRasterWorkerSession(task, (message) => {
+    if (message.phase === "assets") {
+      const ratio = (Number(message.completed) || 0) / Math.max(1, Number(message.total) || 1);
+      updateExportProgress(
+        task,
+        EXPORT_PROGRESS_COLLECT_END +
+          (EXPORT_PROGRESS_DECODE_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
+        "Decoding"
+      );
+    }
+  });
+  try {
+    const prepared = await session.start(scene, [], requiredOutput);
+    throwIfTaskCancelled(task);
+    return {
+      session,
+      prepared,
+      timingMap: createExportRasterTimingMap(prepared, entries, options)
+    };
+  } catch (error) {
+    session.release();
+    throw error;
+  }
+}
+
+function exportRasterSourceRequiresLiveBrowserFrame(sourceUrl, element = null) {
+  const source = String(sourceUrl || "");
+  if (!source) {
+    return false;
+  }
+  const metadata = getStockBrushMetadataForSource(source);
+  const brushId = Number(element?.dataset?.brushId);
+  const brush = Number.isFinite(brushId) ? findBrushById(brushId) : null;
+  if (isGifUrl(source) || (brush && getBrushSourceIsGif(brush))) {
+    return false;
+  }
+  if (metadata) {
+    // The raster worker only has deterministic animation decoding for GIF.
+    // Keep animated non-GIF assets on the browser compatibility renderer so
+    // they are never silently substituted with a static first frame.
+    return metadata.animated === true;
+  }
+  if (brush?.animated === true) {
+    return true;
+  }
+  const mimeType = getSceneRendererMimeType(source);
+  const originalMimeType = brush ? getSceneRendererMimeType(getBrushPrimarySourceUrl(brush)) : "";
+  return Boolean(
+    /^(?:image\/(?:png|webp|avif|svg\+xml))$/i.test(mimeType) ||
+    /^(?:image\/(?:png|webp|avif|svg\+xml))$/i.test(originalMimeType) ||
+    /^(?:blob:)/i.test(source) ||
+    /\.(?:png|webp|avif|svg)(?:[?#]|$)/i.test(source)
+  );
+}
+
+function shouldTryExportRasterWorker(entries = [], options = {}) {
+  const backgroundSource = getExportRasterBackgroundImageUrl(options);
+  return Boolean(
+    !options.sequenceExportActive &&
+    typeof Worker === "function" &&
+    typeof window.OffscreenCanvas === "function" &&
+    !(Array.isArray(entries) ? entries : []).some((entry) =>
+      exportRasterSourceRequiresLiveBrowserFrame(entry?.sourceUrl, entry?.element)
+    ) &&
+    !exportRasterSourceRequiresLiveBrowserFrame(backgroundSource)
+  );
+}
+
+function isExportRasterSafetyError(error) {
+  return [
+    "MEMORY_BUDGET_EXCEEDED",
+    "MEMORY_ESTIMATE_OVERFLOW",
+    "SOURCE_TOO_LARGE",
+    "GIF_FRAME_LIMIT_EXCEEDED"
+  ].includes(String(error?.code || ""));
+}
+
 async function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
+  const frameTimeMs = Math.max(0, Number(options.frameTimeMs) || 0);
+  if (options.preferMainRenderer !== true && shouldTryExportRasterWorker(entries, options)) {
+    let raster = null;
+    try {
+      raster = await prepareExportRasterWorkerSession(
+        selectionBounds,
+        outputWidth,
+        outputHeight,
+        entries,
+        options,
+        task,
+        "png"
+      );
+      if (!raster.session.capabilities?.png) {
+        throw new Error("Worker PNG encoding is unavailable.");
+      }
+      const output = await raster.session.renderFrame("png", frameTimeMs);
+      throwIfTaskCancelled(task);
+      if (
+        output?.kind !== "png" ||
+        !(output.blob instanceof Blob) ||
+        output.blob.type !== "image/png" ||
+        Number(output.width) !== outputWidth ||
+        Number(output.height) !== outputHeight
+      ) {
+        throw new Error("Worker PNG output was invalid.");
+      }
+      updateExportProgress(task, EXPORT_PROGRESS_DRAW_END, "Drawing");
+      updateExportProgress(task, EXPORT_PROGRESS_PNG_ENCODE_HOLD, "Encoding");
+      return output.blob;
+    } catch (error) {
+      if (isCancellationError(error) || task?.cancelled) {
+        throw createCancellationError();
+      }
+      if (isExportRasterSafetyError(error)) {
+        throw error;
+      }
+      console.warn("Worker PNG export fell back to the main renderer.", error);
+    } finally {
+      raster?.session.release();
+    }
+  }
   const canvas = document.createElement("canvas");
   canvas.width = outputWidth;
   canvas.height = outputHeight;
@@ -13147,30 +19041,41 @@ async function renderExportPngBlob(selectionBounds, outputWidth, outputHeight, e
   if (!ctx) {
     throw new Error("Could not create export canvas.");
   }
-  await loadExportStampSourceImages(entries, task);
-  throwIfTaskCancelled(task);
-  await drawExportFrameAsync(
-    ctx,
-    selectionBounds,
-    outputWidth,
-    outputHeight,
-    entries,
-    null,
-    0,
-    { ...options, sequenceTimeMs: options.sequenceExportActive ? (Number(options.sequencePrewarmMs) || 0) : null },
-    task,
-    (ratio) => updateExportProgress(
+  const releaseSourceImages = options.releaseSourceImagesAfterRender === true;
+  try {
+    await loadExportStampSourceImages(entries, task, {
+      cache: !releaseSourceImages
+    });
+    throwIfTaskCancelled(task);
+    await drawExportFrameAsync(
+      ctx,
+      selectionBounds,
+      outputWidth,
+      outputHeight,
+      entries,
+      null,
+      frameTimeMs,
+      { ...options, sequenceTimeMs: options.sequenceExportActive ? (Number(options.sequencePrewarmMs) || 0) : null },
       task,
-      EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
-      "Drawing"
-    )
-  );
-  throwIfTaskCancelled(task);
-  updateExportProgress(task, EXPORT_PROGRESS_PNG_ENCODE_HOLD, "Encoding");
-  return canvasToPngBlob(canvas);
+      (ratio) => updateExportProgress(
+        task,
+        EXPORT_PROGRESS_COLLECT_END + (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_COLLECT_END) * ratio,
+        "Drawing"
+      )
+    );
+    throwIfTaskCancelled(task);
+    updateExportProgress(task, EXPORT_PROGRESS_PNG_ENCODE_HOLD, "Encoding");
+    return await canvasToPngBlob(canvas);
+  } finally {
+    if (releaseSourceImages) {
+      releaseExportEntrySourceImages(entries);
+    }
+  }
 }
 
 async function prepareExportGifRenderAssets(entries, options = {}, task = null) {
+  await prepareExportBackgroundAnimation(options, task);
+  throwIfTaskCancelled(task);
   const gifAnimationMap = await buildGifAnimationMap(
     entries,
     task,
@@ -13190,6 +19095,85 @@ async function prepareExportGifRenderAssets(entries, options = {}, task = null) 
 function formatExportByteSize(bytes) {
   const value = Math.max(0, Number(bytes) || 0);
   return `${(value / 1000000).toFixed(value >= 10000000 ? 1 : 2)}mb`;
+}
+
+function releaseGifEncoderFrames(gif) {
+  if (!gif || typeof gif !== "object") {
+    return;
+  }
+  if (Array.isArray(gif.frames)) {
+    for (const frame of gif.frames) {
+      if (!frame || typeof frame !== "object") {
+        continue;
+      }
+      frame.data = null;
+      frame.context = null;
+      frame.image = null;
+    }
+    gif.frames.length = 0;
+  }
+  gif.groups?.clear?.();
+  if (Array.isArray(gif.imageParts)) {
+    gif.imageParts.length = 0;
+  }
+  const encoderWorkers = new Set([
+    ...(Array.isArray(gif.freeWorkers) ? gif.freeWorkers : []),
+    ...(Array.isArray(gif.activeWorkers) ? gif.activeWorkers : [])
+  ]);
+  for (const worker of encoderWorkers) {
+    try {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.terminate?.();
+    } catch {
+      // The worker may already have been terminated by gif.js.
+    }
+  }
+  if (Array.isArray(gif.freeWorkers)) {
+    gif.freeWorkers.length = 0;
+  }
+  if (Array.isArray(gif.activeWorkers)) {
+    gif.activeWorkers.length = 0;
+  }
+  gif.running = false;
+}
+
+function getGifEncoderFrameBudgetBytes() {
+  const deviceMemory = Number(navigator.deviceMemory);
+  if (Number.isFinite(deviceMemory) && deviceMemory <= 4) {
+    return 80 * 1024 * 1024;
+  }
+  if (Number.isFinite(deviceMemory) && deviceMemory <= 8) {
+    return 128 * 1024 * 1024;
+  }
+  if (Number.isFinite(deviceMemory) && deviceMemory > 8) {
+    return 192 * 1024 * 1024;
+  }
+  return EXPORT_GIF_ENCODER_DEFAULT_FRAME_BUDGET_BYTES;
+}
+
+function getMemoryBoundedGifFrameDelays(width, height, frameDelays) {
+  const normalizedDelays = normalizeFrameDelays(frameDelays);
+  const safeDelays = normalizedDelays.length ? normalizedDelays : [EXPORT_GIF_FRAME_DELAY_MS];
+  const bytesPerFrame = Math.max(1, Math.round(Number(width) || 1)) *
+    Math.max(1, Math.round(Number(height) || 1)) * 4;
+  const maxFrameCount = Math.floor(getGifEncoderFrameBudgetBytes() / bytesPerFrame);
+  if (maxFrameCount < 1) {
+    const error = new Error("The requested GIF dimensions exceed the safe encoder memory budget.");
+    error.code = "MEMORY_BUDGET_EXCEEDED";
+    throw error;
+  }
+  if (safeDelays.length <= maxFrameCount) {
+    return safeDelays;
+  }
+  const boundedDelays = createExportFrameDelaysForCount(
+    getFrameDelaysDuration(safeDelays),
+    maxFrameCount
+  );
+  updateBrushStatus(
+    `GIF sampled to ${boundedDelays.length} frames at this resolution to fit memory safely.`
+  );
+  return boundedDelays;
 }
 
 function estimateGifExportBytes(width, height, frameCount, entries) {
@@ -13277,6 +19261,20 @@ function createInitialGifSizeLimitPlan(width, height, frameDelays, entries, opti
   );
 }
 
+function getEstimatedGifFrameDelaysForSizeLimit(options = {}) {
+  const frameCountOverride = Number(options.frameCountOverride);
+  if (Number.isFinite(frameCountOverride) && frameCountOverride > 0) {
+    return createExportFrameDelays(0, frameCountOverride);
+  }
+  if (options.animationAuto === false) {
+    const manualSeconds = EXPORT_MANUAL_SECONDS_PRESETS.includes(Number(options.animationSeconds))
+      ? Number(options.animationSeconds)
+      : 1;
+    return createExportFrameDelays(manualSeconds * 1000);
+  }
+  return createExportFrameDelays(EXPORT_GIF_DURATION_MS);
+}
+
 async function renderExportGifBlobWithSizeLimit(
   selectionBounds,
   outputWidth,
@@ -13285,6 +19283,99 @@ async function renderExportGifBlobWithSizeLimit(
   options = {},
   task = null
 ) {
+  if (shouldTryExportRasterWorker(entries, options) && !(options.gifAnimationMap instanceof Map)) {
+    try {
+      const estimatedFrameDelays = getEstimatedGifFrameDelaysForSizeLimit(options);
+      let plan = createInitialGifSizeLimitPlan(
+        outputWidth,
+        outputHeight,
+        estimatedFrameDelays,
+        entries,
+        options
+      );
+      const priority = getGifSizeLimitPriority(options);
+      let baseFrameDelays = null;
+      let durationMs = 0;
+      for (let attempt = 0; attempt < EXPORT_GIF_SIZE_LIMIT_MAX_ATTEMPTS; attempt += 1) {
+        throwIfTaskCancelled(task);
+        const frameDelays = baseFrameDelays
+          ? plan.frameCount === baseFrameDelays.length
+            ? baseFrameDelays
+            : createExportFrameDelaysForCount(durationMs, plan.frameCount)
+          : plan.frameCount < estimatedFrameDelays.length
+            ? createExportFrameDelaysForCount(
+                getFrameDelaysDuration(estimatedFrameDelays),
+                plan.frameCount
+              )
+            : null;
+        const result = await renderExportGifBlobWithRasterWorker(
+          selectionBounds,
+          plan.width,
+          plan.height,
+          entries,
+          {
+            ...options,
+            ...(frameDelays ? { frameDelaysOverride: frameDelays } : {}),
+            returnRenderDetails: true
+          },
+          task
+        );
+        const blob = result?.blob;
+        if (!(blob instanceof Blob)) {
+          throw new Error("Worker GIF sizing returned an invalid result.");
+        }
+        if (!baseFrameDelays) {
+          baseFrameDelays = normalizeFrameDelays(result.frameDelays);
+          if (!baseFrameDelays.length) {
+            baseFrameDelays = [EXPORT_GIF_FRAME_DELAY_MS];
+          }
+          durationMs = getFrameDelaysDuration(baseFrameDelays);
+          plan.frameCount = baseFrameDelays.length;
+        }
+        throwIfTaskCancelled(task);
+        if (blob.size <= EXPORT_GIF_MAX_SIZE_BYTES) {
+          if (
+            attempt > 0 ||
+            plan.width !== outputWidth ||
+            plan.height !== outputHeight ||
+            plan.frameCount !== baseFrameDelays.length
+          ) {
+            updateBrushStatus(
+              `GIF sized to ${formatExportByteSize(blob.size)} (${plan.width}x${plan.height}, ${plan.frameCount} frames).`
+            );
+          }
+          return blob;
+        }
+        updateBrushStatus(
+          `GIF was ${formatExportByteSize(blob.size)}; reducing toward 15mb...`
+        );
+        updateExportProgress(task, EXPORT_PROGRESS_DRAW_END, "Sizing");
+        const nextPlan = reduceGifSizeLimitPlan(
+          plan,
+          EXPORT_GIF_SIZE_TARGET_BYTES / Math.max(1, blob.size),
+          priority
+        );
+        plan = gifSizeLimitPlansMatch(nextPlan, plan)
+          ? reduceGifSizeLimitPlan(plan, 0.65, priority === "frames" ? "resolution" : "frames")
+          : nextPlan;
+        await yieldToMainThread(task);
+      }
+      const error = new Error("Could not reduce GIF below 15mb.");
+      error.code = "EXPORT_GIF_SIZE_LIMIT_FAILED";
+      throw error;
+    } catch (error) {
+      if (isCancellationError(error) || task?.cancelled) {
+        throw createCancellationError();
+      }
+      if (isExportRasterSafetyError(error)) {
+        throw error;
+      }
+      if (error?.code === "EXPORT_GIF_SIZE_LIMIT_FAILED") {
+        throw error;
+      }
+      console.warn("Worker GIF sizing fell back to the main renderer.", error);
+    }
+  }
   const gifAnimationMap = await prepareExportGifRenderAssets(entries, options, task);
   const baseFrameDelays = getExportGifFrameDelays(gifAnimationMap, options);
   const durationMs = getExportGifDurationMs(gifAnimationMap, options);
@@ -13350,7 +19441,173 @@ async function renderExportGifBlobWithSizeLimit(
   throw new Error("Could not reduce GIF below 15mb.");
 }
 
+async function renderExportGifBlobWithRasterWorker(
+  selectionBounds,
+  outputWidth,
+  outputHeight,
+  entries,
+  options = {},
+  task = null
+) {
+  await loadGifLibrary();
+  throwIfTaskCancelled(task);
+  if (typeof window.GIF !== "function") {
+    throw new Error("GIF encoder is unavailable.");
+  }
+
+  const includeBackground = options.includeBackground !== false;
+  const backgroundColor = normalizeHexColor(options.backgroundColor, "#ffffff");
+  const frameOptions = {
+    ...options,
+    includeBackground,
+    matteColor: ""
+  };
+  let raster = null;
+  let gif = null;
+  try {
+    raster = await prepareExportRasterWorkerSession(
+      selectionBounds,
+      outputWidth,
+      outputHeight,
+      entries,
+      frameOptions,
+      task,
+      "rgba"
+    );
+    if (!raster.session.capabilities?.rgba) {
+      throw new Error("Worker RGBA export is unavailable.");
+    }
+    const overrideFrameDelays = normalizeFrameDelays(options.frameDelaysOverride);
+    const requestedFrameDelays = overrideFrameDelays.length
+      ? overrideFrameDelays
+      : getExportGifFrameDelays(raster.timingMap, options);
+    const frameDelays = getMemoryBoundedGifFrameDelays(
+      outputWidth,
+      outputHeight,
+      requestedFrameDelays
+    );
+
+    gif = new window.GIF({
+      workers: 2,
+      quality: 1,
+      width: outputWidth,
+      height: outputHeight,
+      repeat: 0,
+      dither: false,
+      background: includeBackground ? backgroundColor : GIF_TRANSPARENT_MATTE,
+      globalPalette: includeBackground ? true : false,
+      workerScript: GIF_JS_WORKER_URL,
+      ...(includeBackground ? {} : { transparent: GIF_TRANSPARENT_MATTE_HEX })
+    });
+    if (task) {
+      task.gif = gif;
+    }
+
+    let elapsedMs = 0;
+    for (let index = 0; index < frameDelays.length; index += 1) {
+      throwIfTaskCancelled(task);
+      const output = await raster.session.renderFrame("rgba", elapsedMs);
+      if (
+        output?.kind !== "rgba" ||
+        !(output.buffer instanceof ArrayBuffer) ||
+        output.buffer.byteLength !== outputWidth * outputHeight * 4 ||
+        Number(output.width) !== outputWidth ||
+        Number(output.height) !== outputHeight
+      ) {
+        throw new Error("Worker GIF frame output was invalid.");
+      }
+      let imageData = new ImageData(
+        new Uint8ClampedArray(output.buffer),
+        outputWidth,
+        outputHeight
+      );
+      if (!includeBackground) {
+        imageData = prepareTransparentGifFrameImageData(imageData);
+      }
+      gif.addFrame(imageData, {
+        delay: frameDelays[index],
+        dispose: 2
+      });
+      elapsedMs += frameDelays[index];
+      updateExportProgress(
+        task,
+        EXPORT_PROGRESS_DECODE_END +
+          (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_DECODE_END) *
+            ((index + 1) / Math.max(1, frameDelays.length)),
+        "Drawing"
+      );
+    }
+
+    raster.session.release();
+    raster = null;
+    const blob = await new Promise((resolve, reject) => {
+      const clearGifTask = () => {
+        if (task?.gif === gif) {
+          task.gif = null;
+        }
+      };
+      gif.on("progress", (ratio) => {
+        updateExportProgress(
+          task,
+          EXPORT_PROGRESS_DRAW_END +
+            (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DRAW_END) * ratio,
+          "Encoding"
+        );
+      });
+      gif.on("finished", (blob) => {
+        clearGifTask();
+        releaseGifEncoderFrames(gif);
+        if (task?.cancelled) {
+          reject(createCancellationError());
+          return;
+        }
+        resolve(blob);
+      });
+      gif.on("abort", () => {
+        clearGifTask();
+        releaseGifEncoderFrames(gif);
+        reject(createCancellationError());
+      });
+      throwIfTaskCancelled(task);
+      gif.render();
+    });
+    return options.returnRenderDetails === true
+      ? { blob, frameDelays }
+      : blob;
+  } catch (error) {
+    if (task?.gif === gif) {
+      task.gif = null;
+    }
+    releaseGifEncoderFrames(gif);
+    throw error;
+  } finally {
+    raster?.session.release();
+  }
+}
+
 async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
+  if (shouldTryExportRasterWorker(entries, options) && !(options.gifAnimationMap instanceof Map)) {
+    try {
+      return await renderExportGifBlobWithRasterWorker(
+        selectionBounds,
+        outputWidth,
+        outputHeight,
+        entries,
+        options,
+        task
+      );
+    } catch (error) {
+      if (isCancellationError(error) || task?.cancelled) {
+        throw createCancellationError();
+      }
+      if (isExportRasterSafetyError(error)) {
+        throw error;
+      }
+      console.warn("Worker GIF rasterization fell back to the main renderer.", error);
+    }
+  }
+  await prepareExportBackgroundAnimation(options, task);
+  throwIfTaskCancelled(task);
   await loadGifLibrary();
   throwIfTaskCancelled(task);
   if (typeof window.GIF !== "function") {
@@ -13389,9 +19646,14 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     throwIfTaskCancelled(task);
   }
   const overrideFrameDelays = normalizeFrameDelays(options.frameDelaysOverride);
-  const frameDelays = overrideFrameDelays.length
+  const requestedFrameDelays = overrideFrameDelays.length
     ? overrideFrameDelays
     : getExportGifFrameDelays(gifAnimationMap, options);
+  const frameDelays = getMemoryBoundedGifFrameDelays(
+    outputWidth,
+    outputHeight,
+    requestedFrameDelays
+  );
 
   const gif = new window.GIF({
     workers: 2,
@@ -13463,6 +19725,7 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     });
     gif.on("finished", (blob) => {
       clearGifTask();
+      releaseGifEncoderFrames(gif);
       if (task && task.cancelled) {
         reject(createCancellationError());
         return;
@@ -13471,6 +19734,7 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
     });
     gif.on("abort", () => {
       clearGifTask();
+      releaseGifEncoderFrames(gif);
       reject(createCancellationError());
     });
     throwIfTaskCancelled(task);
@@ -13530,6 +19794,8 @@ async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight,
     };
   });
 
+  await prepareExportBackgroundAnimation(options, task);
+  throwIfTaskCancelled(task);
   const gifAnimationMap = await buildGifAnimationMap(
     entries,
     task,
@@ -13699,7 +19965,6 @@ async function confirmExport() {
   const resolution = getExportScaledResolution(normalized);
   state.exportTask = task;
   updateExportModeUI();
-  restoreAllCulledStampSources();
   updateBrushCursorPreview();
   const timestamp = Date.now();
   const exportOptions = {
@@ -13720,7 +19985,7 @@ async function confirmExport() {
   updateExportProgress(task, 0, "Exporting");
   updateBrushStatus("Exporting... Press Esc to cancel.");
   try {
-    Object.assign(exportOptions, await getExportBackgroundImageOptions());
+    Object.assign(exportOptions, await getExportBackgroundImageOptions(task));
     throwIfTaskCancelled(task);
     if (sequenceSnapshot) {
       state.sequenceExportActive = true;
@@ -13731,10 +19996,14 @@ async function confirmExport() {
     const entries = await collectExportStampEntries(
       normalized,
       task,
-      (ratio) => updateExportProgress(task, EXPORT_PROGRESS_COLLECT_END * ratio, "Collecting")
+      (ratio) => updateExportProgress(task, EXPORT_PROGRESS_COLLECT_END * ratio, "Collecting"),
+      { includeSequenceCandidates: exportOptions.sequenceExportActive }
     );
     throwIfTaskCancelled(task);
-    const hasGif = hasGifStampOnCanvas() || exportOptions.sequenceExportActive;
+    const hasGif =
+      hasGifStampOnCanvas() ||
+      exportOptions.sequenceExportActive ||
+      isGifUrl(getExportRasterBackgroundImageUrl(exportOptions));
     const blob = hasGif
       ? exportOptions.gifSizeLimitEnabled
         ? await renderExportGifBlobWithSizeLimit(normalized, resolution.width, resolution.height, entries, exportOptions, task)
@@ -13753,7 +20022,27 @@ async function confirmExport() {
   } catch (error) {
     if (isCancellationError(error)) {
       updateBrushStatus("Export cancelled.");
+    } else if (error?.code === "MEMORY_BUDGET_EXCEEDED") {
+      console.error("GIF export exceeded the safe raster memory budget.", error);
+      updateBrushStatus("Could not complete export safely. Try a lower export scale.");
+    } else if (isExportRasterSafetyError(error)) {
+      console.error("GIF export exceeded a safe raster limit.", error);
+      updateBrushStatus("Could not complete export safely with this source or scale.");
+    } else if (
+      error?.code === "EXPORT_BACKGROUND_LOAD_FAILED" ||
+      error?.code === "EXPORT_SOURCE_LOAD_TIMEOUT"
+    ) {
+      console.error("GIF export could not load the selected background.", error);
+      updateBrushStatus("Could not complete export because the background image could not be read.");
+    } else if (
+      error?.code === "EXPORT_SOURCE_LOAD_FAILED" ||
+      error?.code === "EXPORT_SOURCE_UNAVAILABLE" ||
+      error?.code === "EXPORT_GIF_DECODE_FAILED"
+    ) {
+      console.error("GIF export could not load a brush source.", error);
+      updateBrushStatus("Could not complete export because a brush image could not be read.");
     } else {
+      console.error("GIF export failed.", error);
       updateBrushStatus("Could not complete export.");
     }
     resetExportProgress();
@@ -13774,6 +20063,7 @@ async function confirmExport() {
     updateUndoState();
     updateExportModeUI();
     scheduleStampVisibilityRefresh();
+    refreshLayerSequenceLoop();
   }
 }
 
@@ -13794,7 +20084,6 @@ async function confirmVideoExport() {
   const resolution = getVideoScaledResolution(getExportScaledResolution(normalized));
   state.exportTask = task;
   updateExportModeUI();
-  restoreAllCulledStampSources();
   updateBrushCursorPreview();
   const timestamp = Date.now();
   state.exportVideoAuto = exportVideoAutoToggle ? exportVideoAutoToggle.checked : state.exportVideoAuto !== false;
@@ -13818,7 +20107,7 @@ async function confirmVideoExport() {
   updateExportProgress(task, 0, "Exporting");
   updateBrushStatus("Exporting video... Press Esc to cancel.");
   try {
-    Object.assign(exportOptions, await getExportBackgroundImageOptions());
+    Object.assign(exportOptions, await getExportBackgroundImageOptions(task));
     throwIfTaskCancelled(task);
     if (sequenceSnapshot) {
       state.sequenceExportActive = true;
@@ -13829,7 +20118,8 @@ async function confirmVideoExport() {
     const entries = await collectExportStampEntries(
       normalized,
       task,
-      (ratio) => updateExportProgress(task, EXPORT_PROGRESS_COLLECT_END * ratio, "Collecting")
+      (ratio) => updateExportProgress(task, EXPORT_PROGRESS_COLLECT_END * ratio, "Collecting"),
+      { includeSequenceCandidates: exportOptions.sequenceExportActive }
     );
     throwIfTaskCancelled(task);
     const blob = await renderExportVideoBlob(
@@ -13856,7 +20146,14 @@ async function confirmVideoExport() {
   } catch (error) {
     if (isCancellationError(error)) {
       updateBrushStatus("Video export cancelled.");
+    } else if (
+      error?.code === "EXPORT_BACKGROUND_LOAD_FAILED" ||
+      error?.code === "EXPORT_SOURCE_LOAD_TIMEOUT"
+    ) {
+      console.error("Video export could not load the selected background.", error);
+      updateBrushStatus("Could not complete video export because the background image could not be read.");
     } else {
+      console.error("Video export failed.", error);
       updateBrushStatus("Could not complete video export.");
     }
     resetExportProgress(exportVideoButton, "Render Video");
@@ -13879,6 +20176,7 @@ async function confirmVideoExport() {
     updateUndoState();
     updateExportModeUI();
     scheduleStampVisibilityRefresh();
+    refreshLayerSequenceLoop();
   }
 }
 
@@ -13938,15 +20236,16 @@ function createBrushFromSourceData(brushData) {
 
 function getStockBrushFolderSourceUrls(folder) {
   return getStockBrushFiles(folder).map((filePath) =>
-    normalizeFavoriteBrushSource(encodeStockBrushPath(filePath))
+    getCanonicalStockBrushSource(encodeStockBrushPath(filePath))
   );
 }
 
 function getBrushPrimarySourceUrl(brush) {
-  return normalizeFavoriteBrushSource(brush?.originalUrl || brush?.url || "");
+  return getCanonicalStockBrushSource(brush?.originalUrl || brush?.url || "");
 }
 
 function refreshBrushDataAfterLoad(releaseUrls = []) {
+  resetBrushGalleryForBrushSetChange();
   clearBrushFrameCountJobs();
   state.soloBrushId = null;
   clearSelectedBrushes();
@@ -14013,7 +20312,7 @@ async function loadStockBrushFolder(folderId, options = {}) {
 
       const existingSources = new Set(state.brushes.map(getBrushPrimarySourceUrl));
       const filesToLoad = files.filter((filePath) =>
-        !existingSources.has(normalizeFavoriteBrushSource(encodeStockBrushPath(filePath)))
+        !existingSources.has(getCanonicalStockBrushSource(encodeStockBrushPath(filePath)))
       );
       if (filesToLoad.length) {
         const loaded = await loadStockBrushFileData(filesToLoad);
@@ -14056,6 +20355,7 @@ async function loadStockBrushFileData(files) {
 function cloneBrushSourceData(brushData) {
   return {
     ...brushData,
+    tags: getBrushTags(brushData),
     frameRange: brushData?.frameRange ? { ...brushData.frameRange } : null,
     cropRect: brushData?.cropRect ? { ...brushData.cropRect } : null
   };
@@ -14077,40 +20377,162 @@ function getBrushSourceFileName(sourceUrl) {
 
 async function loadBrushSourceData(sources) {
   const uniqueSources = Array.from(
-    new Set(sources.map(normalizeFavoriteBrushSource).filter(Boolean))
+    new Set(sources.map(getCanonicalStockBrushSource).filter(Boolean))
   );
-  const loadedBrushData = await mapWithConcurrency(uniqueSources, 18, async (sourceUrl) => {
-    try {
-      if (!brushSourceDataCache.has(sourceUrl)) {
-        brushSourceDataCache.set(
-          sourceUrl,
-          getImageDimensions(sourceUrl)
-            .then((dimensions) => ({
-              url: sourceUrl,
-              name: getBrushSourceFileName(sourceUrl),
-              width: dimensions.width,
-              height: dimensions.height,
-              originalUrl: sourceUrl,
-              originalWidth: dimensions.width,
-              originalHeight: dimensions.height,
-              frameCount: isGifUrl(sourceUrl) ? null : 1,
-              frameRange: null,
-              cropRect: null,
-              enabled: true,
-              weightMode: "normal"
-            }))
-            .catch((error) => {
-              brushSourceDataCache.delete(sourceUrl);
-              throw error;
-            })
-        );
+  const loadedBrushData = await mapWithConcurrency(
+    uniqueSources,
+    BRUSH_SOURCE_LOAD_CONCURRENCY,
+    async (canonicalSourceUrl) => {
+      const requestUrl = getStockBrushRequestUrl(canonicalSourceUrl);
+      const stockMetadata = getStockBrushMetadataForSource(canonicalSourceUrl);
+      try {
+        if (!brushSourceDataCache.has(requestUrl)) {
+          const metadataHasDimensions = Boolean(
+            stockMetadata && stockMetadata.width > 0 && stockMetadata.height > 0
+          );
+          const dimensionsPromise = metadataHasDimensions
+            ? Promise.resolve({ width: stockMetadata.width, height: stockMetadata.height })
+            : getImageDimensions(requestUrl);
+          brushSourceDataCache.set(
+            requestUrl,
+            dimensionsPromise
+              .then((dimensions) => ({
+                url: requestUrl,
+                name: stockMetadata?.name || getBrushSourceFileName(canonicalSourceUrl),
+                width: dimensions.width,
+                height: dimensions.height,
+                originalUrl: canonicalSourceUrl,
+                originalWidth: dimensions.width,
+                originalHeight: dimensions.height,
+                frameCount:
+                  stockMetadata?.frameCount || (isGifUrl(canonicalSourceUrl) ? null : 1),
+                durationMs: Math.max(0, Number(stockMetadata?.durationMs) || 0),
+                animated:
+                  stockMetadata?.animated === true || isGifUrl(canonicalSourceUrl),
+                opaque: stockMetadata?.opaque === true,
+                frameRange: null,
+                cropRect: null,
+                tags: getStockBrushTagsForSource(canonicalSourceUrl),
+                stockAssetRevision: getStockBrushAssetRevisionForSource(canonicalSourceUrl),
+                enabled: true,
+                weightMode: "normal"
+              }))
+              .catch((error) => {
+                brushSourceDataCache.delete(requestUrl);
+                throw error;
+              })
+          );
+        }
+        return cloneBrushSourceData(await brushSourceDataCache.get(requestUrl));
+      } catch (error) {
+        return null;
       }
-      return cloneBrushSourceData(await brushSourceDataCache.get(sourceUrl));
-    } catch (error) {
-      return null;
     }
-  });
+  );
   return loadedBrushData.filter(Boolean);
+}
+
+function refreshExistingBrushFromSourceData(brush, freshBrushData) {
+  if (!brush || !freshBrushData) {
+    return brush;
+  }
+
+  const oldOriginalWidth = getBrushOriginalWidth(brush);
+  const oldOriginalHeight = getBrushOriginalHeight(brush);
+  const oldOutputWidth = Math.max(1, Number(brush.width) || oldOriginalWidth);
+  const oldOutputHeight = Math.max(1, Number(brush.height) || oldOriginalHeight);
+  const oldOriginalSource = getBrushPrimarySourceUrl(brush);
+  const oldRenderSourceKey = getStockBrushSourceLookupKey(brush.url);
+  const originalSourceKey = getStockBrushSourceLookupKey(oldOriginalSource);
+  const renderedOriginalSource = Boolean(
+    oldRenderSourceKey &&
+      originalSourceKey &&
+      oldRenderSourceKey === originalSourceKey &&
+      !/^(?:blob|data):/i.test(String(brush.url || ""))
+  );
+  const usedNativeOutputSize = Boolean(
+    renderedOriginalSource &&
+      !brush.cropRect &&
+      Math.round(oldOutputWidth) === Math.round(oldOriginalWidth) &&
+      Math.round(oldOutputHeight) === Math.round(oldOriginalHeight)
+  );
+  const freshOriginalWidth = getBrushOriginalWidth(freshBrushData);
+  const freshOriginalHeight = getBrushOriginalHeight(freshBrushData);
+
+  if (brush.cropRect) {
+    const widthScale = freshOriginalWidth / oldOriginalWidth;
+    const heightScale = freshOriginalHeight / oldOriginalHeight;
+    brush.cropRect = normalizeBrushCropRect(
+      {
+        x: Number(brush.cropRect.x) * widthScale,
+        y: Number(brush.cropRect.y) * heightScale,
+        width: Number(brush.cropRect.width) * widthScale,
+        height: Number(brush.cropRect.height) * heightScale
+      },
+      freshOriginalWidth,
+      freshOriginalHeight
+    );
+  }
+
+  brush.originalUrl = getBrushPrimarySourceUrl(freshBrushData);
+  brush.originalWidth = freshOriginalWidth;
+  brush.originalHeight = freshOriginalHeight;
+  brush.name = freshBrushData.name || brush.name;
+  brush.tags = getBrushTags(freshBrushData);
+  brush.stockAssetRevision = freshBrushData.stockAssetRevision || "";
+  if (renderedOriginalSource) {
+    brush.url = freshBrushData.url;
+  }
+  if (usedNativeOutputSize) {
+    brush.width = freshOriginalWidth;
+    brush.height = freshOriginalHeight;
+  }
+  if (!normalizeBrushFrameCount(brush.frameCount)) {
+    brush.frameCount = normalizeBrushFrameCount(freshBrushData.frameCount);
+  }
+  brush.durationMs = Math.max(0, Number(freshBrushData.durationMs) || 0);
+  brush.animated = freshBrushData.animated === true;
+  brush.opaque = freshBrushData.opaque === true;
+  return brush;
+}
+
+async function refreshRestoredStockBrushes(brushes) {
+  const revisedSources = Array.from(
+    new Set(
+      (Array.isArray(brushes) ? brushes : [])
+        .filter((brush) => {
+          const source = getBrushPrimarySourceUrl(brush);
+          const expectedRevision = getStockBrushAssetRevisionForSource(source);
+          return Boolean(expectedRevision && brush.stockAssetRevision !== expectedRevision);
+        })
+        .map(getBrushPrimarySourceUrl)
+    )
+  );
+  if (!revisedSources.length) {
+    return 0;
+  }
+
+  const refreshedData = await loadBrushSourceData(revisedSources);
+  const refreshedBySource = new Map(
+    refreshedData.map((brushData) => [getBrushPrimarySourceUrl(brushData), brushData])
+  );
+  const missingSources = revisedSources.filter((source) => !refreshedBySource.has(source));
+  if (missingSources.length) {
+    const retriedData = await loadBrushSourceData(missingSources);
+    for (const brushData of retriedData) {
+      refreshedBySource.set(getBrushPrimarySourceUrl(brushData), brushData);
+    }
+  }
+  let refreshedCount = 0;
+  for (const brush of brushes) {
+    const freshBrushData = refreshedBySource.get(getBrushPrimarySourceUrl(brush));
+    if (!freshBrushData) {
+      continue;
+    }
+    refreshExistingBrushFromSourceData(brush, freshBrushData);
+    refreshedCount += 1;
+  }
+  return refreshedCount;
 }
 
 function getBrushPickSourceFromStamp(stamp) {
@@ -14125,7 +20547,9 @@ function getBrushPickSourceFromStamp(stamp) {
     stamp.currentSrc ||
     stamp.getAttribute("src") ||
     "";
-  return source && source !== TRANSPARENT_STAMP_SRC ? normalizeFavoriteBrushSource(source) : "";
+  return source && source !== TRANSPARENT_STAMP_SRC
+    ? getCanonicalStockBrushSource(source)
+    : "";
 }
 
 async function loadSingleBrushFromStamp(stamp) {
@@ -14154,6 +20578,7 @@ async function loadSingleBrushFromStamp(stamp) {
   state.nextBrushId += 1;
   state.favoriteReturnState = null;
   state.brushes = [brush];
+  resetBrushGalleryForBrushSetChange();
   clearBrushFrameCountJobs();
   setSoloBrushId(brush.id);
   clearActiveStockBrushFolders();
@@ -14235,6 +20660,7 @@ async function loadFavoriteBrushes() {
       state.nextBrushId += 1;
       return brush;
     });
+    resetBrushGalleryForBrushSetChange();
     clearBrushFrameCountJobs();
     state.soloBrushId = null;
     clearSelectedBrushes();
@@ -14250,6 +20676,171 @@ async function loadFavoriteBrushes() {
     brushInput.value = "";
     updateBrushStatus();
     renderBrushGallery();
+    updateEraseCursorGeometry();
+    updateBrushCursorPreview();
+    scheduleSessionSave();
+  } finally {
+    state.stockBrushLoadingFolderId = null;
+    renderStockBrushButtons();
+  }
+}
+
+async function browseAllStockBrushFolders(options = {}) {
+  if (state.stockBrushLoadingFolderId) {
+    return;
+  }
+
+  const folders = getOrderedStockBrushFolders().filter((folder) => getStockBrushFiles(folder).length);
+  const files = folders.flatMap((folder) => getStockBrushFiles(folder));
+  if (!files.length) {
+    return;
+  }
+
+  const catalogSourceUrls = Array.from(
+    new Set(files.map((filePath) => getCanonicalStockBrushSource(encodeStockBrushPath(filePath))))
+  );
+  const selectedBrushIds = state.selectedBrushIds instanceof Set
+    ? state.selectedBrushIds
+    : new Set();
+  const explicitlyActiveBrushIds = new Set(selectedBrushIds);
+  const soloBrush = getSoloBrush();
+  if (soloBrush) {
+    explicitlyActiveBrushIds.add(soloBrush.id);
+  }
+  const getExistingBrushPriority = (brush) => {
+    if (brush.id === soloBrush?.id) {
+      return 3;
+    }
+    if (selectedBrushIds.has(brush.id)) {
+      return 2;
+    }
+    return brush.enabled ? 1 : 0;
+  };
+  const existingBrushesBySource = new Map();
+  for (const brush of state.brushes) {
+    const source = getBrushPrimarySourceUrl(brush);
+    if (!source) {
+      continue;
+    }
+    const current = existingBrushesBySource.get(source);
+    if (!current || getExistingBrushPriority(brush) > getExistingBrushPriority(current)) {
+      existingBrushesBySource.set(source, brush);
+    }
+  }
+
+  const sourcesToLoad = catalogSourceUrls.filter(
+    (source) => {
+      const existingBrush = existingBrushesBySource.get(source);
+      const expectedRevision = getStockBrushAssetRevisionForSource(source);
+      return (
+        !existingBrush ||
+        Boolean(expectedRevision && existingBrush.stockAssetRevision !== expectedRevision)
+      );
+    }
+  );
+  if (state.browsingAllStockBrushes && !sourcesToLoad.length) {
+    return;
+  }
+
+  if (state.brushCropEditor.open) {
+    closeBrushCropModal();
+  }
+
+  state.stockBrushLoadingFolderId = "browse-all";
+  renderStockBrushButtons();
+  updateBrushStatus("Loading all stock brushes to browse...");
+
+  try {
+    const loadedBySource = new Map();
+    if (sourcesToLoad.length) {
+      const loaded = await loadBrushSourceData(sourcesToLoad);
+      for (const brushData of loaded) {
+        loadedBySource.set(getBrushPrimarySourceUrl(brushData), brushData);
+      }
+      const missingAfterFirstLoad = sourcesToLoad.filter(
+        (source) => !loadedBySource.has(source)
+      );
+      if (missingAfterFirstLoad.length) {
+        const retried = await loadBrushSourceData(missingAfterFirstLoad);
+        for (const brushData of retried) {
+          loadedBySource.set(getBrushPrimarySourceUrl(brushData), brushData);
+        }
+      }
+    }
+
+    const retainedBrushIds = new Set();
+    const stockSourceUrls = new Set(catalogSourceUrls);
+    const nextBrushes = catalogSourceUrls.flatMap((source) => {
+      const existingBrush = existingBrushesBySource.get(source);
+      const freshBrushData = loadedBySource.get(source);
+      if (existingBrush) {
+        if (freshBrushData) {
+          refreshExistingBrushFromSourceData(existingBrush, freshBrushData);
+        }
+        existingBrush.enabled = explicitlyActiveBrushIds.has(existingBrush.id);
+        retainedBrushIds.add(existingBrush.id);
+        return [existingBrush];
+      }
+      if (!freshBrushData) {
+        return [];
+      }
+      return [
+        createBrushFromSourceData({
+          ...freshBrushData,
+          enabled: false
+        })
+      ];
+    });
+
+    for (const brush of state.brushes) {
+      const source = getBrushPrimarySourceUrl(brush);
+      if (!retainedBrushIds.has(brush.id) && !stockSourceUrls.has(source)) {
+        retainedBrushIds.add(brush.id);
+        nextBrushes.push(brush);
+      }
+    }
+
+    const discardedBrushUrls = state.brushes
+      .filter((brush) => !retainedBrushIds.has(brush.id))
+      .map((brush) => brush.url);
+    state.favoriteReturnState = null;
+    state.brushes = nextBrushes;
+    if (!options.preserveGalleryState) {
+      resetBrushGalleryForBrushSetChange();
+    }
+    clearBrushFrameCountJobs();
+    clearActiveStockBrushFolders();
+    clearActiveCustomBrushPreset();
+    state.browsingAllStockBrushes = true;
+
+    const brushIds = new Set(state.brushes.map((brush) => brush.id));
+    if (!brushIds.has(state.soloBrushId)) {
+      state.soloBrushId = null;
+    }
+    state.selectedBrushIds = new Set(
+      Array.from(selectedBrushIds).filter((brushId) => brushIds.has(brushId))
+    );
+    for (const oldUrl of discardedBrushUrls) {
+      maybeReleaseObjectUrl(oldUrl);
+    }
+
+    const unresolvedSourceCount = catalogSourceUrls.reduce((count, source) => {
+      const existingBrush = existingBrushesBySource.get(source);
+      const expectedRevision = getStockBrushAssetRevisionForSource(source);
+      const existingBrushIsCurrent = Boolean(
+        existingBrush && (!expectedRevision || existingBrush.stockAssetRevision === expectedRevision)
+      );
+      return count + (existingBrushIsCurrent || loadedBySource.has(source) ? 0 : 1);
+    }, 0);
+    if (unresolvedSourceCount) {
+      updateBrushStatus(
+        `Browsing ${state.brushes.length.toLocaleString()} brushes; ${unresolvedSourceCount.toLocaleString()} could not load.`
+      );
+    } else {
+      updateBrushStatus();
+    }
+    renderBrushGallery();
+    renderStockBrushButtons();
     updateEraseCursorGeometry();
     updateBrushCursorPreview();
     scheduleSessionSave();
@@ -14281,21 +20872,46 @@ async function loadAllStockBrushFolders() {
   updateBrushStatus("Loading all stock brushes...");
 
   try {
-    const loaded = await loadStockBrushFileData(files);
-    if (!loaded.length) {
-      updateBrushStatus("Could not load all stock brushes.");
+    const catalogSourceUrls = Array.from(
+      new Set(files.map((filePath) => getCanonicalStockBrushSource(encodeStockBrushPath(filePath))))
+    );
+    const loadedBySource = new Map();
+    const loaded = await loadBrushSourceData(catalogSourceUrls);
+    for (const brushData of loaded) {
+      loadedBySource.set(getBrushPrimarySourceUrl(brushData), brushData);
+    }
+    const missingAfterFirstLoad = catalogSourceUrls.filter(
+      (source) => !loadedBySource.has(source)
+    );
+    if (missingAfterFirstLoad.length) {
+      const retried = await loadBrushSourceData(missingAfterFirstLoad);
+      for (const brushData of retried) {
+        loadedBySource.set(getBrushPrimarySourceUrl(brushData), brushData);
+      }
+    }
+    const missingSourceCount = catalogSourceUrls.reduce(
+      (count, source) => count + (loadedBySource.has(source) ? 0 : 1),
+      0
+    );
+    if (missingSourceCount) {
+      updateBrushStatus(
+        `Could not load ${missingSourceCount.toLocaleString()} stock brush${missingSourceCount === 1 ? "" : "es"}. Try again.`
+      );
       return;
     }
+    const completeCatalog = catalogSourceUrls.map((source) => loadedBySource.get(source));
 
     const previousBrushUrls = state.brushes.map((brush) => brush.url);
-    state.brushes = loaded.map((brushData) => {
+    state.brushes = completeCatalog.map((brushData) => {
       const brush = {
         id: state.nextBrushId,
-        ...brushData
+        ...brushData,
+        enabled: true
       };
       state.nextBrushId += 1;
       return brush;
     });
+    resetBrushGalleryForBrushSetChange();
     clearBrushFrameCountJobs();
     state.soloBrushId = null;
     clearSelectedBrushes();
@@ -14322,8 +20938,47 @@ async function loadAllStockBrushFolders() {
   }
 }
 
+function removeStockBrushFolderFromActiveSelection(folderId) {
+  if (state.stockBrushLoadingFolderId) {
+    return false;
+  }
+
+  const folder = getStockBrushFolderById(folderId);
+  if (!folder) {
+    return false;
+  }
+
+  const activeFolderIds = getActiveStockBrushFolderIdSet();
+  if (!activeFolderIds.has(folder.id) || activeFolderIds.size <= 1) {
+    return false;
+  }
+
+  const folderSourceUrls = new Set(getStockBrushFolderSourceUrls(folder));
+  const removedUrls = [];
+  state.brushes = state.brushes.filter((brush) => {
+    if (folderSourceUrls.has(getBrushPrimarySourceUrl(brush))) {
+      removedUrls.push(brush.url);
+      return false;
+    }
+    return true;
+  });
+
+  activeFolderIds.delete(folder.id);
+  if (activeFolderIds.size) {
+    setActiveStockBrushFolders(
+      Array.from(activeFolderIds),
+      activeFolderIds.size > 1 ? "multi" : "single"
+    );
+  } else {
+    clearActiveStockBrushFolders();
+  }
+  refreshBrushDataAfterLoad(removedUrls);
+  return true;
+}
+
 function unloadBrushDataSelection() {
   if (!state.brushes.length) {
+    resetBrushGalleryForBrushSetChange();
     clearActiveStockBrushFolders();
     state.favoriteReturnState = null;
     clearActiveCustomBrushPreset();
@@ -14346,6 +21001,7 @@ function unloadBrushDataSelection() {
   clearActiveCustomBrushPreset();
   const previousBrushUrls = state.brushes.map((brush) => brush.url);
   state.brushes = [];
+  resetBrushGalleryForBrushSetChange();
   clearBrushFrameCountJobs();
   state.soloBrushId = null;
   clearSelectedBrushes();
@@ -14404,6 +21060,7 @@ async function loadBrushFiles(files) {
         frameCount: isGifUrl(dataUrl) || /\.gif$/i.test(file.name) ? null : 1,
         frameRange: null,
         cropRect: null,
+        tags: [],
         enabled: true,
         weightMode: "normal"
       });
@@ -14414,6 +21071,7 @@ async function loadBrushFiles(files) {
   }
 
   state.brushes = loaded;
+  resetBrushGalleryForBrushSetChange();
   clearBrushFrameCountJobs();
   state.soloBrushId = null;
   clearSelectedBrushes();
@@ -14544,13 +21202,24 @@ function startErasing(event) {
   const point = screenToWorld(event.clientX, event.clientY);
   const radiusWorld = getCurrentEraserDiameterWorld() / 2;
   const worldOrder = new Map();
-  const stamps = world.getElementsByClassName("stamp");
+  const stamps = getSceneRendererStampsInOrder();
   for (let index = 0; index < stamps.length; index += 1) {
     worldOrder.set(stamps[index], index);
   }
+  const strokeOrder = new Map();
+  const stampOrder = new Map();
+  for (let strokeIndex = 0; strokeIndex < state.strokes.length; strokeIndex += 1) {
+    const stroke = state.strokes[strokeIndex];
+    strokeOrder.set(stroke, strokeIndex);
+    for (let stampIndex = 0; stampIndex < stroke.elements.length; stampIndex += 1) {
+      stampOrder.set(stroke.elements[stampIndex], stampIndex);
+    }
+  }
   const removalContext = {
     records: [],
-    worldOrder
+    worldOrder,
+    strokeOrder,
+    stampOrder
   };
   const changed = eraseAtPoint(point.x, point.y, radiusWorld, removalContext);
 
@@ -14637,6 +21306,7 @@ function stopDrawing(pointerId) {
   }
   state.drawing = null;
   syncViewportPointerCursorClasses();
+  scheduleSceneRendererEvaluation();
 }
 
 function startShapeDrawing(event) {
@@ -15015,6 +21685,9 @@ function closeClearConfirmModal() {
 function setEraseMode(nextValue) {
   state.eraseMode = Boolean(nextValue);
   if (state.eraseMode) {
+    if (state.sceneRendererActive || state.sceneRendererPreparing) {
+      deactivateSceneRenderer();
+    }
     clearCursorTrail();
     cancelShapeDraft();
   }
@@ -15026,6 +21699,9 @@ function setEraseMode(nextValue) {
   }
   updateEraseModeUI();
   updateBrushCursorPreview();
+  if (!state.eraseMode) {
+    scheduleSceneRendererEvaluation();
+  }
 }
 
 function onExportSelectionPointerDown(event) {
@@ -15148,7 +21824,11 @@ function commitExportResolutionInput(axis, input) {
   if (!input || state.exportTask || String(input.value).trim() === "") {
     return;
   }
+  const beforeSetup = captureCurrentExportSetupSnapshot();
   setExportResolutionFromInput(axis, input.value);
+  pushExportCropHistoryStep(beforeSetup, captureCurrentExportSetupSnapshot(), {
+    requireBoundsChange: true
+  });
 }
 
 function onExportResolutionKeyDown(event, axis, input) {
@@ -15240,21 +21920,11 @@ if (editLayerList) {
       return;
     }
 
-    const animationButton = event.target.closest(".edit-layer-animation-button");
-    if (animationButton) {
-      event.preventDefault();
-      stroke.animationPaused = !stroke.animationPaused;
-      applyStrokeAnimationPaused(stroke);
-      selectEditLayer(stroke.id);
-      renderEditLayers();
-      scheduleSessionSave();
-      return;
-    }
-
     const sequenceButton = event.target.closest(".edit-layer-sequence-button");
     if (sequenceButton) {
       event.preventDefault();
       stroke.sequenceOpen = !stroke.sequenceOpen;
+      markStrokeSerializationDirty(stroke);
       selectEditLayer(stroke.id);
       renderEditLayers();
       scheduleSessionSave();
@@ -15331,6 +22001,20 @@ if (editLayerList) {
   });
 
   editLayerList.addEventListener("change", (event) => {
+    const freezeInput = event.target.closest(".edit-layer-freeze-input");
+    if (freezeInput) {
+      const panel = freezeInput.closest(".edit-layer-property-controls");
+      const stroke = getStrokeById(panel?.dataset.strokeId);
+      if (!stroke) {
+        return;
+      }
+      stroke.animationPaused = Boolean(freezeInput.checked);
+      applyStrokeAnimationPaused(stroke);
+      selectEditLayer(stroke.id);
+      scheduleSessionSave();
+      return;
+    }
+
     const settingInput = event.target.closest(".edit-layer-sequence-setting-input");
     if (settingInput) {
       const settingsPanelElement = settingInput.closest(".edit-layer-sequence-settings");
@@ -15410,7 +22094,7 @@ if (editLayerList) {
         settingInput.value,
         Number(settingInput.dataset.sequenceSlotIndex) || 0
       );
-      refreshStrokeSequenceEffect(stroke);
+      scheduleStrokeSequenceEffectRefresh(stroke);
       scheduleSessionSave();
       return;
     }
@@ -15423,7 +22107,7 @@ if (editLayerList) {
       getSequenceSettingInputValue(settingInput),
       Number(settingInput.dataset.sequenceSlotIndex) || 0
     );
-    refreshStrokeSequenceEffect(stroke);
+    scheduleStrokeSequenceEffectRefresh(stroke);
     const valueLabel = settingInput.parentElement?.querySelector(".edit-layer-sequence-setting-value");
     if (valueLabel) {
       const suffix = valueLabel.textContent.endsWith("ms")
@@ -15472,7 +22156,6 @@ if (editLayerList) {
 	    if (
 	      event.button !== 0 ||
       event.target.closest(".edit-layer-eye-button") ||
-      event.target.closest(".edit-layer-animation-button") ||
       event.target.closest(".edit-layer-sequence-button") ||
       event.target.closest(".edit-layer-sequence-enable-button") ||
       event.target.closest(".edit-layer-sequence-row") ||
@@ -15503,8 +22186,23 @@ if (stockBrushButtons) {
     }
     event.preventDefault();
     void loadStockBrushFolder(button.dataset.stockBrushFolderId || "", {
-      additive: event.ctrlKey || event.metaKey
+      additive: (event.ctrlKey || event.metaKey) && !state.browsingAllStockBrushes
     });
+  });
+  stockBrushButtons.addEventListener("contextmenu", (event) => {
+    const button = event.target.closest(".stock-brush-button");
+    if (!button || button.disabled) {
+      return;
+    }
+    if (removeStockBrushFolderFromActiveSelection(button.dataset.stockBrushFolderId || "")) {
+      event.preventDefault();
+    }
+  });
+}
+if (browseAllStockBrushesButton) {
+  browseAllStockBrushesButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void browseAllStockBrushFolders();
   });
 }
 if (loadAllStockBrushesButton) {
@@ -15534,11 +22232,100 @@ for (const presetContainer of [drawingBrushPresetButtons, brushesBrushPresetButt
     presetContainer.addEventListener("drop", onCustomBrushPresetDrop);
   }
 }
+if (brushGalleryPreviousPageButton) {
+  brushGalleryPreviousPageButton.addEventListener("click", () => {
+    setBrushGalleryPage(state.brushGalleryPage - 1);
+  });
+}
+if (brushGalleryNextPageButton) {
+  brushGalleryNextPageButton.addEventListener("click", () => {
+    setBrushGalleryPage(state.brushGalleryPage + 1);
+  });
+}
 if (brushSortSelect) {
   brushSortSelect.addEventListener("change", () => {
-    state.brushGallerySort = normalizeBrushGallerySort(brushSortSelect.value);
+    const nextSort = normalizeBrushGallerySort(brushSortSelect.value);
+    if (nextSort === "random") {
+      state.brushGalleryRandomSeed = createBrushGalleryRandomSeed();
+    }
+    state.brushGallerySort = nextSort;
+    resetBrushGalleryPage();
     renderBrushGallery();
+    brushGallery.scrollTop = 0;
     scheduleSessionSave();
+  });
+}
+if (brushGallerySearchInput) {
+  brushGallerySearchInput.addEventListener("input", () => {
+    const nextSearch = normalizeBrushGallerySearch(brushGallerySearchInput.value);
+    if (nextSearch === state.brushGallerySearch) {
+      return;
+    }
+    setBrushTagMenuOpen(false);
+    state.brushGallerySearch = nextSearch;
+    resetBrushGalleryPage();
+    renderBrushGallery();
+    brushGallery.scrollTop = 0;
+    scheduleSessionSave();
+  });
+}
+if (brushTagMenuButton) {
+  brushTagMenuButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    setBrushTagMenuOpen(!state.brushTagMenuOpen);
+  });
+  brushTagMenuButton.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
+    }
+    event.preventDefault();
+    setBrushTagMenuOpen(true);
+    const items = Array.from(brushTagMenu?.querySelectorAll(".brush-tag-menu-item") || []);
+    const item = event.key === "ArrowUp" ? items[items.length - 1] : items[0];
+    item?.focus();
+  });
+}
+if (brushTagMenu) {
+  brushTagMenu.addEventListener("click", (event) => {
+    const button = event.target.closest(".brush-tag-menu-item");
+    if (!button || !brushTagMenu.contains(button)) {
+      return;
+    }
+    event.preventDefault();
+    applyBrushTagSearch(button.dataset.brushTag || "");
+  });
+  brushTagMenu.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    const items = Array.from(brushTagMenu.querySelectorAll(".brush-tag-menu-item"));
+    if (!items.length) {
+      return;
+    }
+    event.preventDefault();
+    const activeIndex = Math.max(0, items.indexOf(document.activeElement));
+    let nextIndex = activeIndex;
+    if (event.key === "ArrowDown") {
+      nextIndex = (activeIndex + 1) % items.length;
+    } else if (event.key === "ArrowUp") {
+      nextIndex = (activeIndex - 1 + items.length) % items.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = items.length - 1;
+    }
+    items[nextIndex]?.focus();
+  });
+}
+if (brushSearchControls) {
+  brushSearchControls.addEventListener("focusout", (event) => {
+    const nextTarget = event.relatedTarget;
+    if (
+      state.brushTagMenuOpen &&
+      (!(nextTarget instanceof Node) || !brushSearchControls.contains(nextTarget))
+    ) {
+      setBrushTagMenuOpen(false);
+    }
   });
 }
 if (saveCompositionButton) {
@@ -15745,7 +22532,7 @@ if (drawModeButtons) {
       return;
     }
     event.preventDefault();
-    setDrawMode(button.dataset.drawMode || "pencil");
+    setDrawMode(getDrawModeFromButtonClick(button.dataset.drawMode || "pencil"));
   });
 }
 spraySpreadSlider.addEventListener("input", () => {
@@ -15953,6 +22740,13 @@ if (exportSeeBeyondToggle) {
     scheduleSessionSave();
   });
 }
+if (exportGuidelinesToggle) {
+  exportGuidelinesToggle.addEventListener("change", () => {
+    state.exportGuidelinesEnabled = exportGuidelinesToggle.checked;
+    updateExportGuidelinesUI();
+    scheduleSessionSave();
+  });
+}
 gifCountToggle.addEventListener("change", () => {
   state.showGifCountIndicator = gifCountToggle.checked;
   updateGifCountIndicator();
@@ -16050,6 +22844,25 @@ brushCropModal.addEventListener("click", (event) => {
 brushCropImage.addEventListener("load", () => {
   renderBrushCropModal();
 });
+if (brushCropZoomInput) {
+  brushCropZoomInput.addEventListener("input", () => {
+    setBrushCropZoomPercent(brushCropZoomInput.value);
+  });
+}
+if (brushCropZoomOutButton) {
+  brushCropZoomOutButton.addEventListener("click", () => {
+    setBrushCropZoomPercent(
+      Number(state.brushCropEditor.zoomPercent) - BRUSH_CROP_ZOOM_STEP_PERCENT
+    );
+  });
+}
+if (brushCropZoomInButton) {
+  brushCropZoomInButton.addEventListener("click", () => {
+    setBrushCropZoomPercent(
+      Number(state.brushCropEditor.zoomPercent) + BRUSH_CROP_ZOOM_STEP_PERCENT
+    );
+  });
+}
 if (brushCropWidthInput) {
   brushCropWidthInput.addEventListener("input", () => {
     state.brushCropEditor.outputWidth = clamp(
@@ -16327,6 +23140,16 @@ document.addEventListener("pointerdown", (event) => {
   }
   setTintPopoverOpen(false);
 });
+document.addEventListener("pointerdown", (event) => {
+  if (!state.brushTagMenuOpen || !brushSearchControls) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Node && brushSearchControls.contains(target)) {
+    return;
+  }
+  setBrushTagMenuOpen(false);
+});
 document.addEventListener("keydown", (event) => {
   state.ctrlOrMetaHeld = Boolean(event.ctrlKey || event.metaKey);
   if (event.key === "Escape" && state.exportTask) {
@@ -16354,6 +23177,12 @@ document.addEventListener("keydown", (event) => {
     exitExportMode({ focusButton: true });
     return;
   }
+  if (event.key === "Escape" && state.brushTagMenuOpen) {
+    event.preventDefault();
+    setBrushTagMenuOpen(false);
+    brushTagMenuButton?.focus();
+    return;
+  }
   if (event.key === "Escape" && state.tintPopoverOpen) {
     event.preventDefault();
     setTintPopoverOpen(false);
@@ -16363,15 +23192,35 @@ document.addEventListener("keydown", (event) => {
   const key = String(event.key || "").toLowerCase();
   const hasUndoModifier = event.ctrlKey || event.metaKey;
   if (hasUndoModifier && !event.altKey && key === "z") {
-    if (state.exportMode || state.placementTask || state.exportTask) {
+    if (state.placementTask || state.exportTask) {
       event.preventDefault();
       return;
     }
     event.preventDefault();
+    if (state.exportMode) {
+      if (state.exportDrag) {
+        if (event.shiftKey) {
+          return;
+        }
+        stopExportSelectionDrag(state.exportDrag.pointerId);
+      }
+      if (event.shiftKey) {
+        redoExportCropAdjustment();
+      } else {
+        undoExportCropAdjustment();
+      }
+      return;
+    }
+    if (state.editLayerMove) {
+      if (event.shiftKey) {
+        return;
+      }
+      stopEditLayerMove(state.editLayerMove.pointerId);
+    }
     if (event.shiftKey) {
-      redoLastStroke();
+      redoKeyboardHistoryAction();
     } else {
-      undoLastStroke();
+      undoKeyboardHistoryAction();
     }
     return;
   }
@@ -16461,7 +23310,14 @@ viewport.addEventListener("auxclick", (event) => {
 });
 window.addEventListener("pagehide", flushSessionSaveNow);
 window.addEventListener("beforeunload", flushSessionSaveNow);
+window.addEventListener("pageshow", () => {
+  lastLifecycleFlushRevision = -1;
+});
 window.addEventListener("resize", () => {
+  if (state.sceneRendererPreparing) {
+    noteSceneRendererMutation();
+  }
+  resizeSceneRenderer();
   updateEditLayerDeleteDropzonePosition();
   updateGifPauseButtonPosition();
   if (state.exportMode) {
@@ -16469,6 +23325,7 @@ window.addEventListener("resize", () => {
   }
   if (state.brushCropEditor.open) {
     renderBrushCropModal();
+    centerBrushCropSelectionInPreview();
   }
 });
 controlsPanel.addEventListener("scroll", () => {
@@ -16478,18 +23335,43 @@ controlsPanel.addEventListener("scroll", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
+    const now = performance.now();
+    for (const stroke of state.strokes) {
+      setStrokeSequenceClockPaused(stroke, true, now);
+    }
+    stopLayerSequenceLoop();
+    if (sceneRendererInitialized && (state.sceneRendererActive || state.sceneRendererPreparing)) {
+      postSceneRendererMessage("pause", { paused: true, now });
+    }
     flushSessionSaveNow();
+    return;
   }
+  const now = performance.now();
+  for (const stroke of state.strokes) {
+    setStrokeSequenceClockPaused(
+      stroke,
+      Boolean(state.gifAnimationsPaused || stroke.animationPaused),
+      now
+    );
+  }
+  if (sceneRendererInitialized && state.sceneRendererActive) {
+    resizeSceneRenderer();
+    syncSceneRendererCamera();
+    postSceneRendererMessage("pause", { paused: false, now });
+  } else {
+    scheduleSceneRendererEvaluation();
+  }
+  refreshLayerSequenceLoop();
 });
 gifPauseObserver.observe(document.body, { childList: true, subtree: true });
 
 async function initializeApp() {
   loadFavoriteBrushSources();
   loadCustomBrushPresetSources();
-  startLayerSequenceLoop();
   const restored = await restoreSessionState();
   if (restored) {
     updateFavoriteBrushButtons();
+    refreshLayerSequenceLoop();
     return;
   }
   applyCollapsedSliderGroupSnapshot(null);
@@ -16513,6 +23395,7 @@ async function initializeApp() {
   renderBrushGallery();
   renderStockBrushButtons();
   renderCamera();
+  refreshLayerSequenceLoop();
 }
 
 void initializeApp();

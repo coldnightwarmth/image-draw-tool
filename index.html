@@ -11,13 +11,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260513-sidebar-collapse">
+  <link rel="stylesheet" href="styles.css?v=20260721-optimization-closeout-v1">
 </head>
 <body>
   <div id="viewport" aria-label="Drawing canvas">
     <div id="world">
       <div id="exportBgImageLayer" hidden></div>
     </div>
+    <canvas id="sceneRenderCanvas" aria-hidden="true" hidden></canvas>
   </div>
   <div id="eraseCursor" aria-hidden="true"></div>
   <div id="shapePreview" aria-hidden="true"></div>
@@ -287,17 +288,60 @@
               &#10005;
             </button>
           </div>
+          <div id="brushSearchControls">
+            <input
+              id="brushGallerySearchInput"
+              type="search"
+              placeholder="search"
+              aria-label="Search GIFs by name or tag"
+              aria-controls="brushGallery"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="160"
+            >
+            <button
+              id="brushTagMenuButton"
+              type="button"
+              aria-label="Browse brush tags"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="brushTagMenu"
+              title="Browse brush tags"
+              disabled
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M2.5 2.5h5.25l5.75 5.75-5.25 5.25-5.75-5.75z"></path>
+                <circle cx="5.35" cy="5.35" r="1.05"></circle>
+              </svg>
+            </button>
+            <div id="brushTagMenu" role="menu" aria-label="Brush tags" hidden></div>
+          </div>
           <div id="brushSortControls">
             <label for="brushSortSelect" class="control-label inline-label">sort by</label>
             <select id="brushSortSelect" aria-label="Sort brush gallery">
               <option value="alpha">alphabetical</option>
+              <option value="random">random</option>
               <option value="area-asc">size small-big</option>
               <option value="area-desc">size big-small</option>
             </select>
           </div>
           <div id="brushGallery" hidden></div>
+          <nav id="brushGalleryPagination" aria-label="Brush gallery pages" hidden>
+            <button id="brushGalleryPreviousPageButton" type="button" aria-label="Previous brush gallery page" aria-controls="brushGallery" title="Previous page">←</button>
+            <span id="brushGalleryPageStatus" role="status" aria-live="polite" aria-atomic="true">1–60 of 60 · page 1/1</span>
+            <button id="brushGalleryNextPageButton" type="button" aria-label="Next brush gallery page" aria-controls="brushGallery" title="Next page">→</button>
+          </nav>
         </div>
-        <div id="stockBrushButtons" aria-label="Stock brush data"></div>
+        <div id="stockBrushButtons" aria-label="Stock brush data">
+          <button
+            id="loadAllStockBrushesButton"
+            class="stock-brush-all-button"
+            type="button"
+            aria-label="Activate all stock brushes"
+            aria-pressed="false"
+            title="Activate all stock brushes"
+          >ALL</button>
+        </div>
         <input
           id="brushInput"
           type="file"
@@ -306,7 +350,9 @@
           webkitdirectory
         >
 	        <p id="brushStatus">No brush data loaded.</p>
-	        <button id="loadAllStockBrushesButton" type="button">ALL</button>
+	        <div id="stockBrushBrowseRow">
+	          <button id="browseAllStockBrushesButton" type="button" aria-label="Browse all stock brushes" aria-pressed="false" title="Browse all stock brushes without activating them">Browse</button>
+	        </div>
 	        <div id="brushesFavoritesRow" class="favorites-loader-row">
 	          <div id="brushesBrushPresetButtons" class="custom-brush-preset-buttons" aria-label="Custom brush presets"></div>
 	          <button id="loadFavoriteBrushesFullButton" class="favorite-loader-button" type="button" aria-label="Load favorite brushes" title="Load favorite brushes">★</button>
@@ -372,13 +418,6 @@
         <label for="exportBackgroundToggle" class="control-label inline-label">export bkg?</label>
         <label class="ios-switch" for="exportBackgroundToggle">
           <input id="exportBackgroundToggle" type="checkbox" checked>
-          <span class="ios-switch-slider" aria-hidden="true"></span>
-        </label>
-      </div>
-      <div class="settings-row export-settings-row">
-        <label for="exportSeeBeyondToggle" class="control-label inline-label">see beyond?</label>
-        <label class="ios-switch" for="exportSeeBeyondToggle">
-          <input id="exportSeeBeyondToggle" type="checkbox" checked>
           <span class="ios-switch-slider" aria-hidden="true"></span>
         </label>
       </div>
@@ -478,6 +517,21 @@
       <div id="exportVideoActions">
         <button id="exportVideoButton" type="button" disabled>Render Video</button>
         <button id="exportVideoCancelButton" type="button" aria-label="Cancel video export" title="Cancel video export" disabled>&#10005;</button>
+      </div>
+      <hr class="export-controls-divider">
+      <div id="exportSeeBeyondRow" class="settings-row export-settings-row">
+        <label for="exportSeeBeyondToggle" class="control-label inline-label">see beyond?</label>
+        <label class="ios-switch" for="exportSeeBeyondToggle">
+          <input id="exportSeeBeyondToggle" type="checkbox" checked>
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div id="exportGuidelinesRow" class="settings-row export-settings-row">
+        <label for="exportGuidelinesToggle" class="control-label inline-label">guidelines</label>
+        <label class="ios-switch" for="exportGuidelinesToggle">
+          <input id="exportGuidelinesToggle" type="checkbox">
+          <span class="ios-switch-slider" aria-hidden="true"></span>
+        </label>
       </div>
     </section>
 
@@ -633,7 +687,7 @@
           <div class="brush-crop-shade" id="brushCropShadeRight"></div>
           <div class="brush-crop-shade" id="brushCropShadeBottom"></div>
           <div class="brush-crop-shade" id="brushCropShadeLeft"></div>
-    <div id="brushCropSelection">
+          <div id="brushCropSelection">
             <div class="brush-crop-edge" data-edge="top-left"></div>
             <div class="brush-crop-edge" data-edge="top-right"></div>
             <div class="brush-crop-edge" data-edge="bottom-right"></div>
@@ -644,6 +698,23 @@
             <div class="brush-crop-edge" data-edge="left"></div>
           </div>
         </div>
+      </div>
+      <div id="brushCropZoomControls" class="brush-crop-zoom-controls" aria-label="Crop preview zoom controls">
+        <span class="brush-crop-zoom-label">zoom:</span>
+        <button id="brushCropZoomOutButton" class="brush-crop-zoom-button" type="button" aria-label="Zoom crop preview out" aria-controls="brushCropStage">&#8722;</button>
+        <input
+          id="brushCropZoomInput"
+          type="range"
+          min="25"
+          max="400"
+          step="25"
+          value="100"
+          aria-label="Crop preview zoom"
+          aria-valuetext="100%"
+          aria-controls="brushCropStage"
+        >
+        <button id="brushCropZoomInButton" class="brush-crop-zoom-button" type="button" aria-label="Zoom crop preview in" aria-controls="brushCropStage">+</button>
+        <output id="brushCropZoomReadout" for="brushCropZoomInput">100%</output>
       </div>
       <div id="brushCropResolutionControls" class="brush-crop-resolution-controls">
         <input id="brushCropWidthInput" type="number" min="1" max="10000" step="1" aria-label="Brush draw width">
@@ -668,9 +739,10 @@
         <button type="button" class="brush-crop-probability-button" data-weight-mode="uncommon">Uncommon</button>
         <button type="button" class="brush-crop-probability-button" data-weight-mode="rare">Rare</button>
       </div>
+      <div id="brushCropTags" class="brush-crop-tags" aria-label="Brush tags" hidden></div>
       <div class="confirm-actions brush-crop-actions">
         <button id="brushCropConfirmButton" type="button">Confirm</button>
-        <button id="brushCropCancelButton" type="button">Cancel</button>
+        <button id="brushCropCancelButton" type="button">Back</button>
       </div>
     </div>
   </div>
@@ -682,6 +754,12 @@
     <div class="export-shade" id="exportShadeLeft"></div>
 
     <div id="exportSelection" aria-hidden="true">
+      <div id="exportGuidelines" aria-hidden="true">
+        <span class="export-guideline export-guideline-vertical export-guideline-one-third"></span>
+        <span class="export-guideline export-guideline-vertical export-guideline-two-thirds"></span>
+        <span class="export-guideline export-guideline-horizontal export-guideline-one-third"></span>
+        <span class="export-guideline export-guideline-horizontal export-guideline-two-thirds"></span>
+      </div>
       <div class="export-edge-handle" data-edge="top-left"></div>
       <div class="export-edge-handle" data-edge="top-right"></div>
       <div class="export-edge-handle" data-edge="bottom-right"></div>
@@ -722,7 +800,9 @@
     </div>
   </div>
 
-  <script src="stock-brushes.js?v=20260513-stock"></script>
-  <script src="app.js?v=20260514-picker-random-size"></script>
+  <script src="stock-brushes.js?v=20260721-all-gif-arc-export-v5"></script>
+  <script src="brush-metadata.js?v=20260721-all-gif-arc-export-v5"></script>
+  <script src="scene-occlusion.js?v=20260721-performance"></script>
+  <script src="app.js?v=20260721-optimization-closeout-v1"></script>
 </body>
 </html>
