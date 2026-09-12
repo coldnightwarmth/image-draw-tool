@@ -457,6 +457,10 @@ input {
   opacity: 0.78;
 }
 
+a.main-mode-button {
+  text-decoration: none;
+}
+
 .main-mode-button.is-active,
 .main-mode-button[aria-pressed="true"] {
   background: #b8b8b8;

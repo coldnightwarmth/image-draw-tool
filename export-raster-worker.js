@@ -1749,7 +1749,7 @@ function applyPixelation(job, context, width, height, pixelSize) {
   context.drawImage(reduced.canvas, 0, 0, reducedWidth, reducedHeight, 0, 0, width, height);
 }
 
-function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry) {
+function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale = 1) {
   if (!entry.tintLayers.length && !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) {
     context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     return;
@@ -1780,7 +1780,11 @@ function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entr
         { capability: true }
       );
     }
-    context.filter = `blur(${entry.blurAmount.toFixed(2)}px)`;
+    // Entry geometry and CSS filter lengths are expressed in scene pixels.
+    // Stamps are explicitly resized into output pixels, so scale the blur too;
+    // otherwise a downsampled GIF looks much blurrier than the live canvas.
+    const renderedBlurAmount = Math.max(0, entry.blurAmount * effectScale);
+    context.filter = `blur(${renderedBlurAmount.toFixed(2)}px)`;
   }
   context.imageSmoothingEnabled = entry.pixelateAmount > 0 ? false : entry.imageRendering === "auto";
   context.drawImage(scratch.canvas, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
@@ -1824,7 +1828,8 @@ function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
   context.imageSmoothingEnabled = entry.imageRendering === "auto";
   context.translate(centerX, centerY);
   context.rotate((entry.rotation * Math.PI) / 180);
-  drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry);
+  const effectScale = Math.sqrt(Math.max(0, Math.abs(scaleX * scaleY)));
+  drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
   context.restore();
 }
 

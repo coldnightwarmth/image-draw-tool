@@ -8,6 +8,40 @@ The dependency-free focused regression test for animated export crop membership 
 node scripts/test_export_and_lifecycle_regressions.mjs
 ```
 
+The finite-canvas composition generator has its own browser regression run:
+
+```sh
+node scripts/tests/run-generator-regression.mjs
+node scripts/tests/run-generator-bookmark-regression.mjs
+node scripts/tests/run-generator-export-regression.mjs
+```
+
+It verifies the clean `/generator/` route, the complete ALL catalog, exact and
+distinct placement counts, line/spray/box/scatter generation, fixed-property
+controls, independent category/tag filtering, deterministic sequence effects,
+explicit min/max randomization ranges, opt-in seeded rerolls for GIF count,
+lower-biased margin amounts with an extra compact-margin preference, randomized
+margin behavior, enabled sequence effects, and range endpoints, the weighted 300-GIF
+new-composition ceiling, full-gamut seeded backgrounds, finite
+bounds, placement margins, foreground crop margins, paused crop inspection,
+per-stamp uncropped exceptions, live/export pixel-grid parity for the pixelate
+sequence effect, active composition/settings restoration after
+refresh, live same-seed control updates with stable GIF assignments,
+in-place sequence-only updates that retain every GIF node and all unrelated
+visual properties, background-only rerolls, the persisted 30-action undo history, the 500-item
+local bookmark gallery and its alternate sidebar view, persistent-storage enrollment,
+portable bookmark backup/restore,
+and browser console errors. The dedicated export run
+decodes animated sources, exports image-cycle and blur compositions at the
+canvas's exact pixel dimensions, and checks that selected stamps can render
+above the crop. It validates the animated RIFF/WebP frame structure, lossless
+VP8L color, auto-loop timing, and cancellation. It also validates the split
+download control's six-second, 30fps H.264 MP4 at the canvas's full dimensions,
+including its playable duration and AVC container metadata. The generator reuses
+the production animation raster pipeline for both formats, then packages
+full-color WebP frames without GIF palette quantization or streams those frames
+through the browser's native H.264 encoder for MP4.
+
 That focused test also verifies large-scene session saves use one immediate
 leading write plus a non-starving, fixed-deadline trailing throttle during
 continuous slider/input activity.
