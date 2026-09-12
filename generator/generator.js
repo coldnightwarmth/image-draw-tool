@@ -1,12 +1,13 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20260911-workspace-actions-v3";
+  const GENERATOR_ASSET_REVISION = "20260911-random-floor-v1";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
   const DEFAULT_HEIGHT = 800;
   const DEFAULT_COUNT = 120;
+  const MIN_RANDOMIZED_COUNT = 5;
   const MAX_GENERATED_COUNT = 300;
   const DEFAULT_MARGIN = 0;
   const MAX_MARGIN_FRACTION = 0.45;
@@ -965,9 +966,9 @@
   }
 
   function randomizeGeneratedCount(random, minimum, maximum) {
-    const lower = Math.min(minimum, maximum);
     const upper = Math.max(minimum, maximum);
-    const weightedRatio = Math.pow(random(), 1.45);
+    const lower = Math.min(upper, Math.max(MIN_RANDOMIZED_COUNT, Math.min(minimum, maximum)));
+    const weightedRatio = Math.pow(random(), 2.15);
     return Math.min(upper, lower + Math.floor(weightedRatio * (upper - lower + 1)));
   }
 
@@ -977,12 +978,12 @@
       return 0;
     }
 
-    // Keep the distribution broad, but gently favor the lower half and give
-    // compact margins an additional chance when the available range allows it.
-    if (upper >= 64 && random() < 0.12) {
+    // Keep the full range reachable, but strongly favor its lower half and give
+    // compact margins a dedicated extra chance when the range allows it.
+    if (upper >= 64 && random() < 0.2) {
       return randomInteger(random, 0, 63);
     }
-    return Math.min(upper, Math.floor(Math.pow(random(), 1.18) * (upper + 1)));
+    return Math.min(upper, Math.floor(Math.pow(random(), 1.75) * (upper + 1)));
   }
 
   function randomizeGenerationControls(seed) {
@@ -1114,7 +1115,9 @@
     elements.categorySelectionCount.textContent = `${categorySelected} selected`;
     elements.tagSelectionCount.textContent = `${tagSelected} selected`;
 
-    const maximumCount = Math.min(MAX_GENERATED_COUNT, pool.length);
+    const maximumCount = pool.length
+      ? Math.min(MAX_GENERATED_COUNT, Math.max(MIN_RANDOMIZED_COUNT, pool.length))
+      : 0;
     const minimumCount = 1;
     elements.count.min = String(minimumCount);
     elements.count.max = String(Math.max(1, maximumCount));

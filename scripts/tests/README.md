@@ -20,10 +20,11 @@ It verifies the clean `/generator/` route, the complete ALL catalog, exact and
 distinct placement counts, line/spray/box/scatter generation, fixed-property
 controls, independent category/tag filtering, deterministic sequence effects,
 explicit min/max randomization ranges, opt-in seeded rerolls for GIF count,
-lower-biased margin amounts with an extra compact-margin preference, randomized
-margin behavior, enabled sequence effects, and range endpoints, the weighted 300-GIF
-new-composition ceiling, full-gamut seeded backgrounds, finite
-bounds, placement margins, foreground crop margins, paused crop inspection,
+strongly lower-biased margin amounts with an extra compact-margin preference,
+randomized margin behavior, enabled sequence effects, and range endpoints, the
+manual 1–4 GIF range, hard five-GIF randomized floor, strongly lower-biased
+300-GIF new-composition ceiling, full-gamut seeded backgrounds, finite bounds,
+placement margins, foreground crop margins, paused crop inspection,
 per-stamp uncropped exceptions, live/export pixel-grid parity for the pixelate
 sequence effect, active composition/settings restoration after
 refresh, live same-seed control updates with stable GIF assignments,

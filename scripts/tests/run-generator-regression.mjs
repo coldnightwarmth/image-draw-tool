@@ -438,6 +438,17 @@ try {
   assert.equal(await page.locator("#generatorTagPanel").isHidden(), true);
   assert.equal(await page.locator("#generatorCountSlider").getAttribute("min"), "1");
   assert.equal(await page.locator("#generatorCountSlider").getAttribute("max"), "300");
+  assert.deepEqual(
+    await page.locator("#generatorCountSlider").evaluate((input) => {
+      const values = [1, 2, 3, 4].map((value) => {
+        input.value = String(value);
+        return Number(input.value);
+      });
+      input.value = "120";
+      return values;
+    }),
+    [1, 2, 3, 4]
+  );
   assert.equal(await page.locator("#generatorAspectLockButton").count(), 0);
   assert.equal(await page.locator("#generatorExportCancelButton").isHidden(), true);
   assert.equal(await page.locator(
@@ -663,6 +674,49 @@ try {
     randomizedGeneration.controls.sequenceSpeedRange
   );
 
+  const lowBiasSamples = await page.evaluate(async () => {
+    const samples = [];
+    for (let index = 0; index < 32; index += 1) {
+      const seed = Math.imul(index + 1, 0x9e3779b9) >>> 0;
+      await window.GeneratorApp.generate(seed);
+      samples.push({
+        count: Number(document.getElementById("generatorCountSlider")?.value),
+        margin: Number(document.getElementById("generatorMarginSlider")?.value),
+        marginMaximum: Number(document.getElementById("generatorMarginSlider")?.max)
+      });
+    }
+    return samples;
+  });
+  const lowBiasSummary = {
+    minimumCount: Math.min(...lowBiasSamples.map(({ count }) => count)),
+    countBelow100: lowBiasSamples.filter(({ count }) => count < 100).length,
+    countBelow50: lowBiasSamples.filter(({ count }) => count < 50).length,
+    marginInLowerHalf: lowBiasSamples.filter(
+      ({ margin, marginMaximum }) => margin < marginMaximum / 2
+    ).length,
+    marginBelow64: lowBiasSamples.filter(({ margin }) => margin < 64).length
+  };
+  assert.ok(
+    lowBiasSummary.minimumCount >= 5,
+    `expected randomized compositions to contain at least five GIFs, got ${JSON.stringify(lowBiasSummary)}`
+  );
+  assert.ok(
+    lowBiasSummary.countBelow100 >= 17,
+    `expected a strong sub-100 GIF bias, got ${JSON.stringify(lowBiasSummary)}`
+  );
+  assert.ok(
+    lowBiasSummary.countBelow50 >= 12,
+    `expected a strong sub-50 GIF bias, got ${JSON.stringify(lowBiasSummary)}`
+  );
+  assert.ok(
+    lowBiasSummary.marginInLowerHalf >= 25,
+    `expected a strong lower-half margin bias, got ${JSON.stringify(lowBiasSummary)}`
+  );
+  assert.ok(
+    lowBiasSummary.marginBelow64 >= 14,
+    `expected an extra compact-margin bias, got ${JSON.stringify(lowBiasSummary)}`
+  );
+
   await page.locator(
     "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorSequenceEffectsRandomToggle, #generatorSizeRangeRandomToggle, #generatorSequenceSpeedRangeRandomToggle"
   ).evaluateAll((inputs) => {
@@ -727,6 +781,7 @@ try {
     inputs[0]?.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await setRange(page, "#generatorCountSlider", 12);
+  await page.waitForTimeout(250);
   await generateWithSeed(page, 0xabcdef01, 12);
   await page.waitForFunction(
     () => Boolean(document.querySelector(".generator-pixelate-proxy:not([hidden])")),
@@ -826,8 +881,9 @@ try {
   assert.deepEqual(sourceSummary.selectedTags, ["meme"]);
   assert.equal(sourceSummary.activePoolSize, 2);
   assert.equal(await page.locator("#generatorCountSlider").getAttribute("min"), "1");
-  assert.equal(await page.locator("#generatorCountSlider").getAttribute("max"), "2");
-  assert.equal(await page.locator("#generatorCountSlider").inputValue(), "2");
+  assert.equal(await page.locator("#generatorCountSlider").getAttribute("max"), "5");
+  assert.equal(await page.locator("#generatorCountSlider").inputValue(), "5");
+  await setRange(page, "#generatorCountSlider", 2);
   await generateWithSeed(page, 0x55556666, 2);
   const memeOnly = await getCompositionSnapshot(page);
   assert.equal(memeOnly.count, 2);
