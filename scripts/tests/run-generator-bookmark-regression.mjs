@@ -213,12 +213,14 @@ async function getControlSnapshot(page) {
     margin: document.getElementById("generatorMarginSlider")?.value,
     marginMode: document.querySelector('input[name="generatorMarginMode"]:checked')?.value,
     count: document.getElementById("generatorCountSlider")?.value,
+    markCount: document.getElementById("generatorMarkCountSlider")?.value,
+    gifsPerMark: document.getElementById("generatorGifsPerMarkSlider")?.value,
     modes: Array.from(document.querySelectorAll(".generator-mode-checkbox:checked"))
       .map((input) => input.value),
     randomize: Array.from(document.querySelectorAll(".generator-random-checkbox"))
       .map((input) => [input.id, input.checked]),
     generationRandomize: Array.from(document.querySelectorAll(
-      "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorSequenceEffectsRandomToggle"
+      "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorMarkCountRandomToggle, #generatorGifsPerMarkRandomToggle, #generatorSequenceEffectsRandomToggle"
     )).map((input) => [input.id, input.checked]),
     rangeRandomize: Array.from(document.querySelectorAll(".generator-range-random-checkbox"))
       .map((input) => [input.id, input.checked]),
@@ -329,7 +331,14 @@ try {
   await setRange(page, "#generatorMarginSlider", 88);
   await page.locator('.generator-margin-mode-choice:has(input[value="crop"]) span').click();
   await setRange(page, "#generatorCountSlider", 24);
-  await page.locator("#generatorRandomizeAllToggle").uncheck({ force: true });
+  await setRange(page, "#generatorMarkCountSlider", 7);
+  await setRange(page, "#generatorGifsPerMarkSlider", 3);
+  await page.locator(".generator-random-checkbox").evaluateAll((inputs) => {
+    for (const input of inputs) {
+      input.checked = false;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
   await setRange(page, "#generatorSizeSlider", 74);
   await setRange(page, "#generatorSpacingSlider", 49);
   await setRange(page, "#generatorRotationSlider", 17);
@@ -347,6 +356,14 @@ try {
     generatorOpacityRandomMaxSlider: 91,
     generatorTintAmountRandomMinSlider: 11,
     generatorTintAmountRandomMaxSlider: 88,
+    generatorPitchRandomMinSlider: -22,
+    generatorPitchRandomMaxSlider: 33,
+    generatorYawRandomMinSlider: -28,
+    generatorYawRandomMaxSlider: 36,
+    generatorHorizontalStretchRandomMinSlider: 72,
+    generatorHorizontalStretchRandomMaxSlider: 148,
+    generatorVerticalStretchRandomMinSlider: 65,
+    generatorVerticalStretchRandomMaxSlider: 135,
     generatorSpraySpreadRandomMinSlider: 20,
     generatorSpraySpreadRandomMaxSlider: 1800,
     generatorLineAngleRandomMinSlider: -74,
@@ -384,6 +401,8 @@ try {
     "generatorMarginRandomToggle",
     "generatorMarginModeRandomToggle",
     "generatorCountRandomToggle",
+    "generatorMarkCountRandomToggle",
+    "generatorGifsPerMarkRandomToggle",
     "generatorSequenceEffectsRandomToggle",
     "generatorSizeRangeRandomToggle",
     "generatorSequenceIntensityRangeRandomToggle"
@@ -439,6 +458,8 @@ try {
     margin: true,
     marginMode: true,
     count: true,
+    markCount: true,
+    gifsPerMark: true,
     sequenceEffects: true
   });
   assert.equal(records[0].controls.rangeRandomize.size, true);

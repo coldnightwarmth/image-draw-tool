@@ -23,7 +23,7 @@ import { decompressFrame, parseGIF } from "./gifuct-js.bundle.mjs";
  *     can fall back wholesale to the main-thread exporter.
  *
  *   render-frame (the alias `render` is also accepted)
- *     { jobId, timeMs?, output?: "png" | "rgba" | "bitmap", entries?, background? }
+ *     { jobId, timeMs?, output?: "png" | "rgba" | "bitmap" | "webp", entries?, background?, generatorComposite? }
  *     Renders one frame and replies with `rendered`. Optional entries/background
  *     replace the prepared values for that frame; all referenced assets must
  *     have been declared during prepare. `rgba` transfers an ArrayBuffer and
@@ -51,7 +51,7 @@ import { decompressFrame, parseGIF } from "./gifuct-js.bundle.mjs";
  * StampDTO array order is paint/z order and is never regrouped or reordered:
  *   {
  *     sourceId? | sourceUrl,
- *     centerX, centerY, width, height, rotation?, opacity?, blendMode?,
+ *     centerX, centerY, width, height, rotation?, transformMatrix?: [a,b,c,d], opacity?, blendMode?,
  *     imageRendering?: "auto" | "pixelated",
  *     tintSettings?: { color, amountPercent } | { layers: [...] },
  *     tintLayers?: [{ color, amountPercent }],
@@ -462,6 +462,12 @@ function normalizeEntry(raw, index) {
   if (opacity < 0 || opacity > 1) {
     throw new ExportRasterError("INVALID_STAMP_OPACITY", `Stamp ${index} opacity must be from 0 to 1.`);
   }
+  const rawTransformMatrix = Array.isArray(raw.transformMatrix)
+    ? raw.transformMatrix.slice(0, 4).map(Number)
+    : null;
+  const transformMatrix = rawTransformMatrix?.length === 4 && rawTransformMatrix.every(Number.isFinite)
+    ? rawTransformMatrix
+    : null;
   return {
     sourceId,
     sourceUrl,
@@ -470,6 +476,7 @@ function normalizeEntry(raw, index) {
     width,
     height,
     rotation: finiteNumber(raw.rotation, 0),
+    transformMatrix,
     opacity,
     blendMode: normalizeBlendMode(raw.blendMode),
     imageRendering: raw.imageRendering === "auto" ? "auto" : "pixelated",
@@ -1827,7 +1834,19 @@ function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
   }
   context.imageSmoothingEnabled = entry.imageRendering === "auto";
   context.translate(centerX, centerY);
-  context.rotate((entry.rotation * Math.PI) / 180);
+  if (entry.transformMatrix) {
+    const [a, b, c, d] = entry.transformMatrix;
+    context.transform(
+      a,
+      b * scaleY / Math.max(0.000001, scaleX),
+      c * scaleX / Math.max(0.000001, scaleY),
+      d,
+      0,
+      0
+    );
+  } else {
+    context.rotate((entry.rotation * Math.PI) / 180);
+  }
   const effectScale = Math.sqrt(Math.max(0, Math.abs(scaleX * scaleY)));
   drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
   context.restore();
@@ -1936,18 +1955,118 @@ async function rasterizeFrame(job, frame = {}, progress = null) {
   return { canvas: output.canvas, context: output.context, timeMs };
 }
 
+function parseExportColor(color) {
+  const normalized = String(color || "").trim();
+  const match = /^#([0-9a-f]{6})$/i.exec(normalized);
+  const value = Number.parseInt(match?.[1] || "ffffff", 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255, 255];
+}
+
+function maskGeneratorCropMargin(data, width, height, background, crop) {
+  if (!crop || crop.margin <= 0) {
+    return;
+  }
+  const marginX = Math.min(
+    Math.floor(width / 2),
+    Math.max(0, Math.round(crop.margin * width / Math.max(1, crop.width)))
+  );
+  const marginY = Math.min(
+    Math.floor(height / 2),
+    Math.max(0, Math.round(crop.margin * height / Math.max(1, crop.height)))
+  );
+  const [red, green, blue, alpha] = parseExportColor(background);
+  const fillPixel = (offset) => {
+    data[offset] = red;
+    data[offset + 1] = green;
+    data[offset + 2] = blue;
+    data[offset + 3] = alpha;
+  };
+  for (let y = 0; y < height; y += 1) {
+    const fullRow = y < marginY || y >= height - marginY;
+    const endX = fullRow ? width : marginX;
+    for (let x = 0; x < endX; x += 1) {
+      fillPixel((y * width + x) * 4);
+    }
+    if (!fullRow) {
+      for (let x = width - marginX; x < width; x += 1) {
+        fillPixel((y * width + x) * 4);
+      }
+    }
+  }
+}
+
+function flattenRgbaOverBackground(data, background) {
+  const [backgroundRed, backgroundGreen, backgroundBlue] = parseExportColor(background);
+  for (let offset = 0; offset < data.length; offset += 4) {
+    const alpha = data[offset + 3] / 255;
+    const inverseAlpha = 1 - alpha;
+    data[offset] = Math.round(data[offset] * alpha + backgroundRed * inverseAlpha);
+    data[offset + 1] = Math.round(data[offset + 1] * alpha + backgroundGreen * inverseAlpha);
+    data[offset + 2] = Math.round(data[offset + 2] * alpha + backgroundBlue * inverseAlpha);
+    data[offset + 3] = 255;
+  }
+}
+
+function compositeRgbaOver(base, overlay) {
+  for (let offset = 0; offset < base.length; offset += 4) {
+    const alpha = overlay[offset + 3] / 255;
+    if (alpha <= 0) {
+      continue;
+    }
+    const inverseAlpha = 1 - alpha;
+    base[offset] = Math.round(overlay[offset] * alpha + base[offset] * inverseAlpha);
+    base[offset + 1] = Math.round(overlay[offset + 1] * alpha + base[offset + 1] * inverseAlpha);
+    base[offset + 2] = Math.round(overlay[offset + 2] * alpha + base[offset + 2] * inverseAlpha);
+    base[offset + 3] = 255;
+  }
+}
+
+async function encodeWebpResult(job, rendered, retainedReadback = false) {
+  const { outputWidth: width, outputHeight: height } = job.scene;
+  assertJobMemoryBudget(job, {
+    phase: "webp-encode", transientBytes: getSafeRgbaByteLength(width, height, retainedReadback ? 2 : 1)
+  });
+  const blob = await rendered.canvas.convertToBlob({ type: "image/webp", quality: 1 });
+  throwIfCancelled(job);
+  if (blob.type !== "image/webp") {
+    throw new ExportRasterError("WEBP_OUTPUT_UNAVAILABLE", "Full-quality WebP encoding is unavailable.");
+  }
+  return { payload: { kind: "webp", width, height, timeMs: rendered.timeMs, blob }, transfer: [] };
+}
+
 async function encodeFrameResult(job, frame, outputKind, progress = null) {
   const rendered = await rasterizeFrame(job, frame, progress);
   throwIfCancelled(job);
   const width = job.scene.outputWidth;
   const height = job.scene.outputHeight;
   const frameByteLength = getSafeRgbaByteLength(width, height);
-  if (outputKind === "rgba") {
+  // Most frames need no pixel processing: encode directly without an RGBA
+  // readback, main-thread transfer, or second full-size encoding canvas.
+  if (outputKind === "webp" && !(frame.generatorComposite?.crop?.margin > 0) &&
+      !frame.generatorComposite?.overlayEntries?.length) {
+    return encodeWebpResult(job, rendered);
+  }
+  if (outputKind === "rgba" || outputKind === "webp") {
     assertJobMemoryBudget(job, {
       phase: "rgba-readback",
-      transientBytes: frameByteLength
+      transientBytes: frameByteLength * (frame.generatorComposite?.overlayEntries?.length ? 2 : 1)
     });
     const image = rendered.context.getImageData(0, 0, width, height);
+    const composite = frame.generatorComposite;
+    if (composite) {
+      const overlays = Array.isArray(composite.overlayEntries) ? composite.overlayEntries : [];
+      if (overlays.length) flattenRgbaOverBackground(image.data, composite.background);
+      maskGeneratorCropMargin(image.data, width, height, composite.background, composite.crop);
+      if (overlays.length) {
+        const overlay = await rasterizeFrame(job, { timeMs: frame.timeMs, entries: overlays });
+        compositeRgbaOver(image.data, overlay.context.getImageData(0, 0, width, height).data);
+      }
+    }
+    throwIfCancelled(job);
+    if (outputKind === "webp") {
+      rendered.context.putImageData(image, 0, 0);
+      return encodeWebpResult(job, rendered, true);
+    }
     return {
       payload: {
         kind: "rgba",
@@ -1996,7 +2115,7 @@ async function encodeFrameResult(job, frame, outputKind, progress = null) {
 }
 
 function normalizeOutputKind(value) {
-  if (value === "rgba" || value === "bitmap" || value === "png") {
+  if (value === "rgba" || value === "bitmap" || value === "png" || value === "webp") {
     return value;
   }
   return "png";
@@ -2187,12 +2306,13 @@ async function handlePrepare(message) {
   try {
     await enqueueJobOperation(job, async () => {
       job.scene = normalizeScene(message.scene);
-      // Peak frame production retains the output and artwork canvases plus
-      // one encoder/readback/transfer-sized allocation.
+      // Legacy callers retain two canvases and one transfer allocation. The
+      // generator also retains pixels while compositing/encoding; reserve that
+      // fourth frame before decoding assets, rather than failing at render time.
       job.outputWorkingSetReserveBytes = getSafeRgbaByteLength(
         job.scene.outputWidth,
         job.scene.outputHeight,
-        3
+        message.scene?.outputWorkingSetFrames === 4 ? 4 : 3
       );
       assertJobMemoryBudget(job, { phase: "output-working-set" });
       const rawAssets = Array.isArray(message.assets) ? message.assets : message.scene?.assets;
@@ -2282,7 +2402,8 @@ async function handleRenderFrame(message) {
   const frame = {
     timeMs: message.timeMs,
     entries: message.entries,
-    background: message.background
+    background: message.background,
+    generatorComposite: message.generatorComposite
   };
   const result = await enqueueJobOperation(job, async () => {
     if (!job.prepared) {

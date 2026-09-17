@@ -109,3 +109,27 @@ The console fallback uses synthetic pointer events because DevTools cannot creat
 `functional` contains pass/fail details and before/after scene snapshots for each invariant. `phases` isolates generation, history, culling, sequencing, and visibility timings. `telemetry.frames` reports frame-gap percentiles and counts over 32/50/100 ms; `telemetry.longTasks` contains every browser long-task entry plus aggregate duration.
 
 For device-to-device comparisons, keep the stamp count, viewport, pointer-move steps, browser version, and headless/headful setting identical.
+
+## Generator performance and device checks
+
+```sh
+node scripts/tests/run-generator-performance-regression.mjs
+```
+
+Exercises desktop, high-DPI touch/tablet, and phone-sized Chromium viewports,
+with 4× CPU throttling for the touch profiles. Reports frame gaps and browser
+style/layout counters for 120 simultaneous pixelation effects; timing numbers
+are diagnostics, not hardware-independent pass thresholds. Verifies interrupted
+and competing pointer handling, orientation changes, thumbnail node/URL reuse,
+and exact 1200×800 RGBA and lossless WebP parity for crop margins, translucent
+uncropped stamps, all-uncropped scenes, and direct WebP encoding.
+
+For a diagnostic comparison restoring only the former interleaved pixelation
+read/write order in the test server (without editing production files):
+
+```sh
+GENERATOR_UNBATCHED_BASELINE=1 node scripts/tests/run-generator-performance-regression.mjs
+```
+
+Run timing comparisons sequentially on an otherwise idle machine. CPU/DPI/touch
+emulation does not reproduce Surface graphics drivers, Windows, or mobile Safari.

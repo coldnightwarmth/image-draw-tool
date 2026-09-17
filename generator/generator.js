@@ -1,12 +1,16 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20260911-random-floor-v1";
+  const GENERATOR_ASSET_REVISION = "20260917-performance-v2";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
   const DEFAULT_HEIGHT = 800;
   const DEFAULT_COUNT = 120;
+  const DEFAULT_MARK_COUNT = 12;
+  const MAX_MARK_COUNT = 64;
+  const DEFAULT_GIFS_PER_MARK = 100;
+  const MAX_GIFS_PER_MARK = 100;
   const MIN_RANDOMIZED_COUNT = 5;
   const MAX_GENERATED_COUNT = 300;
   const DEFAULT_MARGIN = 0;
@@ -86,6 +90,7 @@
     marginOverlay: byId("generatorMarginOverlay"),
     emptyState: byId("generatorEmptyState"),
     dimensionBadge: byId("generatorDimensionBadge"),
+    canvasInfoDismiss: byId("generatorCanvasInfoDismissButton"),
     canvasMeta: byId("generatorCanvasMeta"),
     status: byId("generatorStatus"),
     catalogCount: byId("generatorCatalogCount"),
@@ -110,10 +115,17 @@
     count: byId("generatorCountSlider"),
     countValue: byId("generatorCountValue"),
     countRandom: byId("generatorCountRandomToggle"),
+    markCount: byId("generatorMarkCountSlider"),
+    markCountValue: byId("generatorMarkCountValue"),
+    markCountRandom: byId("generatorMarkCountRandomToggle"),
+    gifsPerMark: byId("generatorGifsPerMarkSlider"),
+    gifsPerMarkValue: byId("generatorGifsPerMarkValue"),
+    gifsPerMarkRandom: byId("generatorGifsPerMarkRandomToggle"),
+    gifsPerMarkGroup: document.querySelector(".generator-gifs-per-mark-group"),
     generate: byId("generatorGenerateButton"),
     backgroundOnly: byId("generatorBackgroundButton"),
     undo: byId("generatorUndoButton"),
-    randomizeAll: byId("generatorRandomizeAllToggle"),
+    randomizationPresets: Array.from(document.querySelectorAll("[data-randomization-preset]")),
     sequenceEnabled: byId("generatorSequenceEnabledToggle"),
     sequenceEffectsRandom: byId("generatorSequenceEffectsRandomToggle"),
     sequenceStateLabel: byId("generatorSequenceStateLabel"),
@@ -142,6 +154,8 @@
 
   const SINGLE_RANGE_OUTPUTS = [
     ["generatorCountSlider", "generatorCountValue", ""],
+    ["generatorMarkCountSlider", "generatorMarkCountValue", ""],
+    ["generatorGifsPerMarkSlider", "generatorGifsPerMarkValue", ""],
     ["generatorMarginSlider", "generatorMarginValue", "px"]
   ].map(([inputId, outputId, suffix]) => ({
     input: byId(inputId),
@@ -155,6 +169,10 @@
     ["rotation", "generatorRotationSlider", "generatorRotationRandomMinSlider", "generatorRotationRandomMaxSlider", "generatorRotationValue", "°"],
     ["opacity", "generatorOpacitySlider", "generatorOpacityRandomMinSlider", "generatorOpacityRandomMaxSlider", "generatorOpacityValue", "%"],
     ["tint", "generatorTintAmountSlider", "generatorTintAmountRandomMinSlider", "generatorTintAmountRandomMaxSlider", "generatorTintAmountValue", "%"],
+    ["pitch", "generatorPitchSlider", "generatorPitchRandomMinSlider", "generatorPitchRandomMaxSlider", "generatorPitchValue", "°"],
+    ["yaw", "generatorYawSlider", "generatorYawRandomMinSlider", "generatorYawRandomMaxSlider", "generatorYawValue", "°"],
+    ["horizontalStretch", "generatorHorizontalStretchSlider", "generatorHorizontalStretchRandomMinSlider", "generatorHorizontalStretchRandomMaxSlider", "generatorHorizontalStretchValue", "%"],
+    ["verticalStretch", "generatorVerticalStretchSlider", "generatorVerticalStretchRandomMinSlider", "generatorVerticalStretchRandomMaxSlider", "generatorVerticalStretchValue", "%"],
     ["spraySpread", "generatorSpraySpreadSlider", "generatorSpraySpreadRandomMinSlider", "generatorSpraySpreadRandomMaxSlider", "generatorSpraySpreadValue", "px"],
     ["lineAngle", "generatorLineAngleSlider", "generatorLineAngleRandomMinSlider", "generatorLineAngleRandomMaxSlider", "generatorLineAngleValue", "°"],
     ["lineLength", "generatorLineLengthSlider", "generatorLineLengthRandomMinSlider", "generatorLineLengthRandomMaxSlider", "generatorLineLengthValue", "px"],
@@ -197,6 +215,10 @@
     rotation: "generatorRotationRandomToggle",
     opacity: "generatorOpacityRandomToggle",
     tint: "generatorTintRandomToggle",
+    pitch: "generatorPitchRandomToggle",
+    yaw: "generatorYawRandomToggle",
+    horizontalStretch: "generatorHorizontalStretchRandomToggle",
+    verticalStretch: "generatorVerticalStretchRandomToggle",
     spraySpread: "generatorSpraySpreadRandomToggle",
     lineAngle: "generatorLineAngleRandomToggle",
     lineLength: "generatorLineLengthRandomToggle",
@@ -214,6 +236,8 @@
     margin: elements.marginRandom,
     marginMode: elements.marginModeRandom,
     count: elements.countRandom,
+    markCount: elements.markCountRandom,
+    gifsPerMark: elements.gifsPerMarkRandom,
     sequenceEffects: elements.sequenceEffectsRandom
   };
 
@@ -268,6 +292,7 @@
     lockedAspectRatio: DEFAULT_WIDTH / DEFAULT_HEIGHT,
     generationToken: 0,
     generating: false,
+    canvasInfoHidden: false,
     cropInspectionActive: false,
     pixelatePreviewFrameId: null,
     pixelatePreviewLastUpdate: 0,
@@ -642,9 +667,14 @@
     scheduleActiveSessionSave();
   }
 
+  let indexedSpecs = null;
+  let specsByIndex = new Map();
   function getCurrentSpecForImage(image) {
-    const index = Number(image?.dataset?.generatorIndex);
-    return state.currentSpecs.find((spec) => Number(spec.index) === index) || null;
+    if (indexedSpecs !== state.currentSpecs) {
+      indexedSpecs = state.currentSpecs;
+      specsByIndex = new Map(indexedSpecs.map((spec) => [Number(spec.index), spec]));
+    }
+    return specsByIndex.get(Number(image?.dataset?.generatorIndex)) || null;
   }
 
   function applyUncroppedStateToImage(image, spec, paintIndex = 0) {
@@ -1009,6 +1039,24 @@
         Math.min(Number(elements.count.max) || MAX_GENERATED_COUNT, MAX_GENERATED_COUNT)
       ));
     }
+    if (GENERATION_RANDOM_TOGGLES.markCount?.checked) {
+      const maximum = Math.min(
+        MAX_MARK_COUNT,
+        Math.max(1, Number(elements.count.value) || DEFAULT_COUNT)
+      );
+      elements.markCount.value = String(randomInteger(
+        deriveGenerationControlRandom(seed, "mark-count"),
+        1,
+        maximum
+      ));
+    }
+    if (GENERATION_RANDOM_TOGGLES.gifsPerMark?.checked) {
+      elements.gifsPerMark.value = String(randomInteger(
+        deriveGenerationControlRandom(seed, "gifs-per-mark"),
+        1,
+        MAX_GIFS_PER_MARK
+      ));
+    }
     if (GENERATION_RANDOM_TOGGLES.sequenceEffects?.checked) {
       const random = deriveGenerationControlRandom(seed, "sequence-effects");
       const effectInputs = Array.from(
@@ -1061,8 +1109,10 @@
     if (!control?.wrapper || !control.minimum || !control.maximum) {
       return;
     }
+    let activePointerId = null;
     control.wrapper.addEventListener("pointerdown", (event) => {
-      if (event.button !== undefined && event.button !== 0) {
+      if (activePointerId !== null || event.isPrimary === false ||
+          (event.button !== undefined && event.button !== 0)) {
         return;
       }
       const rect = control.wrapper.getBoundingClientRect();
@@ -1074,16 +1124,21 @@
       const handle = minimumDistance === maximumDistance
         ? (targetValue <= (bounds.minimum + bounds.maximum) / 2 ? control.minimum : control.maximum)
         : (minimumDistance < maximumDistance ? control.minimum : control.maximum);
-      const changedBound = handle === control.minimum ? "minimum" : "maximum";
       event.preventDefault();
       handle.focus({ preventScroll: true });
+      activePointerId = event.pointerId;
       control.wrapper.setPointerCapture?.(event.pointerId);
       const move = (moveEvent) => {
+        if (moveEvent.pointerId !== activePointerId) return;
         setRangeHandleFromPointer(control, handle, moveEvent.clientX);
-        updateRandomRangeControl(control, changedBound);
       };
       const finish = (finishEvent) => {
-        control.wrapper.releasePointerCapture?.(finishEvent.pointerId);
+        if (finishEvent.pointerId !== activePointerId) return;
+        activePointerId = null;
+        if (control.wrapper.hasPointerCapture?.(finishEvent.pointerId)) {
+          control.wrapper.releasePointerCapture(finishEvent.pointerId);
+        }
+        control.wrapper.removeEventListener("lostpointercapture", finish);
         control.wrapper.removeEventListener("pointermove", move);
         control.wrapper.removeEventListener("pointerup", finish);
         control.wrapper.removeEventListener("pointercancel", finish);
@@ -1091,6 +1146,7 @@
       control.wrapper.addEventListener("pointermove", move);
       control.wrapper.addEventListener("pointerup", finish);
       control.wrapper.addEventListener("pointercancel", finish);
+      control.wrapper.addEventListener("lostpointercapture", finish);
       move(event);
     }, { capture: true });
   }
@@ -1178,15 +1234,58 @@
     elements.status.classList.toggle("is-error", isError);
   }
 
-  function syncRandomizeAllToggle() {
-    const toggles = Object.values(RANDOM_TOGGLES).filter(Boolean);
-    const checkedCount = toggles.filter((toggle) => toggle.checked).length;
-    elements.randomizeAll.checked = checkedCount === toggles.length;
-    elements.randomizeAll.indeterminate = checkedCount > 0 && checkedCount < toggles.length;
-    elements.randomizeAll.closest(".ios-switch")?.classList.toggle(
-      "is-indeterminate",
-      elements.randomizeAll.indeterminate
-    );
+  function getAllRandomizationToggles() {
+    return Array.from(new Set([
+      ...Object.values(RANDOM_TOGGLES),
+      ...Object.values(GENERATION_RANDOM_TOGGLES),
+      ...Object.values(RANGE_RANDOM_TOGGLES),
+      elements.sequenceEnabled
+    ].filter(Boolean)));
+  }
+
+  function updateGifsPerMarkVisibility() {
+    const visible = Boolean(RANDOM_TOGGLES.gif?.checked);
+    elements.gifsPerMarkGroup.hidden = !visible;
+  }
+
+  function randomizationPresetMatches(preset) {
+    return getAllRandomizationToggles().every((toggle) => {
+      if (preset === "on") {
+        return toggle.checked;
+      }
+      if (preset === "off") {
+        return !toggle.checked;
+      }
+      return toggle.checked === toggle.defaultChecked;
+    });
+  }
+
+  function syncRandomizationPresetButtons() {
+    for (const button of elements.randomizationPresets) {
+      button.setAttribute(
+        "aria-pressed",
+        String(randomizationPresetMatches(button.dataset.randomizationPreset))
+      );
+    }
+  }
+
+  function applyRandomizationPreset(preset) {
+    for (const toggle of getAllRandomizationToggles()) {
+      toggle.checked = preset === "on"
+        ? true
+        : preset === "off"
+          ? false
+          : toggle.defaultChecked;
+    }
+    RANDOM_RANGE_CONTROLS.forEach((control) => updateRandomRangeControl(control));
+    updateSequenceControlUI();
+    updateGifsPerMarkVisibility();
+    syncRandomizationPresetButtons();
+    if (state.currentCount) {
+      markSettingsPending({ affectsBackground: true });
+    } else {
+      scheduleActiveSessionSave();
+    }
   }
 
   function updateAspectLockUI() {
@@ -1275,16 +1374,32 @@
         return [control.key, { minimum: bounds.minimum, maximum: bounds.maximum }];
       })
     );
+    const count = normalizeInteger(
+      elements.count.value,
+      DEFAULT_COUNT,
+      Number(elements.count.min) || 1,
+      Number(elements.count.max) || 500
+    );
+    const markCount = normalizeInteger(
+      elements.markCount.value,
+      DEFAULT_MARK_COUNT,
+      1,
+      Math.min(MAX_MARK_COUNT, count)
+    );
+    elements.markCount.value = String(markCount);
+    elements.markCountValue.textContent = String(markCount);
     return {
       width: dimensions.width,
       height: dimensions.height,
       margin: singles.generatorMarginSlider,
       marginMode: getMarginMode(),
-      count: normalizeInteger(
-        elements.count.value,
-        DEFAULT_COUNT,
-        Number(elements.count.min) || 1,
-        Number(elements.count.max) || 500
+      count,
+      markCount,
+      gifsPerMark: normalizeInteger(
+        elements.gifsPerMark.value,
+        DEFAULT_GIFS_PER_MARK,
+        1,
+        MAX_GIFS_PER_MARK
       ),
       pool: getActiveCatalog(),
       sourceMode: state.sourceMode,
@@ -1305,6 +1420,10 @@
       opacity: fixedValues.opacity,
       tintAmount: fixedValues.tint,
       tintColor: elements.tintColor.value,
+      pitch: fixedValues.pitch,
+      yaw: fixedValues.yaw,
+      horizontalStretch: fixedValues.horizontalStretch,
+      verticalStretch: fixedValues.verticalStretch,
       spraySpread: fixedValues.spraySpread,
       lineAngle: fixedValues.lineAngle,
       lineLength: fixedValues.lineLength,
@@ -1599,18 +1718,29 @@
     const modeCounts = Object.fromEntries(settings.modes.map((mode) => [mode, 0]));
     let queue = [];
     let remaining = settings.count;
-    let motifId = 0;
+    const targetMarkCount = Math.min(
+      normalizeInteger(settings.markCount, DEFAULT_MARK_COUNT, 1, MAX_MARK_COUNT),
+      settings.count
+    );
 
-    while (remaining > 0) {
+    for (let motifId = 0; motifId < targetMarkCount; motifId += 1) {
       if (!queue.length) {
         queue = settings.randomize.modeMix
           ? shuffle(settings.modes, random)
           : MODE_ORDER.filter((mode) => settings.modes.includes(mode));
       }
       const mode = queue.shift();
-      const modesStillDue = queue.length;
-      const availableForChunk = Math.max(1, remaining - modesStillDue);
-      const chunkSize = getChunkSize(mode, availableForChunk, random, geometrySettings);
+      const marksRemaining = targetMarkCount - motifId;
+      const maximumChunkSize = Math.max(1, remaining - (marksRemaining - 1));
+      const idealChunkSize = getChunkSize(mode, maximumChunkSize, random, geometrySettings);
+      const averageChunkSize = remaining / marksRemaining;
+      const chunkSize = marksRemaining === 1
+        ? remaining
+        : clamp(
+            Math.round(averageChunkSize * 0.7 + idealChunkSize * 0.3),
+            1,
+            maximumChunkSize
+          );
       const anchor = chooseBestAnchor(
         anchors,
         geometrySettings.width,
@@ -1631,7 +1761,6 @@
       points.push(...motifPoints.slice(0, remaining));
       modeCounts[mode] = (modeCounts[mode] || 0) + Math.min(motifPoints.length, remaining);
       remaining -= Math.min(motifPoints.length, remaining);
-      motifId += 1;
     }
     const finalPoints = points.slice(0, settings.count);
     if (placementInset > 0) {
@@ -1687,6 +1816,102 @@
     return ((hue * 60) + 360) % 360;
   }
 
+  function composeStampTransform(markTransform, rotationDegrees) {
+    const transform = markTransform && typeof markTransform === "object"
+      ? markTransform
+      : { a: 1, b: 0, c: 0, d: 1 };
+    const radians = (Number(rotationDegrees) || 0) * Math.PI / 180;
+    const cosine = Math.cos(radians);
+    const sine = Math.sin(radians);
+    const a = Number.isFinite(Number(transform.a)) ? Number(transform.a) : 1;
+    const b = Number.isFinite(Number(transform.b)) ? Number(transform.b) : 0;
+    const c = Number.isFinite(Number(transform.c)) ? Number(transform.c) : 0;
+    const d = Number.isFinite(Number(transform.d)) ? Number(transform.d) : 1;
+    return [
+      a * cosine + c * sine,
+      b * cosine + d * sine,
+      -a * sine + c * cosine,
+      -b * sine + d * cosine
+    ];
+  }
+
+  function formatCssMatrix(matrix) {
+    return `matrix(${matrix.map((value) => Number(value).toFixed(6)).join(", ")}, 0, 0)`;
+  }
+
+  function applyMarkTransforms(specs, settings, random) {
+    const specsByMotif = new Map();
+    for (const spec of specs) {
+      const motifSpecs = specsByMotif.get(spec.motifId) || [];
+      motifSpecs.push(spec);
+      specsByMotif.set(spec.motifId, motifSpecs);
+    }
+    for (const motifSpecs of specsByMotif.values()) {
+      const centerX = motifSpecs.reduce((sum, spec) => sum + spec.x, 0) / motifSpecs.length;
+      const centerY = motifSpecs.reduce((sum, spec) => sum + spec.y, 0) / motifSpecs.length;
+      const pitch = settings.randomize.pitch
+        ? sampleConfiguredRange(settings, "pitch", random)
+        : settings.pitch;
+      const yaw = settings.randomize.yaw
+        ? sampleConfiguredRange(settings, "yaw", random)
+        : settings.yaw;
+      const horizontalStretch = settings.randomize.horizontalStretch
+        ? sampleConfiguredRange(settings, "horizontalStretch", random)
+        : settings.horizontalStretch;
+      const verticalStretch = settings.randomize.verticalStretch
+        ? sampleConfiguredRange(settings, "verticalStretch", random)
+        : settings.verticalStretch;
+      const pitchRadians = pitch * Math.PI / 180;
+      const yawRadians = yaw * Math.PI / 180;
+      const horizontalScale = Math.max(0, horizontalStretch) / 100;
+      const verticalScale = Math.max(0, verticalStretch) / 100;
+      const markTransform = {
+        a: Math.cos(yawRadians) * horizontalScale,
+        b: -Math.sin(pitchRadians) * Math.sin(yawRadians) * horizontalScale,
+        c: 0,
+        d: Math.cos(pitchRadians) * verticalScale,
+        pitch,
+        yaw,
+        horizontalStretch,
+        verticalStretch,
+        centerX,
+        centerY
+      };
+      const transformedPositions = motifSpecs.map((spec) => {
+        const offsetX = spec.x - centerX;
+        const offsetY = spec.y - centerY;
+        return {
+          spec,
+          x: centerX + markTransform.a * offsetX + markTransform.c * offsetY,
+          y: centerY + markTransform.b * offsetX + markTransform.d * offsetY
+        };
+      });
+      const minimumX = Math.min(...transformedPositions.map(({ x }) => x));
+      const maximumX = Math.max(...transformedPositions.map(({ x }) => x));
+      const minimumY = Math.min(...transformedPositions.map(({ y }) => y));
+      const maximumY = Math.max(...transformedPositions.map(({ y }) => y));
+      const shiftX = minimumX < 0
+        ? -minimumX
+        : maximumX > settings.width
+          ? settings.width - maximumX
+          : 0;
+      const shiftY = minimumY < 0
+        ? -minimumY
+        : maximumY > settings.height
+          ? settings.height - maximumY
+          : 0;
+      for (const { spec, x, y } of transformedPositions) {
+        spec.x = clamp(x + shiftX, 0, settings.width);
+        spec.y = clamp(y + shiftY, 0, settings.height);
+        spec.markTransform = {
+          ...markTransform,
+          centerX: centerX + shiftX,
+          centerY: centerY + shiftY
+        };
+      }
+    }
+  }
+
   function buildVisualSpecs(points, settings, random, preferredSources = []) {
     const brushBag = createBrushBag(settings.pool, random);
     const poolBySource = new Map(settings.pool.map((brush) => [brush.source, brush]));
@@ -1695,23 +1920,75 @@
       ? null
       : (preferredBrushes.find(Boolean) || brushBag.next());
     const usedSources = new Set();
-    const nextUnusedBrush = () => {
+    const nextPaletteBrush = (paletteSources) => {
       for (let attempt = 0; attempt < settings.pool.length; attempt += 1) {
         const candidate = brushBag.next();
-        if (candidate && !usedSources.has(candidate.source)) {
+        if (
+          candidate &&
+          !usedSources.has(candidate.source) &&
+          !paletteSources.has(candidate.source)
+        ) {
           return candidate;
         }
       }
-      return brushBag.next();
+      for (let attempt = 0; attempt < settings.pool.length; attempt += 1) {
+        const candidate = brushBag.next();
+        if (candidate && !paletteSources.has(candidate.source)) {
+          return candidate;
+        }
+      }
+      return null;
     };
+    const motifPointIndexes = new Map();
+    points.forEach((point, index) => {
+      const indexes = motifPointIndexes.get(point.motifId) || [];
+      indexes.push(index);
+      motifPointIndexes.set(point.motifId, indexes);
+    });
+    const motifBrushes = new Map();
+    if (settings.randomize.gif) {
+      for (const [motifId, indexes] of motifPointIndexes.entries()) {
+        const targetCount = Math.min(
+          normalizeInteger(settings.gifsPerMark, DEFAULT_GIFS_PER_MARK, 1, MAX_GIFS_PER_MARK),
+          indexes.length,
+          settings.pool.length
+        );
+        const palette = [];
+        const paletteSources = new Set();
+        for (const index of indexes) {
+          const preferredBrush = preferredBrushes[index];
+          if (preferredBrush && !paletteSources.has(preferredBrush.source)) {
+            palette.push(preferredBrush);
+            paletteSources.add(preferredBrush.source);
+            usedSources.add(preferredBrush.source);
+          }
+          if (palette.length >= targetCount) {
+            break;
+          }
+        }
+        while (palette.length < targetCount) {
+          const brush = nextPaletteBrush(paletteSources);
+          if (!brush) {
+            break;
+          }
+          palette.push(brush);
+          paletteSources.add(brush.source);
+          usedSources.add(brush.source);
+        }
+        motifBrushes.set(motifId, palette);
+      }
+    }
+    const motifOffsets = new Map();
     const sizeRange = getConfiguredRange(settings, "size");
     const opacityRange = getConfiguredRange(settings, "opacity");
     const tintRange = getConfiguredRange(settings, "tint");
     const specs = points.map((point, index) => {
-      const preferredBrush = preferredBrushes[index];
+      const palette = motifBrushes.get(point.motifId) || [];
+      const motifOffset = motifOffsets.get(point.motifId) || 0;
       const brush = settings.randomize.gif
-        ? (preferredBrush && !usedSources.has(preferredBrush.source) ? preferredBrush : nextUnusedBrush())
+        ? palette[motifOffset % Math.max(1, palette.length)]
         : fixedBrush;
+      motifOffsets.set(point.motifId, motifOffset + 1);
       if (!brush) {
         return null;
       }
@@ -1790,6 +2067,8 @@
         longestSide
       };
     }).filter(Boolean);
+
+    applyMarkTransforms(specs, settings, random);
 
     specs.sort((left, right) => right.longestSide - left.longestSide || left.index - right.index);
     return {
@@ -2142,7 +2421,7 @@
     return positiveModulo((currentTime - delay) / duration, 1);
   }
 
-  function updateGeneratorPixelatePreview(image) {
+  function updateGeneratorPixelatePreview(image, presentation) {
     const spec = getCurrentSpecForImage(image);
     const sequence = spec?.sequence;
     if (
@@ -2153,7 +2432,7 @@
     ) {
       return false;
     }
-    const progress = getGeneratorLiveSequenceProgress(image, sequence);
+    const progress = presentation.progress;
     if (progress === null) {
       return true;
     }
@@ -2194,7 +2473,7 @@
       return true;
     }
 
-    const computed = getComputedStyle(image);
+    const computed = presentation;
     proxy.style.left = image.style.left;
     proxy.style.top = image.style.top;
     proxy.style.width = image.style.width;
@@ -2213,7 +2492,7 @@
 
   function runGeneratorPixelatePreviews(now) {
     state.pixelatePreviewFrameId = null;
-    if (state.cropInspectionActive) {
+    if (state.cropInspectionActive || document.hidden) {
       return;
     }
     if (now - state.pixelatePreviewLastUpdate < PIXELATE_PREVIEW_INTERVAL_MS) {
@@ -2224,9 +2503,22 @@
     const images = Array.from(
       elements.composition.querySelectorAll("img.generator-sequence-pixelate")
     );
+    // Snapshot all animation/style reads before any proxy writes. Interleaving
+    // them forces a style/layout flush for every stamp.
+    const presentations = images.map((image) => {
+      const sequence = getCurrentSpecForImage(image)?.sequence;
+      const computed = getComputedStyle(image);
+      return {
+        progress: sequence ? getGeneratorLiveSequenceProgress(image, sequence) : null,
+        opacity: computed.opacity,
+        transform: computed.transform,
+        filter: computed.filter,
+        zIndex: computed.zIndex
+      };
+    });
     let hasPendingPreview = false;
-    for (const image of images) {
-      hasPendingPreview = updateGeneratorPixelatePreview(image) || hasPendingPreview;
+    for (let index = 0; index < images.length; index += 1) {
+      hasPendingPreview = updateGeneratorPixelatePreview(images[index], presentations[index]) || hasPendingPreview;
     }
     if (images.length || hasPendingPreview) {
       scheduleGeneratorPixelatePreview();
@@ -2234,7 +2526,7 @@
   }
 
   function scheduleGeneratorPixelatePreview() {
-    if (state.pixelatePreviewFrameId !== null || state.cropInspectionActive) {
+    if (state.pixelatePreviewFrameId !== null || state.cropInspectionActive || document.hidden) {
       return;
     }
     state.pixelatePreviewFrameId = requestAnimationFrame(runGeneratorPixelatePreviews);
@@ -2299,6 +2591,10 @@
     const preservedCycle = clearSequenceSpecFromImage(image, spec, sequence);
     image.style.setProperty("--generator-base-opacity", String(spec.opacity));
     image.style.setProperty("--generator-base-rotation", `${spec.rotation}deg`);
+    image.style.setProperty(
+      "--generator-base-transform",
+      formatCssMatrix(composeStampTransform(spec.markTransform, spec.rotation))
+    );
     if (!sequence) {
       return;
     }
@@ -2371,7 +2667,7 @@
     image.style.width = `${spec.width}px`;
     image.style.height = `${spec.height}px`;
     image.style.opacity = String(spec.opacity);
-    image.style.transform = `rotate(${spec.rotation}deg)`;
+    image.style.transform = formatCssMatrix(composeStampTransform(spec.markTransform, spec.rotation));
     image.style.filter = spec.filter;
     image.style.zIndex = String(index + 1);
     image.dataset.generatorMode = spec.mode;
@@ -2386,6 +2682,14 @@
     image.dataset.generatorRotation = spec.rotation.toFixed(3);
     image.dataset.generatorOpacity = spec.opacity.toFixed(4);
     image.dataset.generatorTintAmount = spec.tintAmount.toFixed(4);
+    image.dataset.generatorMarkPitch = Number(spec.markTransform?.pitch || 0).toFixed(3);
+    image.dataset.generatorMarkYaw = Number(spec.markTransform?.yaw || 0).toFixed(3);
+    image.dataset.generatorMarkHorizontalStretch = Number(
+      spec.markTransform?.horizontalStretch ?? 100
+    ).toFixed(3);
+    image.dataset.generatorMarkVerticalStretch = Number(
+      spec.markTransform?.verticalStretch ?? 100
+    ).toFixed(3);
     for (const key of SAMPLED_GEOMETRY_KEYS) {
       if (Number.isFinite(Number(spec[key]))) {
         image.dataset[key] = Number(spec[key]).toFixed(3);
@@ -2526,6 +2830,7 @@
       tintHue: spec.tintHue,
       filter: spec.filter,
       longestSide: spec.longestSide,
+      markTransform: spec.markTransform ? { ...spec.markTransform } : null,
       uncropped: Boolean(spec.uncropped),
       sequence: spec.sequence ? { ...spec.sequence } : null
     };
@@ -2570,6 +2875,24 @@
         tintHue: ((Number(raw.tintHue) || 0) % 360 + 360) % 360,
         filter: String(raw.filter || ""),
         longestSide: Math.max(width, height, Number(raw.longestSide) || 0),
+        markTransform: raw.markTransform && typeof raw.markTransform === "object"
+          ? {
+              a: Number.isFinite(Number(raw.markTransform.a)) ? Number(raw.markTransform.a) : 1,
+              b: Number.isFinite(Number(raw.markTransform.b)) ? Number(raw.markTransform.b) : 0,
+              c: Number.isFinite(Number(raw.markTransform.c)) ? Number(raw.markTransform.c) : 0,
+              d: Number.isFinite(Number(raw.markTransform.d)) ? Number(raw.markTransform.d) : 1,
+              pitch: Number(raw.markTransform.pitch) || 0,
+              yaw: Number(raw.markTransform.yaw) || 0,
+              horizontalStretch: Number.isFinite(Number(raw.markTransform.horizontalStretch))
+                ? Number(raw.markTransform.horizontalStretch)
+                : 100,
+              verticalStretch: Number.isFinite(Number(raw.markTransform.verticalStretch))
+                ? Number(raw.markTransform.verticalStretch)
+                : 100,
+              centerX: Number(raw.markTransform.centerX) || 0,
+              centerY: Number(raw.markTransform.centerY) || 0
+            }
+          : { a: 1, b: 0, c: 0, d: 1, pitch: 0, yaw: 0, horizontalStretch: 100, verticalStretch: 100 },
         uncropped: Boolean(raw.uncropped),
         sequence: raw.sequence && typeof raw.sequence === "object" ? { ...raw.sequence } : null
       };
@@ -2629,6 +2952,12 @@
     const scalar = Number(value) || 0;
     if (key === "rotation" || key === "lineAngle") {
       return [-180, 180];
+    }
+    if (key === "pitch" || key === "yaw") {
+      return [-45, 45];
+    }
+    if (key === "horizontalStretch" || key === "verticalStretch") {
+      return [60, 140];
     }
     if (key === "opacity") {
       return [Math.max(1, scalar - 48), scalar];
@@ -2707,6 +3036,10 @@
     for (const input of ALL_RANGE_INPUTS) {
       if (controls.ranges && Object.prototype.hasOwnProperty.call(controls.ranges, input.id)) {
         input.value = String(controls.ranges[input.id]);
+      } else if (input === elements.markCount) {
+        input.value = String(DEFAULT_MARK_COUNT);
+      } else if (input === elements.gifsPerMark) {
+        input.value = String(DEFAULT_GIFS_PER_MARK);
       }
     }
     restoreLegacyRangeEndpoints(controls);
@@ -2735,7 +3068,8 @@
     updateRangeOutputs();
     updateAspectLockUI();
     updateMarginModeUI();
-    syncRandomizeAllToggle();
+    updateGifsPerMarkVisibility();
+    syncRandomizationPresetButtons();
     updateSequenceControlUI();
     setSourceMode(controls.sourceMode);
     setSequencePaused(Boolean(controls.sequencePaused));
@@ -2748,6 +3082,8 @@
       margin: settings.margin,
       marginMode: settings.marginMode,
       count: settings.count,
+      markCount: settings.markCount,
+      gifsPerMark: settings.gifsPerMark,
       sourceMode: settings.sourceMode,
       sourceLabel: settings.sourceLabel,
       modes: settings.modes.slice(),
@@ -3035,7 +3371,9 @@
       currentBookmarkId: state.currentBookmarkId,
       controls: captureControlState(),
       composition: captureCurrentComposition(),
-      history: state.history.slice(-MAX_HISTORY_ACTIONS).map(cloneStoredValue)
+      // IDBObjectStore.put synchronously structured-clones this record. Avoid
+      // cloning the entire 30-action history a second time on the UI thread.
+      history: state.history.slice(-MAX_HISTORY_ACTIONS)
     };
   }
 
@@ -3262,7 +3600,20 @@
     state.bookmarkObjectUrls = [];
   }
 
+  let renderedBookmarks = null;
   function renderBookmarkGallery() {
+    if (renderedBookmarks && renderedBookmarks.length === state.bookmarks.length &&
+        renderedBookmarks.every((record, index) => record === state.bookmarks[index])) {
+      Array.from(elements.bookmarkGallery.children).forEach((card, index) => {
+        const current = state.bookmarks[index].id === state.currentBookmarkId;
+        card.classList.toggle("is-current", current);
+        const button = card.querySelector(".generator-bookmark-load");
+        if (current) button.setAttribute("aria-current", "true");
+        else button.removeAttribute("aria-current");
+      });
+      return;
+    }
+    renderedBookmarks = state.bookmarks.slice();
     revokeBookmarkObjectUrls();
     elements.bookmarkGallery.replaceChildren();
     elements.bookmarkCount.textContent = String(state.bookmarks.length);
@@ -3285,6 +3636,8 @@
         const objectUrl = URL.createObjectURL(record.thumbnailBlob);
         state.bookmarkObjectUrls.push(objectUrl);
         image.className = "generator-bookmark-preview";
+        image.loading = "lazy";
+        image.decoding = "async";
         image.src = objectUrl;
         image.alt = "";
         loadButton.appendChild(image);
@@ -3402,7 +3755,32 @@
     state.currentCount = specs.length;
     state.currentSeed = Number(record.composition.seed) >>> 0;
     state.currentSpecs = specs;
-    state.currentSettingsUsed = { ...settings, count: specs.length };
+    const restoredMarkCount = Number.isFinite(Number(settings.markCount))
+      ? normalizeInteger(
+          settings.markCount,
+          DEFAULT_MARK_COUNT,
+          1,
+          Math.min(MAX_MARK_COUNT, specs.length)
+        )
+      : new Set(specs.map((spec) => spec.motifId)).size;
+    state.currentSettingsUsed = {
+      ...settings,
+      count: specs.length,
+      markCount: restoredMarkCount,
+      gifsPerMark: normalizeInteger(
+        settings.gifsPerMark,
+        DEFAULT_GIFS_PER_MARK,
+        1,
+        MAX_GIFS_PER_MARK
+      )
+    };
+    if (!Object.prototype.hasOwnProperty.call(
+      record.controls?.ranges || {},
+      "generatorMarkCountSlider"
+    )) {
+      elements.markCount.value = String(restoredMarkCount);
+      elements.markCountValue.textContent = elements.markCount.value;
+    }
     state.currentBackground = background;
     state.currentModeCounts = { ...(record.composition.modeCounts || {}) };
     state.currentUniqueSourceCount = new Set(specs.map((spec) => spec.brush.source)).size;
@@ -3848,10 +4226,10 @@
         throwIfExportCancelled(task);
         return request("prepare", { scene }, EXPORT_PREPARE_TIMEOUT_MS);
       },
-      async renderFrame(timeMs, entries) {
+      async renderFrame(timeMs, entries, options = {}) {
         const message = await request(
           "render-frame",
-          { output: "rgba", timeMs, entries },
+          { output: "rgba", timeMs, entries, ...options },
           EXPORT_FRAME_TIMEOUT_MS
         );
         return message.output;
@@ -4257,7 +4635,8 @@
       centerY,
       width: Math.max(0.1, width),
       height: Math.max(0.1, height),
-      rotation,
+      rotation: 0,
+      transformMatrix: composeStampTransform(spec.markTransform, rotation),
       opacity: clamp(opacity, 0, 1),
       blendMode: "normal",
       imageRendering: sequence?.effect === "pixelate" ? "pixelated" : "auto",
@@ -4278,8 +4657,14 @@
         return;
       }
       const current = assetUsage.get(source) || { width: 1, height: 1 };
-      current.width = Math.max(current.width, Math.ceil(spec.width * scaleX * 1.3));
-      current.height = Math.max(current.height, Math.ceil(spec.height * scaleY * 1.3));
+      const matrix = composeStampTransform(spec.markTransform, spec.rotation);
+      const transformScale = Math.max(
+        1,
+        Math.hypot(matrix[0], matrix[1]),
+        Math.hypot(matrix[2], matrix[3])
+      );
+      current.width = Math.max(current.width, Math.ceil(spec.width * scaleX * transformScale * 1.3));
+      current.height = Math.max(current.height, Math.ceil(spec.height * scaleY * transformScale * 1.3));
       assetUsage.set(source, current);
     };
     for (const spec of specs) {
@@ -4312,6 +4697,8 @@
         matteColor: transparentBackground ? "" : background
       },
       assets,
+      // Reserve both canvases plus readback/compositing or encoding storage.
+      outputWorkingSetFrames: 4,
       memoryBudgetBytes: getExportRasterBudgetBytes()
     };
   }
@@ -4321,66 +4708,6 @@
     const match = /^#([0-9a-f]{6})$/i.exec(normalized);
     const value = Number.parseInt(match?.[1] || "ffffff", 16);
     return [(value >> 16) & 255, (value >> 8) & 255, value & 255, 255];
-  }
-
-  function maskGeneratorCropMargin(data, width, height, background) {
-    if (state.currentMarginMode !== "crop" || state.currentMargin <= 0) {
-      return;
-    }
-    const marginX = Math.min(
-      Math.floor(width / 2),
-      Math.max(0, Math.round(state.currentMargin * width / Math.max(1, state.currentWidth)))
-    );
-    const marginY = Math.min(
-      Math.floor(height / 2),
-      Math.max(0, Math.round(state.currentMargin * height / Math.max(1, state.currentHeight)))
-    );
-    const [red, green, blue, alpha] = parseExportColor(background);
-    const fillPixel = (offset) => {
-      data[offset] = red;
-      data[offset + 1] = green;
-      data[offset + 2] = blue;
-      data[offset + 3] = alpha;
-    };
-    for (let y = 0; y < height; y += 1) {
-      const fullRow = y < marginY || y >= height - marginY;
-      const startX = fullRow ? 0 : 0;
-      const endX = fullRow ? width : marginX;
-      for (let x = startX; x < endX; x += 1) {
-        fillPixel((y * width + x) * 4);
-      }
-      if (!fullRow) {
-        for (let x = width - marginX; x < width; x += 1) {
-          fillPixel((y * width + x) * 4);
-        }
-      }
-    }
-  }
-
-  function flattenRgbaOverBackground(data, background) {
-    const [backgroundRed, backgroundGreen, backgroundBlue] = parseExportColor(background);
-    for (let offset = 0; offset < data.length; offset += 4) {
-      const alpha = data[offset + 3] / 255;
-      const inverseAlpha = 1 - alpha;
-      data[offset] = Math.round(data[offset] * alpha + backgroundRed * inverseAlpha);
-      data[offset + 1] = Math.round(data[offset + 1] * alpha + backgroundGreen * inverseAlpha);
-      data[offset + 2] = Math.round(data[offset + 2] * alpha + backgroundBlue * inverseAlpha);
-      data[offset + 3] = 255;
-    }
-  }
-
-  function compositeRgbaOver(base, overlay) {
-    for (let offset = 0; offset < base.length; offset += 4) {
-      const alpha = overlay[offset + 3] / 255;
-      if (alpha <= 0) {
-        continue;
-      }
-      const inverseAlpha = 1 - alpha;
-      base[offset] = Math.round(overlay[offset] * alpha + base[offset] * inverseAlpha);
-      base[offset + 1] = Math.round(overlay[offset + 1] * alpha + base[offset + 1] * inverseAlpha);
-      base[offset + 2] = Math.round(overlay[offset + 2] * alpha + base[offset + 2] * inverseAlpha);
-      base[offset + 3] = 255;
-    }
   }
 
   function getValidRgbaPixels(output, width, height) {
@@ -4473,33 +4800,6 @@
     return { chunks: imageChunks, chunkBytes, lossless };
   }
 
-  function createWebpFrameEncoder(width, height) {
-    let canvas;
-    let context;
-    if (typeof OffscreenCanvas === "function") {
-      canvas = new OffscreenCanvas(width, height);
-      context = canvas.getContext("2d", { alpha: false, willReadFrequently: false });
-    } else {
-      canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      context = canvas.getContext("2d", { alpha: false, willReadFrequently: false });
-    }
-    if (!context) {
-      throw new Error("This browser cannot prepare WebP frames");
-    }
-    return async (pixels) => {
-      context.putImageData(new ImageData(pixels, width, height), 0, 0);
-      const blob = typeof canvas.convertToBlob === "function"
-        ? await canvas.convertToBlob({ type: "image/webp", quality: 1 })
-        : await canvasToBlob(canvas, "image/webp", 1);
-      if (!blob || blob.type !== "image/webp") {
-        throw new Error("This browser does not support full-quality WebP encoding");
-      }
-      return parseStillWebpFrame(await blob.arrayBuffer());
-    };
-  }
-
   function createAnimatedWebpBlob(frames, width, height, background) {
     if (!frames.length) {
       throw new Error("No WebP frames were rendered");
@@ -4548,39 +4848,23 @@
     timeMs,
     loopPlan,
     dimensions,
-    background
+    background,
+    outputKind = "rgba"
   ) {
-    let pixels;
-    if (regularSpecs.length) {
-      const regularEntries = regularSpecs.map(
-        (spec) => createGeneratorExportEntry(spec, timeMs, loopPlan)
-      );
-      const regularOutput = await session.renderFrame(timeMs, regularEntries);
-      pixels = getValidRgbaPixels(
-        regularOutput,
-        dimensions.width,
-        dimensions.height
-      );
-    } else {
-      pixels = new Uint8ClampedArray(dimensions.width * dimensions.height * 4);
-    }
-    if (uncroppedSpecs.length) {
-      flattenRgbaOverBackground(pixels, background);
-    }
-    maskGeneratorCropMargin(pixels, dimensions.width, dimensions.height, background);
-    if (uncroppedSpecs.length) {
-      const uncroppedEntries = uncroppedSpecs.map(
-        (spec) => createGeneratorExportEntry(spec, timeMs, loopPlan)
-      );
-      const uncroppedOutput = await session.renderFrame(timeMs, uncroppedEntries);
-      const uncroppedPixels = getValidRgbaPixels(
-        uncroppedOutput,
-        dimensions.width,
-        dimensions.height
-      );
-      compositeRgbaOver(pixels, uncroppedPixels);
-    }
-    return pixels;
+    const output = await session.renderFrame(timeMs,
+      regularSpecs.map((spec) => createGeneratorExportEntry(spec, timeMs, loopPlan)), {
+        output: outputKind,
+        generatorComposite: {
+          background,
+          crop: state.currentMarginMode === "crop" ? {
+            margin: state.currentMargin, width: state.currentWidth, height: state.currentHeight
+          } : null,
+          overlayEntries: uncroppedSpecs.map((spec) => createGeneratorExportEntry(spec, timeMs, loopPlan))
+        }
+      });
+    return outputKind === "webp"
+      ? parseStillWebpFrame(await output.blob.arrayBuffer())
+      : getValidRgbaPixels(output, dimensions.width, dimensions.height);
   }
 
   async function renderGeneratorWebp(task, specs, background) {
@@ -4624,22 +4908,21 @@
         loopPlan.durationMs,
         getGeneratorExportFrameInterval(specs, loopPlan)
       );
-      const encodeFrame = createWebpFrameEncoder(dimensions.width, dimensions.height);
       const frames = [];
       let elapsedMs = 0;
       for (let index = 0; index < delays.length; index += 1) {
         throwIfExportCancelled(task);
-        const pixels = await renderGeneratorFramePixels(
+        const encodedFrame = await renderGeneratorFramePixels(
           session,
           regularSpecs,
           uncroppedSpecs,
           elapsedMs,
           loopPlan,
           dimensions,
-          background
+          background,
+          "webp"
         );
         throwIfExportCancelled(task);
-        const encodedFrame = await encodeFrame(pixels);
         frames.push({ ...encodedFrame, delay: delays[index] });
         elapsedMs += delays[index];
         updateGeneratorExportProgress(
@@ -5031,7 +5314,7 @@
     const verticalPadding =
       (Number.parseFloat(stageStyle.paddingTop) || 0) +
       (Number.parseFloat(stageStyle.paddingBottom) || 0);
-    const chromeHeight = 50;
+    const chromeHeight = state.canvasInfoHidden ? 0 : 50;
     const availableWidth = Math.max(40, rect.width - horizontalPadding - 2);
     const availableHeight = Math.max(40, rect.height - verticalPadding - chromeHeight - 2);
     const scale = Math.min(
@@ -5050,9 +5333,36 @@
 
   function scheduleCanvasFit() {
     if (state.fitFrameId !== null) {
-      cancelAnimationFrame(state.fitFrameId);
+      return;
     }
     state.fitFrameId = requestAnimationFrame(fitCanvasToStage);
+  }
+
+  function updateCanvasInfoPresentation() {
+    const hidden = state.canvasInfoHidden;
+    elements.canvasFrame.classList.toggle("is-info-hidden", hidden);
+    elements.canvas.dataset.infoBarsHidden = String(hidden);
+    if (hidden) {
+      elements.canvas.tabIndex = 0;
+    } else {
+      elements.canvas.removeAttribute("tabindex");
+    }
+    const baseLabel = elements.canvas.dataset.baseAriaLabel || elements.canvas.getAttribute("aria-label") || "Generated composition";
+    elements.canvas.setAttribute(
+      "aria-label",
+      hidden
+        ? `${baseLabel} Canvas information bars are hidden. Click or press Enter to show them.`
+        : baseLabel
+    );
+    scheduleCanvasFit();
+  }
+
+  function setCanvasInfoHidden(hidden, options = {}) {
+    state.canvasInfoHidden = Boolean(hidden);
+    updateCanvasInfoPresentation();
+    if (state.canvasInfoHidden && options.focus) {
+      elements.canvas.focus({ preventScroll: true });
+    }
   }
 
   function applyMarginPresentation(settings) {
@@ -5071,6 +5381,10 @@
       .map((mode) => `${modeCounts[mode]} ${mode}`)
       .join(" · ");
     const sourceLabel = settings.sourceLabel || "ALL";
+    const markCount = Math.min(
+      Math.max(1, Math.floor(Number(settings.markCount)) || DEFAULT_MARK_COUNT),
+      settings.count
+    );
     const marginSummary = settings.margin > 0
       ? ` · ${formatInteger(settings.margin)}px ${settings.marginMode === "crop" ? "crop" : "placement"} margin`
       : "";
@@ -5084,13 +5398,11 @@
       ? `${sequenceSummary.layerCount} generated layers have randomized sequence effects.`
       : "No added sequence effects.";
     elements.dimensionBadge.textContent = `${formatInteger(settings.width)} × ${formatInteger(settings.height)}`;
-    elements.canvasMeta.textContent = `seed ${formatSeed(seed)} · ${formatInteger(settings.count)} gifs · ${sourceLabel}${marginSummary}${sequenceText}`;
-    elements.canvas.setAttribute(
-      "aria-label",
-      `Random composition with ${settings.count} GIFs on a ${settings.width} by ${settings.height} pixel canvas. ${accessibleMargin} ${accessibleSequence} ${modeSummary}.`
-    );
+    elements.canvasMeta.textContent = `seed ${formatSeed(seed)} · ${formatInteger(settings.count)} gifs · ${formatInteger(markCount)} marks · ${sourceLabel}${marginSummary}${sequenceText}`;
+    elements.canvas.dataset.baseAriaLabel = `Random composition with ${settings.count} GIFs across ${markCount} marks on a ${settings.width} by ${settings.height} pixel canvas. ${accessibleMargin} ${accessibleSequence} ${modeSummary}.`;
+    updateCanvasInfoPresentation();
     setStatus(
-      `${formatInteger(settings.count)} placements · ${formatInteger(uniqueSourceCount)} distinct gifs · ${modeSummary}${marginSummary}${sequenceText}`
+      `${formatInteger(settings.count)} placements · ${formatInteger(markCount)} marks · ${formatInteger(uniqueSourceCount)} distinct gifs · ${modeSummary}${marginSummary}${sequenceText}`
     );
   }
 
@@ -5255,6 +5567,13 @@
       margin: state.currentMargin,
       marginMode: state.currentMarginMode,
       count: state.currentCount,
+      markCount: new Set(state.currentSpecs.map((spec) => spec.motifId)).size,
+      gifsPerMark: normalizeInteger(
+        state.currentSettingsUsed?.gifsPerMark,
+        DEFAULT_GIFS_PER_MARK,
+        1,
+        MAX_GIFS_PER_MARK
+      ),
       seed: formatSeed(state.currentSeed),
       signature: state.currentSignature,
       backgroundColor: state.currentBackground,
@@ -5270,6 +5589,7 @@
       sequenceEffectCounts: { ...state.currentSequenceEffectCounts },
       sequenceTimingCounts: { ...state.currentSequenceTimingCounts },
       cropInspectionActive: state.cropInspectionActive,
+      canvasInfoHidden: state.canvasInfoHidden,
       uncroppedCount: state.currentSpecs.filter((spec) => spec.uncropped).length,
       randomRanges: Object.fromEntries(
         Object.entries(state.currentSettingsUsed?.randomRanges || {}).map(([key, range]) => [key, { ...range }])
@@ -5417,6 +5737,7 @@
 
     elements.sequenceEnabled.addEventListener("change", () => {
       updateSequenceControlUI();
+      syncRandomizationPresetButtons();
       markSettingsPending({ sequenceChange: "enabled" });
     });
 
@@ -5447,6 +5768,31 @@
     elements.cropInspect.addEventListener("click", () => {
       setCropInspectionActive(!state.cropInspectionActive);
     });
+
+    elements.canvasInfoDismiss.addEventListener("click", () => {
+      setCanvasInfoHidden(true, { focus: true });
+    });
+
+    elements.canvas.addEventListener("click", (event) => {
+      if (!state.canvasInfoHidden) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setCanvasInfoHidden(false);
+    }, true);
+
+    elements.canvas.addEventListener("keydown", (event) => {
+      if (
+        !state.canvasInfoHidden ||
+        (event.key !== "Enter" && event.key !== " ")
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setCanvasInfoHidden(false);
+    }, true);
 
     elements.composition.addEventListener("click", (event) => {
       const image = event.target.closest?.(".generator-stamp");
@@ -5528,28 +5874,26 @@
         if (rangeControl) {
           updateRandomRangeControl(rangeControl);
         }
-        syncRandomizeAllToggle();
+        if (key === "gif") {
+          updateGifsPerMarkVisibility();
+        }
+        syncRandomizationPresetButtons();
         markSettingsPending({ affectsBackground: key === "background" });
       });
     });
 
-    elements.randomizeAll.addEventListener("change", () => {
-      const nextChecked = elements.randomizeAll.checked;
-      Object.values(RANDOM_TOGGLES).forEach((toggle) => {
-        if (toggle) {
-          toggle.checked = nextChecked;
-        }
+    for (const button of elements.randomizationPresets) {
+      button.addEventListener("click", () => {
+        applyRandomizationPreset(button.dataset.randomizationPreset);
       });
-      RANDOM_RANGE_CONTROLS.forEach((control) => updateRandomRangeControl(control));
-      syncRandomizeAllToggle();
-      markSettingsPending({ affectsBackground: true });
-    });
+    }
 
     for (const toggle of [
       ...Object.values(GENERATION_RANDOM_TOGGLES),
       ...Object.values(RANGE_RANDOM_TOGGLES)
     ]) {
       toggle?.addEventListener("change", () => {
+        syncRandomizationPresetButtons();
         void commitFutureRandomizationControlChange();
       });
     }
@@ -5626,13 +5970,26 @@
       void generateComposition({ recordHistory: true });
     });
 
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (state.pixelatePreviewFrameId !== null) {
+          cancelAnimationFrame(state.pixelatePreviewFrameId);
+          state.pixelatePreviewFrameId = null;
+        }
+        void flushActiveSessionSave();
+      } else {
+        scheduleGeneratorPixelatePreview();
+        scheduleCanvasFit();
+      }
+    });
     window.addEventListener("resize", scheduleCanvasFit);
     window.addEventListener("pagehide", () => {
       void flushActiveSessionSave();
     });
     window.addEventListener("beforeunload", () => {
       state.exportTask?.cancel();
-      revokeBookmarkObjectUrls();
+      // Blob URLs are released with the document. Revoking here breaks lazy
+      // thumbnails if navigation is cancelled or this page enters bfcache.
     });
     if (typeof ResizeObserver === "function") {
       new ResizeObserver(scheduleCanvasFit).observe(elements.stageArea);
@@ -5656,7 +6013,8 @@
     updateSequenceControlUI();
     setSequencePaused(false);
     setBookmarkGalleryMode(false);
-    syncRandomizeAllToggle();
+    updateGifsPerMarkVisibility();
+    syncRandomizationPresetButtons();
     attachEvents();
     syncCurrentBookmarkUI();
     await requestPersistentBookmarkStorage();

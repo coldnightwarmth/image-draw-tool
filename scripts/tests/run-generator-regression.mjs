@@ -96,6 +96,10 @@ const RANDOM_RANGE_SELECTORS = {
   rotation: ["#generatorRotationRandomMinSlider", "#generatorRotationRandomMaxSlider"],
   opacity: ["#generatorOpacityRandomMinSlider", "#generatorOpacityRandomMaxSlider"],
   tint: ["#generatorTintAmountRandomMinSlider", "#generatorTintAmountRandomMaxSlider"],
+  pitch: ["#generatorPitchRandomMinSlider", "#generatorPitchRandomMaxSlider"],
+  yaw: ["#generatorYawRandomMinSlider", "#generatorYawRandomMaxSlider"],
+  horizontalStretch: ["#generatorHorizontalStretchRandomMinSlider", "#generatorHorizontalStretchRandomMaxSlider"],
+  verticalStretch: ["#generatorVerticalStretchRandomMinSlider", "#generatorVerticalStretchRandomMaxSlider"],
   spraySpread: ["#generatorSpraySpreadRandomMinSlider", "#generatorSpraySpreadRandomMaxSlider"],
   lineAngle: ["#generatorLineAngleRandomMinSlider", "#generatorLineAngleRandomMaxSlider"],
   lineLength: ["#generatorLineLengthRandomMinSlider", "#generatorLineLengthRandomMaxSlider"],
@@ -162,6 +166,15 @@ async function setPlacementModes(page, selectedModes) {
   }, selectedModes);
 }
 
+async function setPlacementRandomization(page, checked) {
+  await page.locator(".generator-random-checkbox").evaluateAll((inputs, nextChecked) => {
+    for (const input of inputs) {
+      input.checked = nextChecked;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }, checked);
+}
+
 async function generateWithSeed(page, seed, count) {
   await page.waitForFunction(() => {
     const button = document.getElementById("generatorGenerateButton");
@@ -169,7 +182,17 @@ async function generateWithSeed(page, seed, count) {
     return Boolean(button && !button.disabled && canvas?.getAttribute("aria-busy") === "false");
   }, null, { timeout: 20000 });
   const generated = await page.evaluate(
-    (nextSeed) => window.GeneratorApp.generate(nextSeed),
+    async (nextSeed) => {
+      // A queued slider update can start between waitForFunction and evaluate.
+      // Check readiness and call generate in the same browser task.
+      const deadline = performance.now() + 20000;
+      while (document.getElementById("generatorGenerateButton").disabled ||
+             document.getElementById("generatorCanvas").getAttribute("aria-busy") === "true") {
+        if (performance.now() > deadline) throw new Error("Generator did not become idle");
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      return window.GeneratorApp.generate(nextSeed);
+    },
     seed
   );
   if (generated !== true) {
@@ -232,6 +255,7 @@ async function getCompositionSnapshot(page) {
     );
     return {
       count: stamps.length,
+      markCount: new Set(stamps.map((stamp) => stamp.dataset.generatorMotif)).size,
       uniqueSourceCount: new Set(sources).size,
       categories: Array.from(new Set(stamps.map((stamp) => stamp.dataset.generatorCategory))),
       tagFilterViolations: stamps.filter((stamp) => {
@@ -302,6 +326,17 @@ async function getCompositionSnapshot(page) {
       rotationValues: stamps.map((stamp) => Number(stamp.dataset.generatorRotation)),
       opacityValues: stamps.map((stamp) => Number(stamp.dataset.generatorOpacity)),
       tintValues: stamps.map((stamp) => Number(stamp.dataset.generatorTintAmount)),
+      markTransforms: stamps
+        .slice()
+        .sort((left, right) => Number(left.dataset.generatorIndex) - Number(right.dataset.generatorIndex))
+        .map((stamp) => ({
+          motif: stamp.dataset.generatorMotif,
+          pitch: Number(stamp.dataset.generatorMarkPitch),
+          yaw: Number(stamp.dataset.generatorMarkYaw),
+          horizontalStretch: Number(stamp.dataset.generatorMarkHorizontalStretch),
+          verticalStretch: Number(stamp.dataset.generatorMarkVerticalStretch),
+          cssTransform: stamp.style.transform
+        })),
       sampledGeometry: Object.fromEntries([
         "sampledSpacing",
         "sampledLineLength",
@@ -436,8 +471,134 @@ try {
   assert.equal(await page.locator("#generatorTagTab").getAttribute("tabindex"), "-1");
   assert.equal(await page.locator("#generatorCategoryPanel").isHidden(), false);
   assert.equal(await page.locator("#generatorTagPanel").isHidden(), true);
+  assert.equal(await page.locator(".generator-kicker").count(), 0);
   assert.equal(await page.locator("#generatorCountSlider").getAttribute("min"), "1");
   assert.equal(await page.locator("#generatorCountSlider").getAttribute("max"), "300");
+  assert.equal(await page.locator("#generatorMarkCountSlider").getAttribute("min"), "1");
+  assert.equal(await page.locator("#generatorMarkCountSlider").getAttribute("max"), "64");
+  assert.equal(await page.locator("#generatorMarkCountSlider").inputValue(), "12");
+  assert.equal(await page.locator("#generatorGifsPerMarkSlider").getAttribute("min"), "1");
+  assert.equal(await page.locator("#generatorGifsPerMarkSlider").getAttribute("max"), "100");
+  assert.equal(await page.locator("#generatorGifsPerMarkSlider").inputValue(), "100");
+  const sidebarGroupStructure = await page.evaluate(() => {
+    const sourceDetails = document.getElementById("generatorSourceDetails");
+    const canvasDetails = document.getElementById("generatorCanvasDetails");
+    const randomDetails = document.getElementById("generatorRandomDetails");
+    const count = document.getElementById("generatorCountSlider");
+    const markCount = document.getElementById("generatorMarkCountSlider");
+    const differentGif = document.getElementById("generatorGifRandomToggle");
+    const gifsPerMark = document.getElementById("generatorGifsPerMarkSlider");
+    const canvasWidth = document.getElementById("generatorCanvasWidthInput");
+    const modes = document.querySelector(".generator-mode-group");
+    return {
+      allOpen: [sourceDetails, canvasDetails, randomDetails].every((details) => details?.open),
+      countInSource: Boolean(sourceDetails?.contains(count)),
+      markCountInSource: Boolean(sourceDetails?.contains(markCount)),
+      differentGifInSource: Boolean(sourceDetails?.contains(differentGif)),
+      gifsPerMarkInSource: Boolean(sourceDetails?.contains(gifsPerMark)),
+      countBeforeMarkCount: Boolean(
+        count?.compareDocumentPosition(markCount) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+      markCountBeforeDifferentGif: Boolean(
+        markCount?.compareDocumentPosition(differentGif) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+      differentGifBeforeGifsPerMark: Boolean(
+        differentGif?.compareDocumentPosition(gifsPerMark) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+      canvasInCanvas: Boolean(canvasDetails?.contains(canvasWidth)),
+      modesInRandom: Boolean(randomDetails?.contains(modes)),
+      sourceBeforeCanvas: Boolean(
+        sourceDetails?.compareDocumentPosition(canvasDetails) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+      countBeforeCanvas: Boolean(
+        count?.compareDocumentPosition(canvasWidth) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    };
+  });
+  assert.deepEqual(sidebarGroupStructure, {
+    allOpen: true,
+    countInSource: true,
+    markCountInSource: true,
+    differentGifInSource: true,
+    gifsPerMarkInSource: true,
+    countBeforeMarkCount: true,
+    markCountBeforeDifferentGif: true,
+    differentGifBeforeGifsPerMark: true,
+    canvasInCanvas: true,
+    modesInRandom: true,
+    sourceBeforeCanvas: true,
+    countBeforeCanvas: true
+  });
+  assert.equal(await page.locator("#generatorRandomizeAllToggle").count(), 0);
+  assert.equal(await page.getByText("randomize placement controls", { exact: true }).count(), 0);
+  const presetButtons = page.locator("[data-randomization-preset]");
+  assert.deepEqual(await presetButtons.allTextContents(), ["off", "default", "on"]);
+  const presetHeaderGeometry = await page.evaluate(() => {
+    const header = document.querySelector(".generator-panel-header")?.getBoundingClientRect();
+    const title = document.getElementById("generatorPanelTitle")?.getBoundingClientRect();
+    const presets = document.querySelector(".generator-randomization-presets")?.getBoundingClientRect();
+    return {
+      sameRow: Math.abs(title.top - presets.top) < 4 && Math.abs(title.bottom - presets.bottom) < 8,
+      rightAligned: presets.right <= header.right + 0.5 && presets.left > title.right
+    };
+  });
+  assert.deepEqual(presetHeaderGeometry, { sameRow: true, rightAligned: true });
+  const allRandomizationToggleSelector = [
+    ".generator-random-checkbox",
+    ".generator-range-random-checkbox",
+    "#generatorMarginRandomToggle",
+    "#generatorMarginModeRandomToggle",
+    "#generatorCountRandomToggle",
+    "#generatorMarkCountRandomToggle",
+    "#generatorGifsPerMarkRandomToggle",
+    "#generatorSequenceEffectsRandomToggle",
+    "#generatorSequenceEnabledToggle"
+  ].join(",");
+  assert.equal(await page.locator('[data-randomization-preset="default"]').getAttribute("aria-pressed"), "true");
+  await page.locator('[data-randomization-preset="off"]').click();
+  assert.equal(
+    await page.locator(allRandomizationToggleSelector).evaluateAll(
+      (inputs) => inputs.every((input) => !input.checked)
+    ),
+    true
+  );
+  assert.equal(await page.locator(".generator-gifs-per-mark-group").isHidden(), true);
+  assert.equal(await page.locator('[data-randomization-preset="off"]').getAttribute("aria-pressed"), "true");
+  await page.locator('[data-randomization-preset="on"]').click();
+  assert.equal(
+    await page.locator(allRandomizationToggleSelector).evaluateAll(
+      (inputs) => inputs.every((input) => input.checked)
+    ),
+    true
+  );
+  assert.equal(await page.locator(".generator-gifs-per-mark-group").isVisible(), true);
+  assert.equal(await page.locator('[data-randomization-preset="on"]').getAttribute("aria-pressed"), "true");
+  await page.locator('[data-randomization-preset="default"]').click();
+  assert.equal(
+    await page.locator(allRandomizationToggleSelector).evaluateAll(
+      (inputs) => inputs.every((input) => input.checked === input.defaultChecked)
+    ),
+    true
+  );
+  assert.equal(await page.locator(".generator-gifs-per-mark-group").isVisible(), true);
+  assert.equal(await page.locator('[data-randomization-preset="default"]').getAttribute("aria-pressed"), "true");
+  await page.waitForTimeout(250);
+  await page.waitForFunction(() => (
+    document.getElementById("generatorCanvas")?.getAttribute("aria-busy") === "false"
+  ));
+  await page.locator("#generatorSourceDetails > summary").click();
+  assert.equal(await page.locator("#generatorSourceDetails").getAttribute("open"), null);
+  assert.equal(await page.locator("#generatorCountSlider").isVisible(), false);
+  await page.locator("#generatorSourceDetails > summary").click();
+  assert.equal(await page.locator("#generatorCountSlider").isVisible(), true);
+  await page.locator("#generatorCanvasDetails > summary").click();
+  assert.equal(await page.locator("#generatorCanvasWidthInput").isVisible(), false);
+  await page.locator("#generatorCanvasDetails > summary").click();
+  assert.equal(await page.locator("#generatorCanvasWidthInput").isVisible(), true);
+  await page.locator("#generatorRandomDetails > summary").click();
+  assert.equal(await page.locator(".generator-mode-group").isVisible(), false);
+  await page.locator("#generatorRandomDetails > summary").click();
+  assert.equal(await page.locator(".generator-mode-group").isVisible(), true);
   assert.deepEqual(
     await page.locator("#generatorCountSlider").evaluate((input) => {
       const values = [1, 2, 3, 4].map((value) => {
@@ -452,12 +613,12 @@ try {
   assert.equal(await page.locator("#generatorAspectLockButton").count(), 0);
   assert.equal(await page.locator("#generatorExportCancelButton").isHidden(), true);
   assert.equal(await page.locator(
-    "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorSequenceEffectsRandomToggle"
-  ).count(), 4);
+    "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorMarkCountRandomToggle, #generatorGifsPerMarkRandomToggle, #generatorSequenceEffectsRandomToggle"
+  ).count(), 6);
   assert.equal(await page.locator(
-    "#generatorMarginRandomToggle:checked, #generatorMarginModeRandomToggle:checked, #generatorCountRandomToggle:checked, #generatorSequenceEffectsRandomToggle:checked"
+    "#generatorMarginRandomToggle:checked, #generatorMarginModeRandomToggle:checked, #generatorCountRandomToggle:checked, #generatorMarkCountRandomToggle:checked, #generatorGifsPerMarkRandomToggle:checked, #generatorSequenceEffectsRandomToggle:checked"
   ).count(), 0);
-  assert.equal(await page.locator(".generator-range-random-checkbox").count(), 12);
+  assert.equal(await page.locator(".generator-range-random-checkbox").count(), 16);
   assert.equal(await page.locator(".generator-range-random-checkbox:checked").count(), 0);
 
   const expandedRangeDomains = await page.evaluate(() => Object.fromEntries([
@@ -466,6 +627,10 @@ try {
     ["rotation", "generatorRotationSlider", "generatorRotationRandomMinSlider", "generatorRotationRandomMaxSlider"],
     ["opacity", "generatorOpacitySlider", "generatorOpacityRandomMinSlider", "generatorOpacityRandomMaxSlider"],
     ["tint", "generatorTintAmountSlider", "generatorTintAmountRandomMinSlider", "generatorTintAmountRandomMaxSlider"],
+    ["pitch", "generatorPitchSlider", "generatorPitchRandomMinSlider", "generatorPitchRandomMaxSlider"],
+    ["yaw", "generatorYawSlider", "generatorYawRandomMinSlider", "generatorYawRandomMaxSlider"],
+    ["horizontalStretch", "generatorHorizontalStretchSlider", "generatorHorizontalStretchRandomMinSlider", "generatorHorizontalStretchRandomMaxSlider"],
+    ["verticalStretch", "generatorVerticalStretchSlider", "generatorVerticalStretchRandomMinSlider", "generatorVerticalStretchRandomMaxSlider"],
     ["spraySpread", "generatorSpraySpreadSlider", "generatorSpraySpreadRandomMinSlider", "generatorSpraySpreadRandomMaxSlider"],
     ["lineAngle", "generatorLineAngleSlider", "generatorLineAngleRandomMinSlider", "generatorLineAngleRandomMaxSlider"],
     ["lineLength", "generatorLineLengthSlider", "generatorLineLengthRandomMinSlider", "generatorLineLengthRandomMaxSlider"],
@@ -486,11 +651,15 @@ try {
     })];
   })));
   const expectedDomains = {
-    size: [8, 2400],
+    size: [1, 1000],
     spacing: [4, 2000],
     rotation: [-180, 180],
     opacity: [1, 100],
     tint: [0, 100],
+    pitch: [-90, 90],
+    yaw: [-90, 90],
+    horizontalStretch: [0, 200],
+    verticalStretch: [0, 200],
     spraySpread: [8, 2400],
     lineAngle: [-180, 180],
     lineLength: [8, 4000],
@@ -558,6 +727,8 @@ try {
 
   const initial = await getCompositionSnapshot(page);
   assert.equal(initial.count, 120);
+  assert.equal(initial.markCount, 12);
+  assert.equal(defaultSummary.markCount, 12);
   assert.equal(initial.uniqueSourceCount, 120);
   assert.equal(initial.outOfBounds, 0);
   assert.equal(initial.wrongAssetBase, 0);
@@ -582,13 +753,54 @@ try {
     initial.sequenceTimings
   );
 
+  const canvasChromeSignature = initial.visualSignature;
+  assert.equal(
+    await page.locator("#generatorCanvasInfoDismissButton").evaluate(
+      (button) => getComputedStyle(button).borderTopWidth
+    ),
+    "0px"
+  );
+  await page.locator("#generatorCanvasInfoDismissButton").click();
+  await page.waitForFunction(() => window.GeneratorApp.getSummary().canvasInfoHidden);
+  assert.equal(await page.locator(".generator-canvas-header").isVisible(), false);
+  assert.equal(await page.locator(".generator-canvas-footer").isVisible(), false);
+  assert.equal(await page.locator("#generatorCanvas").getAttribute("tabindex"), "0");
+  assert.match(
+    await page.locator("#generatorCanvas").getAttribute("aria-label"),
+    /information bars are hidden/i
+  );
+  await page.locator("#generatorCanvas").evaluate((canvas) => canvas.click());
+  await page.waitForFunction(() => !window.GeneratorApp.getSummary().canvasInfoHidden);
+  assert.equal(await page.locator(".generator-canvas-header").isVisible(), true);
+  assert.equal(await page.locator(".generator-canvas-footer").isVisible(), true);
+  assert.equal(await page.locator("#generatorCanvas").getAttribute("tabindex"), null);
+  assert.equal((await getCompositionSnapshot(page)).visualSignature, canvasChromeSignature);
+
   await generateWithSeed(page, 0xdeadbeef, 120);
   const deterministic = await getCompositionSnapshot(page);
   assert.equal(deterministic.signature, initial.signature);
   assert.equal(deterministic.sequenceSignature, initial.sequenceSignature);
 
+  await setRange(page, "#generatorCountSlider", 80);
+  await setRange(page, "#generatorMarkCountSlider", 64);
+  await generateWithSeed(page, 0x514d4b53, 80);
+  const maximumMarks = await getCompositionSnapshot(page);
+  assert.equal(maximumMarks.markCount, 64);
+  assert.equal((await page.evaluate(() => window.GeneratorApp.getSummary())).markCount, 64);
+
+  await setRange(page, "#generatorCountSlider", 5);
+  await generateWithSeed(page, 0x514d4b54, 5);
+  const cappedMarks = await getCompositionSnapshot(page);
+  assert.equal(cappedMarks.markCount, 5);
+  assert.equal(await page.locator("#generatorMarkCountSlider").inputValue(), "5");
+  assert.equal(await page.locator("#generatorMarkCountValue").textContent(), "5");
+
+  await setRange(page, "#generatorCountSlider", 120);
+  await setRange(page, "#generatorMarkCountSlider", 12);
+  await generateWithSeed(page, 0xdeadbeef, 120);
+
   await page.locator(
-    "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorSequenceEffectsRandomToggle"
+    "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorMarkCountRandomToggle, #generatorGifsPerMarkRandomToggle, #generatorSequenceEffectsRandomToggle"
   ).evaluateAll((inputs) => {
     for (const input of inputs) {
       input.checked = true;
@@ -605,6 +817,8 @@ try {
     summary: window.GeneratorApp.getSummary(),
     controls: {
       count: Number(document.getElementById("generatorCountSlider")?.value),
+      markCount: Number(document.getElementById("generatorMarkCountSlider")?.value),
+      gifsPerMark: Number(document.getElementById("generatorGifsPerMarkSlider")?.value),
       margin: Number(document.getElementById("generatorMarginSlider")?.value),
       marginMaximum: Number(document.getElementById("generatorMarginSlider")?.max),
       marginMode: document.querySelector('input[name="generatorMarginMode"]:checked')?.value,
@@ -622,6 +836,11 @@ try {
   }));
   assert.ok(randomizedGeneration.controls.count >= 1 && randomizedGeneration.controls.count <= 300);
   assert.equal(randomizedGeneration.summary.count, randomizedGeneration.controls.count);
+  assert.ok(randomizedGeneration.controls.markCount >= 1);
+  assert.ok(randomizedGeneration.controls.markCount <= Math.min(64, randomizedGeneration.controls.count));
+  assert.equal(randomizedGeneration.summary.markCount, randomizedGeneration.controls.markCount);
+  assert.ok(randomizedGeneration.controls.gifsPerMark >= 1 && randomizedGeneration.controls.gifsPerMark <= 100);
+  assert.equal(randomizedGeneration.summary.gifsPerMark, randomizedGeneration.controls.gifsPerMark);
   assert.ok(randomizedGeneration.controls.margin >= 0);
   assert.ok(randomizedGeneration.controls.margin <= randomizedGeneration.controls.marginMaximum);
   assert.equal(randomizedGeneration.summary.margin, randomizedGeneration.controls.margin);
@@ -640,6 +859,8 @@ try {
     margin: true,
     marginMode: true,
     count: true,
+    markCount: true,
+    gifsPerMark: true,
     sequenceEffects: true
   });
   assert.equal(randomizedGeneration.summary.rangeRandomize.size, true);
@@ -665,6 +886,8 @@ try {
   }));
   assert.equal(repeatedRandomizedGeneration.summary.signature, randomizedGeneration.summary.signature);
   assert.equal(repeatedRandomizedGeneration.summary.count, randomizedGeneration.summary.count);
+  assert.equal(repeatedRandomizedGeneration.summary.markCount, randomizedGeneration.summary.markCount);
+  assert.equal(repeatedRandomizedGeneration.summary.gifsPerMark, randomizedGeneration.summary.gifsPerMark);
   assert.equal(repeatedRandomizedGeneration.summary.margin, randomizedGeneration.summary.margin);
   assert.equal(repeatedRandomizedGeneration.summary.marginMode, randomizedGeneration.summary.marginMode);
   assert.deepEqual(repeatedRandomizedGeneration.effects, randomizedGeneration.controls.effects);
@@ -718,7 +941,7 @@ try {
   );
 
   await page.locator(
-    "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorSequenceEffectsRandomToggle, #generatorSizeRangeRandomToggle, #generatorSequenceSpeedRangeRandomToggle"
+    "#generatorMarginRandomToggle, #generatorMarginModeRandomToggle, #generatorCountRandomToggle, #generatorMarkCountRandomToggle, #generatorGifsPerMarkRandomToggle, #generatorSequenceEffectsRandomToggle, #generatorSizeRangeRandomToggle, #generatorSequenceSpeedRangeRandomToggle"
   ).evaluateAll((inputs) => {
     for (const input of inputs) {
       input.checked = false;
@@ -927,7 +1150,64 @@ try {
   assert.equal(regenerated.sequenceCount, 0);
   assert.equal((await page.evaluate(() => window.GeneratorApp.getSummary())).sequenceEnabled, false);
 
-  await page.locator("#generatorRandomizeAllToggle").uncheck({ force: true });
+  await setPlacementModes(page, ["line"]);
+  await setRange(page, "#generatorCountSlider", 37);
+  await setRange(page, "#generatorMarkCountSlider", 5);
+  await setRange(page, "#generatorGifsPerMarkSlider", 3);
+  await generateWithSeed(page, 0x29384756, 37);
+  const threeGifsPerMark = await page.evaluate(() => {
+    const grouped = new Map();
+    const stamps = Array.from(document.querySelectorAll(".generator-stamp"))
+      .sort((left, right) => Number(left.dataset.generatorIndex) - Number(right.dataset.generatorIndex));
+    for (const stamp of stamps) {
+      const motifId = stamp.dataset.generatorMotif;
+      const sources = grouped.get(motifId) || [];
+      sources.push(stamp.dataset.generatorSource);
+      grouped.set(motifId, sources);
+    }
+    return Array.from(grouped.values()).map((sources) => {
+      const palette = [];
+      for (const source of sources) {
+        if (!palette.includes(source)) {
+          palette.push(source);
+        }
+      }
+      return {
+        stampCount: sources.length,
+        distinctCount: palette.length,
+        expectedDistinctCount: Math.min(3, sources.length),
+        cyclesPalette: sources.every((source, index) => source === palette[index % palette.length])
+      };
+    });
+  });
+  assert.ok(threeGifsPerMark.length > 1);
+  assert.ok(threeGifsPerMark.every((motif) => (
+    motif.distinctCount === motif.expectedDistinctCount && motif.cyclesPalette
+  )));
+  assert.equal((await page.evaluate(() => window.GeneratorApp.getSummary())).gifsPerMark, 3);
+
+  await setRange(page, "#generatorGifsPerMarkSlider", 1);
+  await page.waitForFunction(() => (
+    document.getElementById("generatorCanvas")?.getAttribute("aria-busy") === "false" &&
+    window.GeneratorApp.getSummary().gifsPerMark === 1
+  ));
+  const oneGifPerMark = await page.evaluate(() => {
+    const sourcesByMotif = new Map();
+    for (const stamp of document.querySelectorAll(".generator-stamp")) {
+      const sources = sourcesByMotif.get(stamp.dataset.generatorMotif) || new Set();
+      sources.add(stamp.dataset.generatorSource);
+      sourcesByMotif.set(stamp.dataset.generatorMotif, sources);
+    }
+    return Array.from(sourcesByMotif.values()).map((sources) => sources.size);
+  });
+  assert.ok(oneGifPerMark.every((count) => count === 1));
+  await setRange(page, "#generatorGifsPerMarkSlider", 100);
+  await page.waitForFunction(() => (
+    document.getElementById("generatorCanvas")?.getAttribute("aria-busy") === "false" &&
+    window.GeneratorApp.getSummary().gifsPerMark === 100
+  ));
+
+  await setPlacementRandomization(page, false);
   await setPlacementModes(page, ["line"]);
   await setRange(page, "#generatorCountSlider", 31);
   await setRange(page, "#generatorSizeSlider", 72);
@@ -1009,17 +1289,22 @@ try {
     "rgb(18, 52, 86)"
   );
 
-  await page.locator("#generatorRandomizeAllToggle").check({ force: true });
+  await setPlacementRandomization(page, true);
   await page.locator("#generatorSequenceEnabledToggle").check({ force: true });
   await page.locator('[data-canvas-size="900x900"]').click();
   await setPlacementModes(page, ["line", "spray", "box", "scatter"]);
   await setRange(page, "#generatorCountSlider", 96);
+  await setRange(page, "#generatorMarkCountSlider", 12);
   const visualRanges = {
     size: [300, 420],
     spacing: [90, 150],
     rotation: [-37, 41],
     opacity: [23, 61],
     tint: [44, 89],
+    pitch: [-35, 40],
+    yaw: [-30, 34],
+    horizontalStretch: [55, 165],
+    verticalStretch: [70, 150],
     spraySpread: [300, 700],
     lineAngle: [-24, 36],
     lineLength: [500, 850],
@@ -1040,6 +1325,42 @@ try {
   assertValuesWithin(ranged.rotationValues, -37, 41, "rotation");
   assertValuesWithin(ranged.opacityValues, 0.23, 0.61, "opacity");
   assertValuesWithin(ranged.tintValues, 0.44, 0.89, "color shift");
+  assertValuesWithin(ranged.markTransforms.map(({ pitch }) => pitch), -35, 40, "mark pitch");
+  assertValuesWithin(ranged.markTransforms.map(({ yaw }) => yaw), -30, 34, "mark yaw");
+  assertValuesWithin(
+    ranged.markTransforms.map(({ horizontalStretch }) => horizontalStretch),
+    55,
+    165,
+    "horizontal mark stretch"
+  );
+  assertValuesWithin(
+    ranged.markTransforms.map(({ verticalStretch }) => verticalStretch),
+    70,
+    150,
+    "vertical mark stretch"
+  );
+  const transformsByMark = new Map();
+  for (const transform of ranged.markTransforms) {
+    const markTransforms = transformsByMark.get(transform.motif) || [];
+    markTransforms.push(transform);
+    transformsByMark.set(transform.motif, markTransforms);
+  }
+  assert.ok(transformsByMark.size > 1, "expected several transformed marks");
+  for (const markTransforms of transformsByMark.values()) {
+    assert.equal(new Set(markTransforms.map((value) => JSON.stringify([
+      value.pitch,
+      value.yaw,
+      value.horizontalStretch,
+      value.verticalStretch
+    ]))).size, 1, "expected one shared transform per mark");
+  }
+  assert.ok(new Set(Array.from(transformsByMark.values(), ([value]) => JSON.stringify([
+    value.pitch,
+    value.yaw,
+    value.horizontalStretch,
+    value.verticalStretch
+  ]))).size > 1, "expected transforms to vary between marks");
+  assert.ok(ranged.markTransforms.every(({ cssTransform }) => cssTransform.startsWith("matrix(")));
   assert.ok(new Set(ranged.sizeValues).size > 8, "expected varied randomized sizes");
   assert.ok(new Set(ranged.rotationValues).size > 8, "expected varied randomized rotations");
   assert.ok(new Set(ranged.opacityValues).size > 8, "expected varied randomized opacities");
@@ -1075,7 +1396,7 @@ try {
   await generateWithSeed(page, 0x2468ace1, 96);
   assert.notEqual((await getCompositionSnapshot(page)).visualSignature, ranged.visualSignature);
 
-  await page.locator("#generatorRandomizeAllToggle").check({ force: true });
+  await setPlacementRandomization(page, true);
   await page.locator("#generatorSequenceEnabledToggle").check({ force: true });
   await setPlacementModes(page, ["line", "spray", "box", "scatter"]);
   await page.locator('[data-canvas-size="800x1200"]').click();
@@ -1095,6 +1416,7 @@ try {
   await setRange(page, "#generatorMarginSlider", 96);
   assert.match(await inspectButton.textContent(), /^(generate crop to inspect|inspect cropped gifs)$/);
   await setRange(page, "#generatorMarginSlider", 0);
+  await page.waitForTimeout(250);
   await generateWithSeed(page, 0x00c0ffee, 60);
   const uncropped = await getCompositionSnapshot(page);
   assert.equal(uncropped.overlay.hidden, true);
@@ -1182,36 +1504,45 @@ try {
     const dock = document.getElementById("generatorWorkspaceActions")?.getBoundingClientRect();
     const modeBar = document.getElementById("mainModeBar")?.getBoundingClientRect();
     const generate = document.getElementById("generatorGenerateButton")?.getBoundingClientRect();
+    const undo = document.getElementById("generatorUndoButton")?.getBoundingClientRect();
     const background = document.getElementById("generatorBackgroundButton")?.getBoundingClientRect();
     const bookmark = document.getElementById("generatorBookmarkButton")?.getBoundingClientRect();
     const download = document.querySelector(".generator-download-split")?.getBoundingClientRect();
     return {
       buttonsOutsideSidebar: [
         "generatorGenerateButton",
+        "generatorUndoButton",
         "generatorBackgroundButton",
         "generatorBookmarkButton",
         "generatorDownloadWebpButton",
         "generatorDownloadMp4Button"
       ].every((id) => !sidebar?.contains(document.getElementById(id))),
-      sameRow: [background, bookmark, download].every(
+      undoInWorkspaceActions: Boolean(document.getElementById("generatorWorkspaceActions")?.contains(
+        document.getElementById("generatorUndoButton")
+      )),
+      sameRow: [undo, background, bookmark, download].every(
         (rect) => Math.abs(rect.top - generate.top) < 0.5 && Math.abs(rect.bottom - generate.bottom) < 0.5
       ),
-      ordered: generate.left > background.right &&
+      ordered: background.left > undo.right &&
+        generate.left > background.right &&
         bookmark.left > generate.right &&
         download.left > bookmark.right,
       dockBeforeModeBar: dock.right < modeBar.left,
       alignedToModeBar: Math.abs(dock.bottom - modeBar.bottom) < 0.5,
       dockWidth: dock.width,
+      generateWidth: generate.width,
       backgroundWidth: background.width,
       backgroundHeight: background.height
     };
   });
   assert.equal(primaryActionGeometry.buttonsOutsideSidebar, true);
+  assert.equal(primaryActionGeometry.undoInWorkspaceActions, true);
   assert.equal(primaryActionGeometry.sameRow, true);
   assert.equal(primaryActionGeometry.ordered, true);
   assert.equal(primaryActionGeometry.dockBeforeModeBar, true);
   assert.equal(primaryActionGeometry.alignedToModeBar, true);
-  assert.equal(primaryActionGeometry.dockWidth, 190);
+  assert.equal(primaryActionGeometry.dockWidth, 298);
+  assert.ok(primaryActionGeometry.generateWidth > primaryActionGeometry.backgroundWidth * 3);
   assert.ok(Math.abs(primaryActionGeometry.backgroundWidth - primaryActionGeometry.backgroundHeight) < 0.1);
   assert.equal(await page.locator('button[aria-label="Generator mode"]').count(), 0);
   assert.equal(await page.locator("#generatorActionStatus").evaluate((status) => (
