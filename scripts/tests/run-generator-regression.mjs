@@ -1507,15 +1507,14 @@ try {
     const undo = document.getElementById("generatorUndoButton")?.getBoundingClientRect();
     const background = document.getElementById("generatorBackgroundButton")?.getBoundingClientRect();
     const bookmark = document.getElementById("generatorBookmarkButton")?.getBoundingClientRect();
-    const download = document.querySelector(".generator-download-split")?.getBoundingClientRect();
+    const download = document.querySelector("#generatorDownloadButton")?.getBoundingClientRect();
     return {
       buttonsOutsideSidebar: [
         "generatorGenerateButton",
         "generatorUndoButton",
         "generatorBackgroundButton",
         "generatorBookmarkButton",
-        "generatorDownloadWebpButton",
-        "generatorDownloadMp4Button"
+        "generatorDownloadButton"
       ].every((id) => !sidebar?.contains(document.getElementById(id))),
       undoInWorkspaceActions: Boolean(document.getElementById("generatorWorkspaceActions")?.contains(
         document.getElementById("generatorUndoButton")
@@ -1541,7 +1540,7 @@ try {
   assert.equal(primaryActionGeometry.ordered, true);
   assert.equal(primaryActionGeometry.dockBeforeModeBar, true);
   assert.equal(primaryActionGeometry.alignedToModeBar, true);
-  assert.equal(primaryActionGeometry.dockWidth, 298);
+  assert.equal(primaryActionGeometry.dockWidth, 264);
   assert.ok(primaryActionGeometry.generateWidth > primaryActionGeometry.backgroundWidth * 3);
   assert.ok(Math.abs(primaryActionGeometry.backgroundWidth - primaryActionGeometry.backgroundHeight) < 0.1);
   assert.equal(await page.locator('button[aria-label="Generator mode"]').count(), 0);

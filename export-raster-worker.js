@@ -2042,11 +2042,15 @@ async function encodeFrameResult(job, frame, outputKind, progress = null) {
   const frameByteLength = getSafeRgbaByteLength(width, height);
   // Most frames need no pixel processing: encode directly without an RGBA
   // readback, main-thread transfer, or second full-size encoding canvas.
-  if (outputKind === "webp" && !(frame.generatorComposite?.crop?.margin > 0) &&
+  if (outputKind === "webp" && !frame.generatorComposite?.flatten && !(frame.generatorComposite?.crop?.margin > 0) &&
       !frame.generatorComposite?.overlayEntries?.length) {
     return encodeWebpResult(job, rendered);
   }
-  if (outputKind === "rgba" || outputKind === "webp") {
+  const bitmapNeedsProcessing = outputKind === "bitmap" && (
+    frame.generatorComposite?.flatten || frame.generatorComposite?.crop?.margin > 0 ||
+    frame.generatorComposite?.overlayEntries?.length > 0
+  );
+  if (outputKind === "rgba" || outputKind === "webp" || bitmapNeedsProcessing) {
     assertJobMemoryBudget(job, {
       phase: "rgba-readback",
       transientBytes: frameByteLength * (frame.generatorComposite?.overlayEntries?.length ? 2 : 1)
@@ -2055,7 +2059,7 @@ async function encodeFrameResult(job, frame, outputKind, progress = null) {
     const composite = frame.generatorComposite;
     if (composite) {
       const overlays = Array.isArray(composite.overlayEntries) ? composite.overlayEntries : [];
-      if (overlays.length) flattenRgbaOverBackground(image.data, composite.background);
+      if (overlays.length || composite.flatten) flattenRgbaOverBackground(image.data, composite.background);
       maskGeneratorCropMargin(image.data, width, height, composite.background, composite.crop);
       if (overlays.length) {
         const overlay = await rasterizeFrame(job, { timeMs: frame.timeMs, entries: overlays });
@@ -2067,16 +2071,20 @@ async function encodeFrameResult(job, frame, outputKind, progress = null) {
       rendered.context.putImageData(image, 0, 0);
       return encodeWebpResult(job, rendered, true);
     }
-    return {
-      payload: {
-        kind: "rgba",
-        width,
-        height,
-        timeMs: rendered.timeMs,
-        buffer: image.data.buffer
-      },
-      transfer: [image.data.buffer]
-    };
+    if (outputKind === "bitmap") {
+      rendered.context.putImageData(image, 0, 0);
+    } else {
+      return {
+        payload: {
+          kind: "rgba",
+          width,
+          height,
+          timeMs: rendered.timeMs,
+          buffer: image.data.buffer
+        },
+        transfer: [image.data.buffer]
+      };
+    }
   }
   if (outputKind === "bitmap") {
     assertJobMemoryBudget(job, {

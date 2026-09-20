@@ -56,7 +56,7 @@ body.generator-page {
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  filter: drop-shadow(7px 8px 0 rgba(0, 0, 0, 0.12));
+  box-shadow: 7px 8px 0 rgba(0, 0, 0, 0.12);
 }
 
 .generator-canvas-header,
@@ -863,22 +863,7 @@ body.generator-page {
   display: none;
 }
 
-.generator-download-split {
-  width: 68px;
-  min-width: 68px;
-  height: 34px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.generator-download-split button:first-child {
-  border-right-width: 0;
-}
-
-.generator-download-split button:hover + button,
-.generator-download-split button:focus-visible + button {
-  border-left-color: #111;
-}
+#generatorDownloadButton { width: 34px; }
 
 .generator-output-actions button:hover {
   border-color: #111;
@@ -959,10 +944,10 @@ body.generator-page {
 
 .generator-workspace-actions {
   position: relative;
-  width: 298px;
+  width: 264px;
   height: 34px;
   display: grid;
-  grid-template-columns: 34px 34px 112px 34px 68px;
+  grid-template-columns: 34px 34px 112px 34px 34px;
   align-items: stretch;
   gap: 4px;
 }
@@ -1533,7 +1518,7 @@ body.generator-page {
 
 .generator-bookmark-safety-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -1867,8 +1852,8 @@ body.generator-page {
   }
 
   .generator-workspace-actions {
-    width: 246px;
-    grid-template-columns: 32px 32px 72px 32px 62px;
+    width: 216px;
+    grid-template-columns: 32px 32px 72px 32px 32px;
   }
 
   .generator-workspace-actions .generator-generate-button {
@@ -1887,9 +1872,9 @@ body.generator-page {
     display: none;
   }
 
-  .generator-workspace-actions .generator-download-split {
-    width: 62px;
-    min-width: 62px;
+  .generator-workspace-actions #generatorDownloadButton {
+    width: 32px;
+    min-width: 32px;
   }
 
   .generator-workspace-actions #generatorExportCancelButton:not([hidden]) {
@@ -1927,3 +1912,68 @@ body.generator-page {
     animation: none !important;
   }
 }
+
+/* Large scenes present one complete raster frame instead of hundreds of GPU
+   animation/filter surfaces. Keep the DOM for editing and crop inspection. */
+#generatorStablePreview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  contain: strict;
+}
+#generatorStablePreview[hidden] { display: none; }
+#generatorCanvas.has-stable-preview #generatorComposition { display: none; }
+#controls.generator-controls { isolation: isolate; }
+.generator-preview-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.generator-preview-option input { margin: 0; accent-color: #111; }
+
+.generator-canvas-footer { min-width: 0; }
+#generatorCanvasMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.generator-render-status { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 13px; }
+#generatorLoadingSpinner { width: 12px; height: 12px; box-sizing: border-box; border: 2px solid #ccc; border-top-color: #555; border-radius: 50%; animation: generator-loading-spin 800ms linear infinite; }
+#generatorLoadingSpinner[hidden], #generatorLowFps[hidden] { display: none; }
+@keyframes generator-loading-spin { to { transform: rotate(360deg); } }
+
+#generatorLiveCaptureFinish[hidden] { display: none; }
+#generatorLiveCaptureFinish:not([hidden]) { position: absolute; z-index: 4; inset: 0 auto 0 0; width: calc(50% - 2px); height: 34px; font-size: 13px; }
+.generator-workspace-actions #generatorExportCancelButton.has-finish:not([hidden]) { left: auto; width: calc(50% - 2px); }
+
+.generator-export-dialog { box-sizing: border-box; width: min(380px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid #999; background: #f5f5f5; color: #222; font-family: "VT323", monospace; font-size: 18px; box-shadow: 0 8px 28px #0003; }
+.generator-export-dialog::backdrop { background: #0003; }
+.generator-export-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.generator-export-heading h2 { margin: 0; font-size: 24px; font-weight: normal; }
+.generator-export-dialog button { font: inherit; color: inherit; border: 1px solid #aaa; border-radius: 0; background: #fff; padding: 6px 9px; min-height: 34px; }
+.generator-export-dialog button { cursor: pointer; }
+.generator-export-dialog button:disabled { opacity: .5; cursor: default; }
+.generator-export-dialog button:focus-visible, .generator-export-dialog input:focus-visible { outline: 2px solid #333; outline-offset: 2px; }
+.generator-export-dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 8px; }
+.generator-export-dialog fieldset > label, .generator-export-label { display: flex; justify-content: space-between; margin-top: 6px; }
+.generator-export-dialog input[type="range"] { width: 100%; min-width: 0; box-sizing: border-box; }
+.generator-export-dialog input[type="range"] { accent-color: #111; }
+.generator-export-destination { display: flex; align-items: center; gap: 10px; }
+#generatorExportDestination { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.generator-export-destination button { flex-shrink: 0; }
+.generator-export-dialog .generator-control-hint { font-size: 14px; line-height: 1.2; margin: 0; color: #666; }
+.generator-export-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+#generatorExportSubmit { background: #111; color: #fff; border-color: #111; }
+#generatorExportStatus { font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; margin: 12px 0 0; }
+#generatorExportStatus:empty { display: none; }
+#generatorExportStatus.is-error { color: #922; }
+
+.generator-export-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.generator-export-choices button[aria-pressed="true"] { background: #111; color: #fff; border-color: #111; }
+.generator-export-reset-folder { justify-self: start; font-size: 14px !important; }
+.generator-export-reset-folder[hidden] { display: none; }
+
+#generatorBookmarkLoadStatus { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+#generatorBookmarkLoadStatus[hidden] { display: none; }
+.generator-bookmark-loading-spinner { flex: 0 0 12px; height: 12px; border: 2px solid #ccc; border-top-color: #333; border-radius: 50%; animation: generator-loading-spin 800ms linear infinite; }

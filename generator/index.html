@@ -13,10 +13,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles.css?v=20260909-generator-v1">
-  <link rel="stylesheet" href="generator.css?v=20260917-performance-v2">
+  <link rel="stylesheet" href="generator.css?v=20260920-bookmark-controls-v7">
   <script defer src="../stock-brushes.js?v=20260721-all-gif-arc-export-v5"></script>
   <script defer src="../brush-metadata.js?v=20260721-all-gif-arc-export-v5"></script>
-  <script defer src="generator.js?v=20260917-performance-v2"></script>
+  <script defer src="generator.js?v=20260920-bookmark-controls-v7"></script>
 </head>
 <body class="generator-page">
   <a class="generator-skip-link" href="#generatorControlsMain">skip to generator controls</a>
@@ -51,6 +51,10 @@
         </div>
         <footer class="generator-canvas-footer">
           <span id="generatorCanvasMeta">preparing all gifs…</span>
+          <span class="generator-render-status" role="status" aria-live="polite">
+            <span id="generatorLoadingSpinner" role="img" aria-label="Loading GIFs" title="Loading GIFs"></span>
+            <span id="generatorLowFps" hidden title="Preview is displaying fewer than 24 frames per second">[low fps]</span>
+          </span>
         </footer>
       </div>
     </section>
@@ -157,6 +161,11 @@
         </div>
         <input id="generatorGifsPerMarkSlider" type="range" min="1" max="100" step="1" value="100">
       </div>
+
+      <label class="generator-preview-option">
+        <input id="generatorSmoothPreviewToggle" type="checkbox">
+        <span>smooth render preview</span>
+      </label>
 
       <p id="generatorStatus" class="generator-status" role="status" aria-live="polite">loading the ALL set…</p>
         </div>
@@ -653,11 +662,12 @@
         </summary>
         <div class="generator-bookmark-safety" aria-label="Bookmark storage and backups">
           <div class="generator-bookmark-safety-actions">
-            <button id="generatorProtectBookmarksButton" type="button">protect storage</button>
             <button id="generatorBackupBookmarksButton" type="button" disabled>backup</button>
-            <button id="generatorRestoreBookmarksButton" class="generator-restore-bookmarks-button" type="button">restore</button>
+            <button id="generatorRestoreBookmarksButton" class="generator-restore-bookmarks-button" type="button">load</button>
+            <button id="generatorClearBookmarksButton" type="button" disabled>clear</button>
             <input id="generatorRestoreBookmarksInput" type="file" accept="application/json,.json" hidden>
           </div>
+          <p id="generatorBookmarkLoadStatus" role="status" aria-live="polite" hidden><span class="generator-bookmark-loading-spinner" aria-hidden="true"></span><span id="generatorBookmarkLoadText">loading bookmarks…</span></p>
           <p id="generatorBookmarkStorageStatus" role="status">checking browser storage protection…</p>
         </div>
         <div id="generatorBookmarkGallery" class="generator-bookmark-gallery" aria-label="Bookmarked compositions"></div>
@@ -715,14 +725,10 @@
         <span aria-hidden="true">★</span>
         <span>bookmark</span>
       </button>
-      <div class="generator-download-split" role="group" aria-label="Download composition">
-        <button id="generatorDownloadWebpButton" type="button" aria-label="Download animated WebP" title="Download animated WebP">
-          <span>webp</span>
-        </button>
-        <button id="generatorDownloadMp4Button" type="button" aria-label="Download six-second MP4" title="Download 6 second MP4">
-          <span>mp4</span>
-        </button>
-      </div>
+      <button id="generatorDownloadButton" type="button" aria-label="Export composition" title="Export composition" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+      <button id="generatorLiveCaptureFinish" type="button" hidden>finish &amp; save</button>
       <button id="generatorExportCancelButton" type="button" hidden>cancel export</button>
     </div>
 
@@ -741,5 +747,27 @@
     </button>
     </nav>
   </div>
+  <dialog id="generatorExportDialog" class="generator-export-dialog" aria-labelledby="generatorExportTitle">
+    <div class="generator-export-heading"><h2 id="generatorExportTitle">export options</h2><button id="generatorExportClose" type="button" aria-label="Close export options">×</button></div>
+    <fieldset id="generatorExportSettings">
+      <span id="generatorExportDestinationLabel" class="generator-export-label">save to</span>
+      <div class="generator-export-destination"><span id="generatorExportDestination" aria-labelledby="generatorExportDestinationLabel">Downloads</span><button id="generatorExportChooseFolder" type="button">choose folder…</button></div>
+      <button id="generatorExportResetFolder" class="generator-export-reset-folder" type="button" hidden>use Downloads</button>
+      <label for="generatorExportDuration">length <output id="generatorExportDurationValue" for="generatorExportDuration">6 sec</output></label>
+      <input id="generatorExportDuration" type="range" min="1" max="15" step="1" value="6">
+      <span id="generatorExportFormatLabel" class="generator-export-label">format</span>
+      <div id="generatorExportFormat" class="generator-export-choices" role="group" aria-labelledby="generatorExportFormatLabel" data-value="mp4">
+        <button type="button" value="mp4" aria-pressed="true">mp4</button>
+        <button type="button" value="webp" aria-pressed="false">webp</button>
+      </div>
+      <span id="generatorExportModeLabel" class="generator-export-label">rendering</span>
+      <div id="generatorExportMode" class="generator-export-choices" role="group" aria-labelledby="generatorExportModeLabel" data-value="normal">
+        <button type="button" value="normal" aria-pressed="true">normal</button>
+        <button type="button" value="realtime" aria-pressed="false">realtime</button>
+      </div>
+    </fieldset>
+    <p id="generatorExportStatus" role="status" aria-live="polite"></p>
+    <div class="generator-export-dialog-actions"><button id="generatorExportDialogCancel" type="button" hidden>cancel export</button><button id="generatorExportSubmit" type="button">export mp4</button></div>
+  </dialog>
 </body>
 </html>

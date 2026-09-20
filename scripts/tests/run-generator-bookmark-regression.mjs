@@ -615,9 +615,23 @@ try {
   assert.deepEqual(await getCompositionSnapshot(page), savedComposition);
   assert.deepEqual(await getControlSnapshot(page), savedControls);
 
-  page.once("dialog", (dialog) => void dialog.accept());
-  await page.locator(".generator-bookmark-delete").click();
+  assert.equal(await page.locator('#generatorProtectBookmarksButton').count(), 0);
+  assert.equal(await page.locator('#generatorRestoreBookmarksButton').textContent(), 'load');
+  page.once('dialog', dialog => { assert.match(dialog.message(), /cannot be undone/); void dialog.dismiss(); });
+  await page.locator('#generatorClearBookmarksButton').click();
+  assert.equal((await readBookmarkRecords(page)).length, 1);
+  page.once('dialog', dialog => { assert.match(dialog.message(), /backup files will not be affected/); void dialog.accept(); });
+  await page.locator('#generatorClearBookmarksButton').click();
   await waitForBookmarkCount(page, 0);
+  assert.equal((await readBookmarkRecords(page)).length, 0);
+  assert.deepEqual(await getCompositionSnapshot(page), savedComposition);
+  await page.reload();
+  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count > 0);
+  assert.equal((await readBookmarkRecords(page)).length, 0);
+  // The downloaded file is still readable and can repopulate the local gallery.
+  await page.locator('#generatorRestoreBookmarksInput').setInputFiles(bookmarkBackupPath);
+  await waitForBookmarkCount(page, 1);
+  await page.waitForFunction(() => document.querySelector('#generatorBookmarkLoadStatus').hidden);
   assert.deepEqual(errors, []);
 
   process.stdout.write("generator bookmark regression checks passed (save, reload, exact restore, backup, import, thumbnail, delete)\n");

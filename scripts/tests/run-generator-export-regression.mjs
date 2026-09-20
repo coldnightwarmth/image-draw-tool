@@ -251,18 +251,8 @@ page.on("console", (message) => {
 try {
   await page.goto(`${localServer.url}generator/?seed=1234abcd`, { waitUntil: "domcontentloaded" });
   await waitForGeneration(page, 120);
-  const downloadControl = await page.locator(".generator-download-split").evaluate((group) => {
-    const buttons = Array.from(group.querySelectorAll("button"));
-    return {
-      labels: buttons.map((button) => button.textContent.trim()),
-      widths: buttons.map((button) => button.getBoundingClientRect().width)
-    };
-  });
-  assert.deepEqual(downloadControl.labels, ["webp", "mp4"]);
-  assert.ok(
-    Math.abs(downloadControl.widths[0] - downloadControl.widths[1]) < 0.1,
-    "expected the WebP and MP4 halves to have equal widths"
-  );
+  assert.equal(await page.locator('#generatorDownloadButton svg').count(), 1);
+  assert.equal(await page.locator('.generator-download-split').count(), 0);
   await page.locator('[data-canvas-size="900x900"]').click();
   await page.locator("#generatorCanvasWidthInput, #generatorCanvasHeightInput").evaluateAll((inputs) => {
     for (const input of inputs) {
@@ -307,7 +297,10 @@ try {
   await waitForGeneration(page, 2);
 
   const downloadPromise = page.waitForEvent("download", { timeout: 240000 });
-  await page.locator("#generatorDownloadWebpButton").click();
+  await page.locator("#generatorDownloadButton").click();
+  await page.locator('#generatorExportFormat button[value="webp"]').click();
+  await page.locator("#generatorExportSubmit").click();
+  await page.locator("#generatorExportClose").click();
   const download = await downloadPromise;
   await page.waitForFunction(() => !window.GeneratorApp.getSummary().exporting);
   const downloadedPath = await download.path();
@@ -355,7 +348,10 @@ try {
   assert.match(result.status, /full resolution/i);
 
   const mp4DownloadPromise = page.waitForEvent("download", { timeout: 240000 });
-  await page.locator("#generatorDownloadMp4Button").click();
+  await page.locator("#generatorDownloadButton").click();
+  await page.locator('#generatorExportFormat button[value="mp4"]').click();
+  await page.locator("#generatorExportSubmit").click();
+  await page.locator("#generatorExportClose").click();
   const mp4Download = await mp4DownloadPromise;
   await page.waitForFunction(() => !window.GeneratorApp.getSummary().exporting);
   const mp4Path = await mp4Download.path();
@@ -416,7 +412,10 @@ try {
   assert.equal((await page.evaluate(() => window.GeneratorApp.getSummary())).uncroppedCount, 1);
 
   const uncroppedDownloadPromise = page.waitForEvent("download", { timeout: 240000 });
-  await page.locator("#generatorDownloadWebpButton").click();
+  await page.locator("#generatorDownloadButton").click();
+  await page.locator('#generatorExportFormat button[value="webp"]').click();
+  await page.locator("#generatorExportSubmit").click();
+  await page.locator("#generatorExportClose").click();
   const uncroppedDownload = await uncroppedDownloadPromise;
   await page.waitForFunction(() => !window.GeneratorApp.getSummary().exporting);
   const uncroppedPath = await uncroppedDownload.path();
@@ -447,6 +446,20 @@ try {
   assert.equal(cancelled.value, null);
   assert.equal(cancelled.exporting, false);
   assert.match(cancelled.status, /cancelled/i);
+  // Both formats honor the new duration range, including its boundaries.
+  for (const seconds of [1, 15]) {
+    for (const format of ['webp', 'mp4']) {
+      const encoded = await page.evaluate(async ({ seconds, format }) => {
+        const result = await (format === 'mp4' ? GeneratorApp.exportMp4 : GeneratorApp.exportWebp)({ durationSeconds: seconds, download: false, returnBlob: true });
+        if (!result) throw new Error(document.querySelector('#generatorActionStatus').textContent);
+        return { durationMs: result.durationMs, bytes: Array.from(new Uint8Array(await result.blob.arrayBuffer())) };
+      }, { seconds, format });
+      assert.equal(encoded.durationMs, seconds * 1000);
+      const bytes = Buffer.from(encoded.bytes);
+      if (format === 'webp') assert.equal(parseAnimatedWebp(bytes).frames.reduce((sum, frame) => sum + frame.delay, 0), seconds * 1000);
+      else assert.ok(Math.abs((await inspectMp4Video(page, bytes)).duration - seconds) < 0.05);
+    }
+  }
   assert.deepEqual(errors, []);
   process.stdout.write(
     `generator WebP + MP4 export regression passed (${result.width}x${result.height}, ` +
@@ -454,8 +467,12 @@ try {
     `${(result.size / 1_000_000).toFixed(2)}mb WebP / ` +
     `${(mp4Result.size / 1_000_000).toFixed(2)}mb MP4)\n`
   );
+} catch (error) {
+  console.error('Export regression failure:', error);
+  console.error(await page.evaluate(() => ({ status: document.querySelector('#generatorActionStatus')?.textContent, summary: window.GeneratorApp?.getSummary() })).catch(() => 'Browser unavailable'));
+  throw error;
 } finally {
-  await context.close();
-  await browser.close();
+  await context.close().catch(() => {});
+  await browser.close().catch(() => {});
   await new Promise((resolveClose) => localServer.server.close(resolveClose));
 }

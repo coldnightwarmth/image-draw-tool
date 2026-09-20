@@ -37,7 +37,7 @@ decodes animated sources, exports image-cycle and blur compositions at the
 canvas's exact pixel dimensions, and checks that selected stamps can render
 above the crop. It validates the animated RIFF/WebP frame structure, lossless
 VP8L color, auto-loop timing, and cancellation. It also validates the split
-download control's six-second, 30fps H.264 MP4 at the canvas's full dimensions,
+export popup's default six-second, 30fps H.264 MP4 at the canvas's full dimensions,
 including its playable duration and AVC container metadata. The generator reuses
 the production animation raster pipeline for both formats, then packages
 full-color WebP frames without GIF palette quantization or streams those frames
@@ -133,3 +133,35 @@ GENERATOR_UNBATCHED_BASELINE=1 node scripts/tests/run-generator-performance-regr
 
 Run timing comparisons sequentially on an otherwise idle machine. CPU/DPI/touch
 emulation does not reproduce Surface graphics drivers, Windows, or mobile Safari.
+
+## Preview stability
+
+```sh
+node scripts/tests/run-generator-stability-regression.mjs
+```
+
+Checks the 300-GIF single-canvas preview, frame backpressure, sidebar stability,
+crop inspection and renderer recovery, loading/low-FPS indicators, sidebar input
+priority, and opt-in **smooth render preview** and default native-browser mode with clean WebP/MP4
+exports. See
+[`docs/generator-stable-preview.md`](../../docs/generator-stable-preview.md)
+for renderer limits and test coverage.
+
+## Export options and live tab recording
+
+```sh
+node scripts/tests/run-generator-live-capture-regression.mjs
+node scripts/tests/run-generator-tab-capture-smoke.mjs
+```
+
+The regression uses a fixture video stream with real browser encoding/playback
+and exercises automatic download, early finish, permission denial, crop failure,
+recorder errors, cancellation and stream cleanup. The smoke test uses actual
+Chromium tab capture and Region Capture in an isolated browser; its test-only
+`--auto-accept-this-tab-capture` flag selects only that test tab. These do not
+capture your desktop or existing browser tabs. Run browser suites sequentially.
+
+The export suite also checks 1- and 15-second normal WebP/MP4 output. The live
+recording suite checks popup defaults, realtime MP4/WebP, chosen-folder writes
+using an isolated origin filesystem, filename collisions, folder errors, mobile
+popup bounds and smooth-preview continuity during capture.

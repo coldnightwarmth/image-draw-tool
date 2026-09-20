@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20260917-performance-v2";
+  const GENERATOR_ASSET_REVISION = "20260920-bookmark-controls-v7";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
@@ -72,7 +72,6 @@
   const PIXELATE_PREVIEW_INTERVAL_MS = 50;
   const EXPORT_LOOP_MIN_MS = 2500;
   const EXPORT_LOOP_MAX_MS = 6000;
-  const EXPORT_MP4_DURATION_MS = 6000;
   const EXPORT_MP4_FRAME_RATE = 30;
   const EXPORT_MP4_CODEC = "avc1.420033";
   const byId = (id) => document.getElementById(id);
@@ -92,6 +91,8 @@
     dimensionBadge: byId("generatorDimensionBadge"),
     canvasInfoDismiss: byId("generatorCanvasInfoDismissButton"),
     canvasMeta: byId("generatorCanvasMeta"),
+    loadingSpinner: byId("generatorLoadingSpinner"),
+    lowFps: byId("generatorLowFps"),
     status: byId("generatorStatus"),
     catalogCount: byId("generatorCatalogCount"),
     sourceHint: byId("generatorSourceHint"),
@@ -112,6 +113,8 @@
     marginHint: byId("generatorMarginHint"),
     cropInspect: byId("generatorCropInspectButton"),
     cropInspectStatus: byId("generatorCropInspectStatus"),
+    smoothRenderPreview: byId("generatorSmoothPreviewToggle"),
+    captureFinish: byId("generatorLiveCaptureFinish"),
     count: byId("generatorCountSlider"),
     countValue: byId("generatorCountValue"),
     countRandom: byId("generatorCountRandomToggle"),
@@ -133,8 +136,20 @@
     sequenceHint: byId("generatorSequenceHint"),
     sequencePause: byId("generatorSequencePauseButton"),
     bookmark: byId("generatorBookmarkButton"),
-    downloadWebp: byId("generatorDownloadWebpButton"),
-    downloadMp4: byId("generatorDownloadMp4Button"),
+    download: byId("generatorDownloadButton"),
+    exportDialog: byId("generatorExportDialog"),
+    exportClose: byId("generatorExportClose"),
+    exportSettings: byId("generatorExportSettings"),
+    exportDestination: byId("generatorExportDestination"),
+    exportChooseFolder: byId("generatorExportChooseFolder"),
+    exportResetFolder: byId("generatorExportResetFolder"),
+    exportDuration: byId("generatorExportDuration"),
+    exportDurationValue: byId("generatorExportDurationValue"),
+    exportFormat: byId("generatorExportFormat"),
+    exportMode: byId("generatorExportMode"),
+    exportStatus: byId("generatorExportStatus"),
+    exportSubmit: byId("generatorExportSubmit"),
+    exportDialogCancel: byId("generatorExportDialogCancel"),
     exportCancel: byId("generatorExportCancelButton"),
     exportProgress: byId("generatorExportProgress"),
     exportProgressBar: byId("generatorExportProgressBar"),
@@ -142,7 +157,9 @@
     bookmarkCount: byId("generatorBookmarkCount"),
     bookmarkGallery: byId("generatorBookmarkGallery"),
     bookmarkEmpty: byId("generatorBookmarkEmpty"),
-    protectBookmarks: byId("generatorProtectBookmarksButton"),
+    clearBookmarks: byId("generatorClearBookmarksButton"),
+    bookmarkLoadStatus: byId("generatorBookmarkLoadStatus"),
+    bookmarkLoadText: byId("generatorBookmarkLoadText"),
     backupBookmarks: byId("generatorBackupBookmarksButton"),
     restoreBookmarksButton: byId("generatorRestoreBookmarksButton"),
     restoreBookmarks: byId("generatorRestoreBookmarksInput"),
@@ -304,8 +321,254 @@
 
   const generatorPixelateProxyMap = new WeakMap();
   const generatorSequenceIterationHandlerMap = new WeakMap();
+  const brushUrlCache = new Map();
   let mp4MuxerPromise = null;
   let nextExportRasterSessionId = 1;
+
+  // Opt-in preview presents complete frames without hundreds of animation surfaces.
+  const stablePreviewCanvas = document.createElement("canvas");
+  stablePreviewCanvas.id = "generatorStablePreview";
+  stablePreviewCanvas.hidden = true;
+  stablePreviewCanvas.setAttribute("aria-hidden", "true");
+  elements.canvas.appendChild(stablePreviewCanvas);
+  let stablePreview = null;
+  let stablePreviewTimer = null;
+
+  let sidebarBusyUntil = 0;
+  let previewLoading = true;
+  let previewFpsEstimate = null;
+  let fpsWindowStart = 0;
+  let fpsWindowFrames = 0;
+  let loadWatchCleanup = () => {};
+
+  function updatePreviewStatus() {
+    elements.loadingSpinner.hidden = !previewLoading;
+    elements.lowFps.hidden = previewLoading || previewFpsEstimate === null ||
+      previewFpsEstimate >= 24 || state.cropInspectionActive || document.hidden;
+  }
+
+  function setPreviewLoading(loading) {
+    if (previewLoading === Boolean(loading)) return;
+    previewLoading = Boolean(loading);
+    resetPreviewFps();
+  }
+
+  function resetPreviewFps() {
+    fpsWindowStart = 0;
+    fpsWindowFrames = 0;
+    previewFpsEstimate = null;
+    updatePreviewStatus();
+  }
+
+  function recordPreviewFrame(now) {
+    if (previewLoading || document.hidden || state.cropInspectionActive) return;
+    if (!fpsWindowStart) { fpsWindowStart = now; return; }
+    fpsWindowFrames += 1;
+    samplePreviewFps(now);
+  }
+
+  function samplePreviewFps(now) {
+    if (!fpsWindowStart || previewLoading || document.hidden || state.cropInspectionActive || now - fpsWindowStart < 1000) return;
+    previewFpsEstimate = 1000 * fpsWindowFrames / (now - fpsWindowStart);
+    fpsWindowStart = now;
+    fpsWindowFrames = 0;
+    updatePreviewStatus();
+  }
+
+  function monitorNativePreviewFrames(now) {
+    // rAF measures browser scheduling in native mode; JS cannot measure dropped
+    // GPU surfaces or the embedded animation rate of each GIF.
+    if (!elements.canvas.classList.contains("has-stable-preview")) recordPreviewFrame(now);
+    else samplePreviewFps(now); // also report stalled worker frames, not just slow arrivals
+    requestAnimationFrame(monitorNativePreviewFrames);
+  }
+
+  function watchCompositionLoads(forceNative = false) {
+    loadWatchCleanup();
+    const pending = new Set();
+    const cleanups = [];
+    let refreshTimer = null;
+    const update = () => {
+      refreshTimer = null;
+      if (!elements.canvas.classList.contains("has-stable-preview")) setPreviewLoading(pending.size > 0);
+    };
+    for (const image of elements.composition.querySelectorAll("img.generator-stamp")) {
+      if (image.complete) continue; // includes failed requests, which must not spin forever
+      pending.add(image);
+      const settled = () => {
+        // The existing error handler may have selected a fallback source.
+        if (!image.complete) return;
+        pending.delete(image);
+        image.removeEventListener("load", settled);
+        image.removeEventListener("error", settled);
+        if (refreshTimer === null) refreshTimer = setTimeout(update, 50);
+      };
+      image.addEventListener("load", settled);
+      image.addEventListener("error", settled);
+      cleanups.push(() => { image.removeEventListener("load", settled); image.removeEventListener("error", settled); });
+      // Native rendering needs all stamps ready, including ones that an effect
+      // later moves into view. Worker-only previews decode their own sources.
+      if (forceNative || !elements.smoothRenderPreview.checked) image.loading = "eager";
+    }
+    loadWatchCleanup = () => {
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+      for (const cleanup of cleanups) cleanup();
+      pending.clear();
+    };
+    update();
+  }
+
+  function stopStablePreview(keepFrame = false) {
+    if (stablePreviewTimer !== null) {
+      clearTimeout(stablePreviewTimer);
+      stablePreviewTimer = null;
+    }
+    if (stablePreview) {
+      clearTimeout(stablePreview.timer);
+      stablePreview.task.cancel();
+      stablePreview.resolveReady?.();
+      stablePreview = null;
+    }
+    resetPreviewFps();
+    if (!keepFrame) {
+      stablePreviewCanvas.hidden = true;
+      elements.canvas.classList.remove("has-stable-preview");
+      elements.canvas.dataset.previewRenderer = "dom";
+    }
+  }
+
+  function scheduleStablePreview() {
+    if (stablePreviewTimer !== null) clearTimeout(stablePreviewTimer);
+    stablePreviewTimer = setTimeout(() => {
+      stablePreviewTimer = null;
+      void startStablePreview();
+    }, 0);
+  }
+
+  async function startStablePreview() {
+    if (state.exportTask && state.exportTask.format !== "capture") return;
+    if (!state.currentCount || !elements.smoothRenderPreview.checked || state.cropInspectionActive ||
+        typeof Worker !== "function" || typeof OffscreenCanvas !== "function") {
+      stopStablePreview(false);
+      scheduleGeneratorPixelatePreview();
+      watchCompositionLoads(true);
+      return;
+    }
+    if (performance.now() < sidebarBusyUntil) {
+      stablePreviewTimer = setTimeout(() => {
+        stablePreviewTimer = null;
+        void startStablePreview();
+      }, Math.max(16, sidebarBusyUntil - performance.now()));
+      return;
+    }
+    // Keep the previous complete frame visible throughout preparation/rebuilds.
+    // The first high-count frame can be a static snapshot while GIFs decode.
+    if (!elements.canvas.classList.contains("has-stable-preview")) {
+      const still = renderLiveCompositionCanvas(
+        Math.min(1200, state.currentWidth),
+        Math.min(900, state.currentHeight)
+      );
+      stablePreviewCanvas.width = still.width;
+      stablePreviewCanvas.height = still.height;
+      stablePreviewCanvas.getContext("2d", { alpha: false }).drawImage(still, 0, 0);
+    }
+    stopStablePreview(true);
+    stablePreviewCanvas.hidden = false;
+    elements.canvas.classList.add("has-stable-preview");
+    elements.canvas.dataset.previewRenderer = "preparing";
+    setPreviewLoading(true);
+    const task = createGeneratorExportTask("preview");
+    const preview = { task, frames: 0, timer: null, wake: null, inFlight: false };
+    preview.ready = new Promise((resolve) => { preview.resolveReady = resolve; });
+    stablePreview = preview;
+    const specs = state.currentSpecs.map((spec) => ({ ...spec, sequence: spec.sequence ? { ...spec.sequence } : null }));
+    const background = state.currentBackground;
+    const logicalWidth = state.currentWidth;
+    const logicalHeight = state.currentHeight;
+    const margin = state.currentMarginMode === "crop" ? state.currentMargin : 0;
+    const scale = Math.min(1, 1200 / logicalWidth, 900 / logicalHeight);
+    const dimensions = { width: Math.max(1, Math.round(logicalWidth * scale)), height: Math.max(1, Math.round(logicalHeight * scale)) };
+    const uncropped = state.currentMarginMode === "crop" ? specs.filter((spec) => spec.uncropped) : [];
+    const regular = uncropped.length ? specs.filter((spec) => !spec.uncropped) : specs;
+    let session;
+    const fail = (error) => {
+      if (stablePreview !== preview || task.cancelled) return;
+      // Restore the editable DOM if this browser cannot decode a source. Never
+      // leave an empty or partial worker frame on screen after a renderer error.
+      stopStablePreview(false);
+      scheduleGeneratorPixelatePreview();
+      elements.canvas.dataset.previewRenderer = "dom-fallback";
+      watchCompositionLoads(true);
+      setActionStatus(`Preview renderer unavailable: ${error.message}`, true);
+    };
+    try {
+      session = createGeneratorRasterSession(task);
+      const initialPlan = createGeneratorLoopPlan(specs);
+      const scene = createGeneratorExportScene(specs, dimensions, background, initialPlan, uncropped.length > 0);
+      scene.memoryBudgetBytes = Math.min(getExportRasterBudgetBytes(), 256 * 1024 * 1024);
+      const prepared = await session.prepare(scene);
+      if (stablePreview !== preview || task.cancelled) return;
+      const durations = new Map((prepared.assets || [])
+        .filter((asset) => asset.frameCount > 1 && asset.totalDurationMs > 0)
+        .map((asset) => [String(asset.id), Number(asset.totalDurationMs)]));
+      const plan = createGeneratorLoopPlan(specs, durations);
+      const epoch = performance.now();
+      let previousTime = epoch;
+      let sequenceTime = 0;
+      const draw = async () => {
+        if (stablePreview !== preview || task.cancelled || document.hidden || preview.inFlight) return;
+        const now = performance.now();
+        if (now < sidebarBusyUntil) {
+          preview.timer = setTimeout(() => void draw(), Math.max(16, sidebarBusyUntil - now));
+          return;
+        }
+        preview.inFlight = true;
+        if (!state.sequencePaused) sequenceTime += now - previousTime;
+        previousTime = now;
+        const timeMs = now - epoch;
+        const frameBackground = state.currentBackground;
+        const { regularEntries, overlayEntries } = createGeneratorFrameEntries(
+          regular, uncropped, timeMs, plan, sequenceTime
+        );
+        try {
+          const output = await session.renderFrame(timeMs,
+            regularEntries, {
+              output: "bitmap",
+              background: { include: !uncropped.length, color: frameBackground, matteColor: uncropped.length ? "" : frameBackground },
+              generatorComposite: {
+                background: frameBackground,
+                crop: margin > 0 ? { margin, width: logicalWidth, height: logicalHeight } : null,
+                overlayEntries
+              }
+            });
+          const bitmap = output.bitmap;
+          if (!bitmap) throw new Error("Missing completed preview frame");
+          try {
+            if (stablePreview !== preview || task.cancelled) return;
+            // Resize and copy in a single task: the compositor never sees a
+            // cleared canvas or a frame with only some stamps painted.
+            if (stablePreviewCanvas.width !== dimensions.width) stablePreviewCanvas.width = dimensions.width;
+            if (stablePreviewCanvas.height !== dimensions.height) stablePreviewCanvas.height = dimensions.height;
+            stablePreviewCanvas.getContext("2d", { alpha: false }).drawImage(bitmap, 0, 0);
+            preview.frames += 1;
+            if (preview.frames === 1) setPreviewLoading(false);
+            recordPreviewFrame(performance.now());
+            preview.resolveReady();
+            elements.canvas.dataset.previewRenderer = "worker";
+          } finally { bitmap.close(); }
+          if (!document.hidden && stablePreview === preview) {
+            preview.timer = setTimeout(() => void draw(), Math.max(16, 50 - (performance.now() - now)));
+          }
+        } catch (error) { fail(error); }
+        finally { preview.inFlight = false; }
+      };
+      preview.wake = () => {
+        clearTimeout(preview.timer);
+        void draw();
+      };
+      await draw();
+    } catch (error) { fail(error); }
+  }
 
   function clamp(value, minimum, maximum) {
     return Math.min(maximum, Math.max(minimum, value));
@@ -414,8 +677,10 @@
   }
 
   function getBrushUrl(source) {
+    if (brushUrlCache.has(source)) return brushUrlCache.get(source);
     const url = new URL(`../${encodeBrushPath(source)}`, document.baseURI);
     url.searchParams.set("generatorv", GENERATOR_ASSET_REVISION);
+    brushUrlCache.set(source, url.href);
     return url.href;
   }
 
@@ -797,6 +1062,7 @@
       updateCropInspectionUi();
       return;
     }
+    if (nextActive) stopStablePreview(false);
     state.cropInspectionActive = nextActive;
     elements.canvas.classList.toggle("crop-inspection-active", nextActive);
     for (const image of getSortedLiveStamps()) {
@@ -817,6 +1083,7 @@
     }
     if (!nextActive) {
       scheduleGeneratorPixelatePreview();
+      scheduleStablePreview();
     }
     updateCropInspectionUi();
   }
@@ -2492,7 +2759,7 @@
 
   function runGeneratorPixelatePreviews(now) {
     state.pixelatePreviewFrameId = null;
-    if (state.cropInspectionActive || document.hidden) {
+    if (state.cropInspectionActive || document.hidden || elements.canvas.classList.contains("has-stable-preview")) {
       return;
     }
     if (now - state.pixelatePreviewLastUpdate < PIXELATE_PREVIEW_INTERVAL_MS) {
@@ -2526,7 +2793,7 @@
   }
 
   function scheduleGeneratorPixelatePreview() {
-    if (state.pixelatePreviewFrameId !== null || state.cropInspectionActive || document.hidden) {
+    if (state.pixelatePreviewFrameId !== null || state.cropInspectionActive || document.hidden || elements.canvas.classList.contains("has-stable-preview")) {
       return;
     }
     state.pixelatePreviewFrameId = requestAnimationFrame(runGeneratorPixelatePreviews);
@@ -2710,12 +2977,15 @@
   function setActionStatus(message, isError = false) {
     elements.actionStatus.textContent = message;
     elements.actionStatus.classList.toggle("is-error", isError);
+    if (state.exportTask || elements.exportDialog.open) {
+      elements.exportStatus.textContent = message;
+      elements.exportStatus.classList.toggle("is-error", isError);
+    }
   }
 
   function updateBookmarkSafetyUi() {
     const persisted = state.bookmarkStoragePersisted;
-    elements.protectBookmarks.disabled = state.bookmarkSafetyBusy || persisted === true;
-    elements.protectBookmarks.textContent = persisted === true ? "storage protected" : "protect storage";
+    elements.clearBookmarks.disabled = state.bookmarkSafetyBusy || !state.bookmarks.length;
     elements.backupBookmarks.disabled = state.bookmarkSafetyBusy || state.bookmarks.length < 1;
     elements.restoreBookmarksButton.disabled = state.bookmarkSafetyBusy;
     elements.restoreBookmarks.disabled = state.bookmarkSafetyBusy;
@@ -2751,15 +3021,15 @@
   }
 
   function syncCurrentBookmarkUI() {
+    syncExportOptionsUi();
     const bookmarked = Boolean(state.currentBookmarkId);
     elements.bookmark.classList.toggle("is-bookmarked", bookmarked);
     elements.bookmark.disabled = !state.bookmarkStorageAvailable ||
-      !state.currentCount || bookmarked || state.generating || Boolean(state.exportTask);
+      !state.currentCount || bookmarked || state.bookmarkSafetyBusy || state.generating || Boolean(state.exportTask);
     elements.bookmark.setAttribute("aria-pressed", String(bookmarked));
     elements.bookmark.querySelector("span:last-child").textContent = bookmarked ? "bookmarked" : "bookmark";
     const exportDisabled = !state.currentCount || state.generating || Boolean(state.exportTask);
-    elements.downloadWebp.disabled = exportDisabled;
-    elements.downloadMp4.disabled = exportDisabled;
+    elements.download.disabled = exportDisabled;
     elements.backgroundOnly.disabled = !state.currentCount || state.generating || Boolean(state.exportTask);
     updateBookmarkSafetyUi();
     updateHistoryUi();
@@ -2937,7 +3207,8 @@
       sequenceEnabled: elements.sequenceEnabled.checked,
       sequenceEffects: getSelectedSequenceEffects(),
       sequenceTimings: getSelectedSequenceTimings(),
-      sequencePaused: state.sequencePaused
+      sequencePaused: state.sequencePaused,
+      smoothRenderPreview: elements.smoothRenderPreview.checked
     };
   }
 
@@ -3023,6 +3294,7 @@
       '.generator-source-checkbox[data-source-kind="tag"]',
       controls.selectedTags
     );
+    elements.smoothRenderPreview.checked = controls.smoothRenderPreview === true;
     elements.width.value = String(controls.width || DEFAULT_WIDTH);
     elements.height.value = String(controls.height || DEFAULT_HEIGHT);
     state.aspectLocked = false;
@@ -3175,6 +3447,8 @@
       background = `#${(randomSeed() & 0xffffff).toString(16).padStart(6, "0")}`;
     }
     state.currentBackground = background;
+    if (stablePreview) stablePreview.wake?.();
+    else scheduleStablePreview();
     state.currentBookmarkId = "";
     elements.canvas.style.backgroundColor = background;
     elements.canvas.style.setProperty("--generator-canvas", background);
@@ -3527,6 +3801,54 @@
     return record;
   }
 
+  async function clearLocalBookmarks() {
+    if (state.bookmarkSafetyBusy || !state.bookmarks.length) return;
+    if (!globalThis.confirm("Clear all local bookmarks? This action cannot be undone. Downloaded backup files will not be affected.")) return;
+    state.bookmarkSafetyBusy = true;
+    syncCurrentBookmarkUI();
+    try {
+      // The active composition shares this store: delete only bookmark records.
+      await runBookmarkRequest("readwrite", (store) => {
+        const request = store.openCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return;
+          if (cursor.key !== ACTIVE_SESSION_RECORD_ID && cursor.value.recordType !== ACTIVE_SESSION_RECORD_TYPE) cursor.delete();
+          cursor.continue();
+        };
+        return request;
+      });
+      state.currentBookmarkId = "";
+      await refreshBookmarks();
+      await flushActiveSessionSave();
+      setActionStatus("local bookmarks cleared");
+    } catch (error) {
+      setActionStatus("could not clear local bookmarks", true);
+    } finally {
+      state.bookmarkSafetyBusy = false;
+      syncCurrentBookmarkUI();
+    }
+  }
+
+  async function readBookmarkBackup(file) {
+    // Parse large JSON away from the UI thread so the spinner and sidebar keep moving.
+    const url = URL.createObjectURL(new Blob([
+      "onmessage = async ({data}) => { try { postMessage({payload: JSON.parse(await data.text())}); } catch (error) { postMessage({error: error.message}); } };"
+    ], { type: "text/javascript" }));
+    let worker;
+    try {
+      worker = new Worker(url);
+      return await new Promise((resolve, reject) => {
+        worker.onmessage = ({ data }) => data.error ? reject(new Error(data.error)) : resolve(data.payload);
+        worker.onerror = () => reject(new Error("Could not read bookmark backup"));
+        worker.postMessage(file);
+      });
+    } finally {
+      worker?.terminate();
+      URL.revokeObjectURL(url);
+    }
+  }
+
   async function restoreBookmarksFromFile(file) {
     if (state.bookmarkSafetyBusy || !(file instanceof File)) {
       return false;
@@ -3536,10 +3858,13 @@
       return false;
     }
     state.bookmarkSafetyBusy = true;
-    updateBookmarkSafetyUi();
+    syncCurrentBookmarkUI();
+    elements.bookmarkLoadStatus.hidden = false;
+    elements.bookmarkLoadText.textContent = "loading bookmarks…";
+    elements.bookmarkGallery.setAttribute("aria-busy", "true");
     setActionStatus("checking bookmark backup…");
     try {
-      const payload = JSON.parse(await file.text());
+      const payload = await readBookmarkBackup(file);
       if (
         payload?.format !== BOOKMARK_BACKUP_FORMAT ||
         payload?.version !== BOOKMARK_BACKUP_VERSION ||
@@ -3553,6 +3878,10 @@
       const restored = [];
       for (const rawRecord of payload.bookmarks) {
         restored.push(await normalizeBookmarkBackupRecord(rawRecord));
+        if (restored.length % 10 === 0) {
+          elements.bookmarkLoadText.textContent = `loading bookmarks… ${restored.length} / ${payload.bookmarks.length}`;
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       }
       const merged = new Map(state.bookmarks.map((record) => [record.id, record]));
       for (const record of restored) {
@@ -3576,7 +3905,9 @@
       return false;
     } finally {
       state.bookmarkSafetyBusy = false;
-      updateBookmarkSafetyUi();
+      elements.bookmarkLoadStatus.hidden = true;
+      elements.bookmarkGallery.removeAttribute("aria-busy");
+      syncCurrentBookmarkUI();
     }
   }
 
@@ -3689,7 +4020,7 @@
   }
 
   async function bookmarkCurrentComposition() {
-    if (!state.currentCount || state.currentBookmarkId || state.generating || state.exportTask) {
+    if (state.bookmarkSafetyBusy || !state.currentCount || state.currentBookmarkId || state.generating || state.exportTask) {
       return;
     }
     if (state.bookmarks.length >= MAX_BOOKMARKS) {
@@ -3735,6 +4066,7 @@
   }
 
   async function restoreCompositionRecord(record, options = {}) {
+    stopStablePreview(true);
     setCropInspectionActive(false);
     const specs = deserializeSpecs(record?.composition?.specs);
     const settings = record?.composition?.settings;
@@ -3879,7 +4211,7 @@
   }
 
   async function deleteBookmark(record) {
-    if (!record?.id || !globalThis.confirm("Delete this bookmarked composition?")) {
+    if (state.bookmarkSafetyBusy || !record?.id || !globalThis.confirm("Delete this bookmarked composition?")) {
       return;
     }
     try {
@@ -3960,6 +4292,10 @@
     }
     context.fillStyle = state.currentBackground;
     context.fillRect(0, 0, canvas.width, canvas.height);
+    if (elements.canvas.classList.contains("has-stable-preview") && stablePreviewCanvas.width > 0) {
+      context.drawImage(stablePreviewCanvas, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    }
     const scaleX = canvas.width / Math.max(1, state.currentWidth);
     const scaleY = canvas.height / Math.max(1, state.currentHeight);
     const images = getSortedLiveStamps();
@@ -3990,7 +4326,8 @@
   }
 
   async function createCompositionThumbnailBlob() {
-    const images = getSortedLiveStamps();
+    if (stablePreview) await stablePreview.ready;
+    const images = elements.canvas.classList.contains("has-stable-preview") ? [] : getSortedLiveStamps();
     await Promise.race([
       Promise.all(images.map((image) => {
         if (image.complete && image.naturalWidth > 0) {
@@ -4057,7 +4394,7 @@
     } else if (task) {
       elements.exportProgress.setAttribute(
         "aria-label",
-        task.format === "mp4" ? "MP4 export progress" : "Animated WebP export progress"
+        task.format === "capture" ? "Live recording progress" : task.format === "mp4" ? "MP4 export progress" : "Animated WebP export progress"
       );
       updateGeneratorExportProgress(task, 0, "Preparing");
     }
@@ -4077,6 +4414,8 @@
           return;
         }
         this.cancelled = true;
+        this.captureAbort?.abort();
+        this.captureStream?.getTracks().forEach((track) => track.stop());
         this.rasterSession?.cancel();
         try {
           this.videoEncoder?.close();
@@ -4120,7 +4459,7 @@
         readySettled = true;
         rejectReady(new Error("The animation renderer took too long to start"));
       }
-    }, EXPORT_STARTUP_TIMEOUT_MS);
+    }, task.format === "preview" ? 30000 : EXPORT_STARTUP_TIMEOUT_MS);
 
     const close = (error = null) => {
       if (closed) {
@@ -4430,7 +4769,7 @@
     const sequenceWeightTotal = Array.from(animations.sequences.values())
       .reduce((sum, item) => sum + item.weight, 0) || 1;
     const candidates = forcedDurationMs
-      ? [clamp(Math.round(forcedDurationMs / 10) * 10, EXPORT_LOOP_MIN_MS, EXPORT_LOOP_MAX_MS)]
+      ? [clamp(Math.round(forcedDurationMs / 10) * 10, 1000, 15000)]
       : Array.from(
           { length: Math.floor((EXPORT_LOOP_MAX_MS - EXPORT_LOOP_MIN_MS) / 100) + 1 },
           (_, index) => EXPORT_LOOP_MIN_MS + index * 100
@@ -4566,7 +4905,7 @@
     return points[points.length - 1][1];
   }
 
-  function createGeneratorExportEntry(spec, timeMs, loopPlan) {
+  function createGeneratorExportEntry(spec, timeMs, loopPlan, sequenceTimeMs = timeMs) {
     const sequence = spec.sequence;
     let centerX = spec.x;
     let centerY = spec.y;
@@ -4588,7 +4927,7 @@
     if (sequence) {
       const duration = Math.max(100, Number(sequence.duration) || 2000);
       const sequenceRate = loopPlan.sequenceRates.get(getSequenceLoopKey(sequence)) || 1;
-      const position = (timeMs * sequenceRate - (Number(sequence.delay) || 0)) / duration;
+      const position = (sequenceTimeMs * sequenceRate - (Number(sequence.delay) || 0)) / duration;
       const progress = positiveModulo(position, 1);
       const level = getSequenceTriangleLevel(sequence, progress);
       if (sequence.effect === "show-hide") {
@@ -4841,6 +5180,13 @@
     );
   }
 
+  function createGeneratorFrameEntries(regularSpecs, uncroppedSpecs, timeMs, loopPlan, sequenceTimeMs = timeMs) {
+    return {
+      regularEntries: regularSpecs.map((spec) => createGeneratorExportEntry(spec, timeMs, loopPlan, sequenceTimeMs)),
+      overlayEntries: uncroppedSpecs.map((spec) => createGeneratorExportEntry(spec, timeMs, loopPlan, sequenceTimeMs))
+    };
+  }
+
   async function renderGeneratorFramePixels(
     session,
     regularSpecs,
@@ -4851,15 +5197,18 @@
     background,
     outputKind = "rgba"
   ) {
+    const { regularEntries, overlayEntries } = createGeneratorFrameEntries(
+      regularSpecs, uncroppedSpecs, timeMs, loopPlan
+    );
     const output = await session.renderFrame(timeMs,
-      regularSpecs.map((spec) => createGeneratorExportEntry(spec, timeMs, loopPlan)), {
+      regularEntries, {
         output: outputKind,
         generatorComposite: {
           background,
           crop: state.currentMarginMode === "crop" ? {
             margin: state.currentMargin, width: state.currentWidth, height: state.currentHeight
           } : null,
-          overlayEntries: uncroppedSpecs.map((spec) => createGeneratorExportEntry(spec, timeMs, loopPlan))
+          overlayEntries
         }
       });
     return outputKind === "webp"
@@ -4868,7 +5217,7 @@
   }
 
   async function renderGeneratorWebp(task, specs, background) {
-    const metadataPlan = createGeneratorLoopPlan(specs);
+    const metadataPlan = createGeneratorLoopPlan(specs, null, task.durationMs);
     const dimensions = getGeneratorExportDimensions();
     const session = createGeneratorRasterSession(task, (message) => {
       if (message.action === "prepare" && Number(message.total) > 0) {
@@ -4902,7 +5251,8 @@
       );
       const loopPlan = createGeneratorLoopPlan(
         specs,
-        decodedDurations
+        decodedDurations,
+        task.durationMs
       );
       const delays = createGeneratorFrameDelays(
         loopPlan.durationMs,
@@ -5016,7 +5366,7 @@
     const encodedWidth = dimensions.width + (dimensions.width % 2);
     const encodedHeight = dimensions.height + (dimensions.height % 2);
     const encoderConfig = await getGeneratorMp4EncoderConfig(encodedWidth, encodedHeight);
-    const metadataPlan = createGeneratorLoopPlan(specs, null, EXPORT_MP4_DURATION_MS);
+    const metadataPlan = createGeneratorLoopPlan(specs, null, task.durationMs);
     const session = createGeneratorRasterSession(task, (message) => {
       if (message.action === "prepare" && Number(message.total) > 0) {
         updateGeneratorExportProgress(
@@ -5051,7 +5401,7 @@
       const loopPlan = createGeneratorLoopPlan(
         specs,
         decodedDurations,
-        EXPORT_MP4_DURATION_MS
+        task.durationMs
       );
       const target = new ArrayBufferTarget();
       const muxer = new Muxer({
@@ -5097,7 +5447,7 @@
         throw new Error("This browser cannot prepare MP4 video frames");
       }
       const frameCount = Math.round(
-        EXPORT_MP4_DURATION_MS / 1000 * EXPORT_MP4_FRAME_RATE
+        task.durationMs / 1000 * EXPORT_MP4_FRAME_RATE
       );
       for (let index = 0; index < frameCount; index += 1) {
         throwIfExportCancelled(task);
@@ -5112,7 +5462,8 @@
           timeMs,
           loopPlan,
           dimensions,
-          background
+          background,
+          "rgba"
         );
         frameContext.fillStyle = background;
         frameContext.fillRect(0, 0, encodedWidth, encodedHeight);
@@ -5171,7 +5522,7 @@
         height: dimensions.height,
         encodedWidth,
         encodedHeight,
-        durationMs: EXPORT_MP4_DURATION_MS,
+        durationMs: task.durationMs,
         frameCount,
         fps: EXPORT_MP4_FRAME_RATE,
         bitrate: encoderConfig.bitrate,
@@ -5192,6 +5543,372 @@
       if (task.videoEncoder === encoder) {
         task.videoEncoder = null;
       }
+    }
+  }
+
+  function supportsLiveCapture() {
+    return typeof navigator.mediaDevices?.getDisplayMedia === "function" &&
+      typeof window.MediaRecorder === "function";
+  }
+
+  let exportDirectoryHandle = null;
+  let choosingExportDirectory = false;
+
+  function normalizeExportDuration(seconds = 6) {
+    return clamp(Math.round(Number(seconds) || 6), 1, 15) * 1000;
+  }
+
+  function liveRecordingMimeType(format) {
+    if (!supportsLiveCapture()) return "";
+    const types = format === "mp4"
+      ? ["video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4"]
+      : ["video/webm;codecs=vp8", "video/mp4", "video/webm"];
+    return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+  }
+
+  function syncExportOptionsUi() {
+    const busy = Boolean(state.exportTask);
+    const recording = state.exportTask?.format === "capture";
+    const realtime = elements.exportMode.dataset.value === "realtime";
+    const format = elements.exportFormat.dataset.value;
+    const supported = !realtime || Boolean(liveRecordingMimeType(format));
+    elements.exportSettings.disabled = busy || choosingExportDirectory;
+    elements.exportSubmit.disabled = busy || choosingExportDirectory || !state.currentCount || state.generating || !supported;
+    elements.exportSubmit.textContent = realtime ? `record ${format}` : `export ${format}`;
+    elements.exportDialogCancel.hidden = !busy;
+    elements.captureFinish.hidden = !recording;
+    elements.captureFinish.disabled = !state.exportTask?.finishCapture;
+    elements.smoothRenderPreview.disabled = busy;
+    elements.exportCancel.textContent = recording ? "cancel recording" : "cancel export";
+    elements.exportCancel.classList.toggle("has-finish", recording);
+    elements.exportDurationValue.textContent = `${elements.exportDuration.value} sec`;
+    const canChoose = typeof window.showDirectoryPicker === "function";
+    elements.exportChooseFolder.disabled = !canChoose;
+    elements.exportDestination.textContent = exportDirectoryHandle?.name || "Downloads";
+    elements.exportResetFolder.hidden = !exportDirectoryHandle;
+    for (const group of [elements.exportFormat, elements.exportMode]) {
+      for (const button of group.querySelectorAll("button")) {
+        button.setAttribute("aria-pressed", String(button.value === group.dataset.value));
+      }
+    }
+    elements.exportChooseFolder.title = canChoose ? "" : "To choose another folder, use your browser’s ask-where-to-save setting.";
+    elements.exportSubmit.title = supported ? "" : `Realtime ${format} recording is unavailable in this browser. Choose normal rendering or another supported format.`;
+  }
+
+  async function chooseExportDirectory() {
+    if (state.exportTask || choosingExportDirectory || typeof window.showDirectoryPicker !== "function") return;
+    const previous = exportDirectoryHandle;
+    choosingExportDirectory = true;
+    syncExportOptionsUi();
+    try {
+      exportDirectoryHandle = await window.showDirectoryPicker({ id: "generator-exports", mode: "readwrite", startIn: previous || "downloads" });
+    } catch (error) {
+      if (error.name !== "AbortError") setActionStatus("Could not access that folder. Choose another folder or Downloads.", true);
+    } finally {
+      choosingExportDirectory = false;
+      syncExportOptionsUi();
+    }
+  }
+
+  async function saveGeneratorExportBlob(blob, filename, directory, task) {
+    throwIfExportCancelled(task);
+    if (!directory) { downloadGeneratorBlob(blob, filename); return filename; }
+    // Keep existing files: choose a numbered name instead of overwriting a prior export.
+    let name = filename;
+    for (let suffix = 1; ; suffix++) {
+      throwIfExportCancelled(task);
+      try { await directory.getFileHandle(name); }
+      catch (error) { if (error.name === "NotFoundError") break; throw error; }
+      const dot = filename.lastIndexOf(".");
+      name = `${filename.slice(0, dot)} (${suffix})${filename.slice(dot)}`;
+    }
+    throwIfExportCancelled(task);
+    let writer;
+    let created = false;
+    try {
+      const handle = await directory.getFileHandle(name, { create: true });
+      created = true;
+      writer = await handle.createWritable();
+      throwIfExportCancelled(task);
+      await writer.write(blob);
+      throwIfExportCancelled(task);
+      await writer.close();
+      return name;
+    } catch (error) {
+      try { await writer?.abort(); } catch (_) { /* already closed */ }
+      if (created) { try { await directory.removeEntry(name); } catch (_) { /* revoked permission */ } }
+      throw error;
+    }
+  }
+
+  function setLiveCaptureStatus(message) {
+    elements.exportStatus.textContent = message;
+    setActionStatus(message);
+  }
+
+  function waitForCaptureVideo(video, event, action, task) {
+    return new Promise((resolve, reject) => {
+      const signal = task.captureAbort.signal;
+      const cleanup = () => {
+        clearTimeout(timer);
+        video.removeEventListener(event, done);
+        video.removeEventListener("error", failed);
+        signal.removeEventListener("abort", abort);
+      };
+      const done = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error("Could not decode the recorded video.")); };
+      const abort = () => { cleanup(); reject(createExportCancellationError()); };
+      const timer = setTimeout(failed, 15000);
+      video.addEventListener(event, done, { once: true });
+      video.addEventListener("error", failed, { once: true });
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) { abort(); return; }
+      try { action(); } catch (error) { cleanup(); reject(error); }
+    });
+  }
+
+  async function convertRecordingToWebp(recording, task) {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    const url = URL.createObjectURL(recording.blob);
+    try {
+      await waitForCaptureVideo(video, "loadeddata", () => { video.src = url; video.load(); }, task);
+      const width = video.videoWidth, height = video.videoHeight;
+      if (!width || !height) throw new Error("No video frames were recorded.");
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext("2d", { alpha: false });
+      const durationMs = Math.max(20, Math.round(recording.durationMs / 10) * 10);
+      const delays = createGeneratorFrameDelays(durationMs, 50);
+      const frames = [];
+      let elapsed = 0, bytes = 0;
+      for (let index = 0; index < delays.length; index++) {
+        throwIfExportCancelled(task);
+        const time = Math.min(elapsed / 1000, Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : elapsed / 1000);
+        if (Math.abs(video.currentTime - time) > 0.0001) {
+          await waitForCaptureVideo(video, "seeked", () => { video.currentTime = time; }, task);
+        }
+        context.drawImage(video, 0, 0, width, height);
+        const blob = await canvas.convertToBlob({ type: "image/webp", quality: 1 });
+        throwIfExportCancelled(task);
+        bytes += blob.size;
+        if (bytes > 128 * 1024 * 1024) throw new Error("This WebP is too large. Try a shorter recording or a smaller browser window.");
+        frames.push({ ...parseStillWebpFrame(await blob.arrayBuffer()), delay: delays[index] });
+        elapsed += delays[index];
+        updateGeneratorExportProgress(task, (index + 1) / delays.length * 100, "Converting WebP");
+      }
+      return { blob: createAnimatedWebpBlob(frames, width, height, state.currentBackground), extension: "webp", durationMs, width, height, frameCount: frames.length };
+    } finally {
+      video.pause(); video.removeAttribute("src"); video.load();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function awaitCaptureStep(promise, task, timeoutMs = 0) {
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      const signal = task.captureAbort.signal;
+      const cleanup = () => {
+        if (timer !== null) clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
+      };
+      const abort = () => { cleanup(); reject(createExportCancellationError()); };
+      Promise.resolve(promise).then(
+        (value) => { cleanup(); resolve(value); },
+        (error) => { cleanup(); reject(error); }
+      );
+      if (signal.aborted) { abort(); return; }
+      signal.addEventListener("abort", abort, { once: true });
+      if (timeoutMs) timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("The browser took too long to prepare the recording. Please try again."));
+      }, timeoutMs);
+    });
+  }
+
+  function recordLiveCaptureStream(stream, task) {
+    return new Promise((resolve, reject) => {
+      const mimeType = liveRecordingMimeType(task.outputFormat);
+      if (!mimeType) throw new Error(`Realtime ${task.outputFormat} recording is unavailable in this browser.`);
+      const recorder = new MediaRecorder(stream, {
+        ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 8_000_000
+      });
+      const track = stream.getVideoTracks()[0];
+      const chunks = [];
+      let bytes = 0;
+      let startedAt = null;
+      let recordingDuration = 0;
+      let durationTimer = null;
+      let progressTimer = null;
+      let stopTimer = null;
+      let settled = false;
+      let stopping = false;
+      const signal = task.captureAbort.signal;
+      const cleanup = () => {
+        clearTimeout(durationTimer);
+        clearTimeout(stopTimer);
+        clearInterval(progressTimer);
+        signal.removeEventListener("abort", abort);
+        track.removeEventListener("ended", finish);
+        task.finishCapture = null;
+      };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (recorder.state !== "inactive") {
+          try { recorder.stop(); } catch (_) { /* already stopping */ }
+        }
+        reject(error);
+      };
+      const abort = () => fail(createExportCancellationError());
+      const finish = () => {
+        if (settled || stopping || recorder.state === "inactive") return;
+        stopping = true;
+        recordingDuration = startedAt === null ? 0 : performance.now() - startedAt;
+        clearTimeout(durationTimer);
+        clearInterval(progressTimer);
+        task.finishCapture = null;
+        syncExportOptionsUi();
+        setLiveCaptureStatus("finishing live recording…");
+        stopTimer = setTimeout(() => fail(new Error("The browser could not finish the recording.")), 15000);
+        try { recorder.stop(); } catch (error) { fail(error); }
+      };
+      recorder.addEventListener("dataavailable", ({ data }) => {
+        if (settled || !data?.size) return;
+        bytes += data.size;
+        if (bytes > 128 * 1024 * 1024) {
+          fail(new Error("The recording exceeded the safe size limit. Try a smaller browser window."));
+          return;
+        }
+        chunks.push(data);
+      });
+      recorder.addEventListener("error", (event) => fail(event.error || new Error("Live recording failed.")));
+      recorder.addEventListener("stop", () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (!chunks.length) { reject(new Error("No video frames were recorded.")); return; }
+        const type = recorder.mimeType || chunks[0].type || "video/webm";
+        resolve({
+          blob: new Blob(chunks, { type }),
+          durationMs: recordingDuration || (startedAt === null ? 0 : performance.now() - startedAt),
+          extension: type.includes("mp4") ? "mp4" : "webm"
+        });
+      });
+      recorder.addEventListener("start", () => {
+        if (settled || stopping) return;
+        startedAt = performance.now();
+        task.finishCapture = finish;
+        syncExportOptionsUi();
+        const report = () => {
+          const elapsed = performance.now() - startedAt;
+          updateGeneratorExportProgress(task, elapsed / task.durationMs * 100, "Recording");
+          setLiveCaptureStatus(`recording ${task.captureArea === "canvas" ? "canvas" : "full tab"} · ${(Math.min(task.durationMs, elapsed) / 1000).toFixed(1)} / ${task.durationMs / 1000}s`);
+        };
+        report();
+        progressTimer = setInterval(report, 200);
+        durationTimer = setTimeout(finish, task.durationMs);
+      }, { once: true });
+      signal.addEventListener("abort", abort, { once: true });
+      track.addEventListener("ended", finish, { once: true });
+      if (signal.aborted) { abort(); return; }
+      if (track.readyState === "ended") { fail(new Error("Tab sharing ended before recording started.")); return; }
+      try { recorder.start(1000); } catch (error) { fail(error); }
+    });
+  }
+
+  async function captureLiveComposition(options = {}) {
+    if (!supportsLiveCapture() ||
+        !state.currentCount || state.generating || state.exportTask) return null;
+    setCropInspectionActive(false);
+    const task = createGeneratorExportTask("capture");
+    task.durationMs = normalizeExportDuration(options.durationSeconds);
+    task.outputFormat = options.format === "webp" ? "webp" : "mp4";
+    task.captureAbort = new AbortController();
+    state.exportTask = task;
+    state.lastExport = null;
+    setGeneratorExportUi(true, task);
+    setLiveCaptureStatus("select this generator tab in the browser’s share dialog…");
+    let stream = null;
+    const stopTracks = (value) => value?.getTracks().forEach((track) => track.stop());
+    try {
+      // Must run directly in the user's click task, before any await. Browser
+      // permission is explicit on every recording; never request microphone/audio.
+      const permission = navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 30, max: 60 }, displaySurface: "browser" },
+        audio: false,
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
+        surfaceSwitching: "exclude",
+        monitorTypeSurfaces: "exclude"
+      }).then((value) => {
+        if (task.cancelled) { stopTracks(value); throw createExportCancellationError(); }
+        task.captureStream = value;
+        return value;
+      });
+      stream = await awaitCaptureStep(permission, task);
+      throwIfExportCancelled(task);
+      const track = stream.getVideoTracks()[0];
+      if (!track) throw new Error("The browser did not provide a video track.");
+      // Defense in depth for browsers that ignore audio:false.
+      for (const audio of stream.getAudioTracks()) { audio.stop(); stream.removeTrack(audio); }
+      const surface = track.getSettings().displaySurface;
+      if (surface && surface !== "browser") {
+        throw new Error("Select the generator browser tab, rather than a window or screen, and try again.");
+      }
+      task.captureArea = "tab";
+      if (typeof window.CropTarget?.fromElement === "function" && typeof track.cropTo === "function") {
+        const target = await awaitCaptureStep(CropTarget.fromElement(elements.canvas), task, 15000);
+        try {
+          await awaitCaptureStep(track.cropTo(target), task, 15000);
+          task.captureArea = "canvas";
+        } catch (error) {
+          if (task.cancelled) throw error;
+          // A crop rejection commonly means another tab was selected. Do not
+          // silently record an unexpected full tab in this case.
+          throw new Error("Could not crop this capture. Select this generator tab and try again.");
+        }
+      }
+      throwIfExportCancelled(task);
+      let result = await recordLiveCaptureStream(stream, task);
+      throwIfExportCancelled(task);
+      const settings = track.getSettings();
+      stopTracks(stream); // stop sharing before packaging/downloading
+      if (task.outputFormat === "webp") {
+        setLiveCaptureStatus("converting recorded frames to WebP…");
+        result = await convertRecordingToWebp(result, task);
+      }
+      throwIfExportCancelled(task);
+      let filename = `composition-${formatSeed(state.currentSeed)}-live.${result.extension}`;
+      task.saving = true;
+      if (options.download !== false) filename = await saveGeneratorExportBlob(result.blob, filename, options.directoryHandle, task);
+      state.lastExport = {
+        format: `live-${result.extension}`, filename, captureArea: task.captureArea,
+        size: result.blob.size, durationMs: Math.round(result.durationMs),
+        // Track settings describe the source surface; Region Capture can
+        // produce smaller encoded frames without updating those settings.
+        sourceWidth: settings.width || null, sourceHeight: settings.height || null,
+        ...(result.width ? { width: result.width, height: result.height, frameCount: result.frameCount } : {}),
+        fps: result.frameCount ? result.frameCount / (result.durationMs / 1000) : settings.frameRate || null,
+        realtime: true
+      };
+      setLiveCaptureStatus(`live ${result.extension} saved · ${task.captureArea === "canvas" ? "canvas" : "full tab"} · ${(result.durationMs / 1000).toFixed(1)}s · ${formatExportByteSize(result.blob.size)}`);
+      return options.returnBlob ? { ...state.lastExport, blob: result.blob } : { ...state.lastExport };
+    } catch (error) {
+      setLiveCaptureStatus(task.cancelled || error?.name === "AbortError"
+        ? "live recording cancelled"
+        : error?.name === "NotAllowedError" && !task.saving
+          ? "tab sharing cancelled or not allowed — nothing was recorded"
+          : error?.message || "could not record this tab");
+      return null;
+    } finally {
+      stopTracks(stream);
+      if (state.exportTask === task) state.exportTask = null;
+      setGeneratorExportUi(false);
+      if (!stablePreview) scheduleStablePreview();
+      if (options.showResult && !task.suppressDialog && !elements.exportDialog.open) elements.exportDialog.showModal();
     }
   }
 
@@ -5223,6 +5940,8 @@
     }
     setCropInspectionActive(false);
     const task = createGeneratorExportTask(exportFormat);
+    task.durationMs = normalizeExportDuration(options.durationSeconds);
+    stopStablePreview(true);
     state.exportTask = task;
     state.lastExport = null;
     setGeneratorExportUi(true, task);
@@ -5240,13 +5959,14 @@
       if (!result?.blob) {
         throw new Error(`The ${exportFormat.toUpperCase()} encoder did not produce a file`);
       }
-      const filename = `composition-${formatSeed(state.currentSeed)}.${exportFormat}`;
+      let filename = `composition-${formatSeed(state.currentSeed)}.${exportFormat}`;
       if (options.download !== false) {
-        downloadGeneratorBlob(result.blob, filename);
+        filename = await saveGeneratorExportBlob(result.blob, filename, options.directoryHandle, task);
       }
       state.lastExport = {
         format: exportFormat === "mp4" ? "mp4" : "animated-webp",
         filename,
+        flashing: false,
         size: result.blob.size,
         width: result.width,
         height: result.height,
@@ -5267,7 +5987,7 @@
           ? ` · ${result.encodedWidth}×${result.encodedHeight} encoded`
           : "";
         setActionStatus(
-          `mp4 ready · 6.0s · ${result.fps}fps · ` +
+          `mp4 ready · ${(result.durationMs / 1000).toFixed(1)}s · ${result.fps}fps · ` +
           `${result.width}×${result.height} full resolution${paddedSize} · ` +
           formatExportByteSize(result.blob.size)
         );
@@ -5301,6 +6021,7 @@
         state.exportTask = null;
       }
       setGeneratorExportUi(false);
+      scheduleStablePreview();
     }
   }
 
@@ -5376,6 +6097,9 @@
   }
 
   function updateCanvasChrome(settings, seed, modeCounts, uniqueSourceCount, sequenceSummary) {
+    resetPreviewFps();
+    watchCompositionLoads();
+    scheduleStablePreview();
     const modeSummary = MODE_ORDER
       .filter((mode) => modeCounts[mode])
       .map((mode) => `${modeCounts[mode]} ${mode}`)
@@ -5461,6 +6185,7 @@
     }
     const random = createRandom(seed);
     setCropInspectionActive(false);
+    stopStablePreview(true);
     const token = ++state.generationToken;
     state.generating = true;
     elements.generate.disabled = true;
@@ -5610,11 +6335,35 @@
       historyLimit: MAX_HISTORY_ACTIONS,
       exporting: Boolean(state.exportTask),
       lastExport: state.lastExport ? { ...state.lastExport } : null,
+      previewRenderer: elements.canvas.dataset.previewRenderer || "dom",
+      previewFrames: stablePreview?.frames || 0,
+      previewFps: previewFpsEstimate,
+      previewLoading,
+      smoothRenderPreview: elements.smoothRenderPreview.checked,
       loadFailureCount: state.loadFailureCount
     };
   }
 
   function attachEvents() {
+    elements.captureFinish.addEventListener("click", () => state.exportTask?.finishCapture?.());
+    const prioritizeSidebar = () => { sidebarBusyUntil = performance.now() + 180; };
+    for (const type of ["pointerdown", "pointermove", "input", "keydown", "wheel", "scroll"]) {
+      elements.controls.addEventListener(type, prioritizeSidebar, { passive: true, capture: true });
+    }
+    requestAnimationFrame(monitorNativePreviewFrames);
+    stablePreviewCanvas.addEventListener("contextlost", (event) => {
+      event.preventDefault();
+      stopStablePreview(true);
+    });
+    stablePreviewCanvas.addEventListener("contextrestored", scheduleStablePreview);
+    elements.smoothRenderPreview.addEventListener("change", () => {
+      syncExportOptionsUi();
+      // Preview quality never changes normal export rendering.
+      stopStablePreview(false);
+      scheduleStablePreview();
+      state.currentControlState = captureControlState();
+      scheduleActiveSessionSave();
+    });
     [...RANDOM_RANGE_CONTROLS, ...SEQUENCE_RANGE_CONTROLS].forEach(
       attachRangePointerInteraction
     );
@@ -5817,22 +6566,7 @@
       void bookmarkCurrentComposition();
     });
 
-    elements.protectBookmarks.addEventListener("click", async () => {
-      if (state.bookmarkSafetyBusy) {
-        return;
-      }
-      state.bookmarkSafetyBusy = true;
-      updateBookmarkSafetyUi();
-      const persisted = await requestPersistentBookmarkStorage();
-      state.bookmarkSafetyBusy = false;
-      updateBookmarkSafetyUi();
-      setActionStatus(
-        persisted
-          ? "bookmark storage protected by this browser"
-          : "browser protection was not granted — keep a bookmark backup",
-        !persisted
-      );
-    });
+    elements.clearBookmarks.addEventListener("click", () => void clearLocalBookmarks());
 
     elements.backupBookmarks.addEventListener("click", () => {
       void backupBookmarksToFile();
@@ -5850,12 +6584,44 @@
       }
     });
 
-    elements.downloadWebp.addEventListener("click", () => {
-      void exportCurrentComposition("webp");
+    elements.download.addEventListener("click", () => {
+      syncExportOptionsUi();
+      elements.exportDialog.showModal();
     });
-
-    elements.downloadMp4.addEventListener("click", () => {
-      void exportCurrentComposition("mp4");
+    elements.exportClose.addEventListener("click", () => elements.exportDialog.close());
+    elements.exportDialog.addEventListener("cancel", (event) => {
+      if (state.exportTask) { event.preventDefault(); cancelGeneratorExport(); }
+    });
+    elements.exportDialogCancel.addEventListener("click", cancelGeneratorExport);
+    elements.exportSubmit.addEventListener("click", () => {
+      const options = {
+        durationSeconds: Number(elements.exportDuration.value),
+        directoryHandle: exportDirectoryHandle,
+        format: elements.exportFormat.dataset.value,
+        showResult: true
+      };
+      if (elements.exportMode.dataset.value === "realtime") {
+        // Close the modal before sharing so neither it nor its backdrop appears
+        // over the artwork. Finish/cancel remain available in the bottom toolbar.
+        elements.exportDialog.close();
+        void captureLiveComposition(options);
+      } else {
+        void exportCurrentComposition(options.format, options);
+      }
+    });
+    elements.exportDuration.addEventListener("input", syncExportOptionsUi);
+    for (const group of [elements.exportFormat, elements.exportMode]) {
+      group.addEventListener("click", (event) => {
+        const button = event.target.closest("button");
+        if (!button || !group.contains(button) || elements.exportSettings.disabled) return;
+        group.dataset.value = button.value;
+        syncExportOptionsUi();
+      });
+    }
+    elements.exportChooseFolder.addEventListener("click", () => void chooseExportDirectory());
+    elements.exportResetFolder.addEventListener("click", () => {
+      exportDirectoryHandle = null;
+      syncExportOptionsUi();
     });
 
     elements.exportCancel.addEventListener("click", cancelGeneratorExport);
@@ -5937,6 +6703,7 @@
     });
 
     document.addEventListener("keydown", (event) => {
+      if (elements.exportDialog.open && event.key !== "Escape") return;
       if (
         !event.defaultPrevented &&
         (event.metaKey || event.ctrlKey) &&
@@ -5971,6 +6738,7 @@
     });
 
     document.addEventListener("visibilitychange", () => {
+      resetPreviewFps();
       if (document.hidden) {
         if (state.pixelatePreviewFrameId !== null) {
           cancelAnimationFrame(state.pixelatePreviewFrameId);
@@ -5978,15 +6746,25 @@
         }
         void flushActiveSessionSave();
       } else {
+        if (stablePreview) stablePreview.wake?.();
+        else scheduleStablePreview();
         scheduleGeneratorPixelatePreview();
         scheduleCanvasFit();
       }
     });
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) scheduleStablePreview();
+    });
     window.addEventListener("resize", scheduleCanvasFit);
     window.addEventListener("pagehide", () => {
+      if (state.exportTask?.format === "capture") {
+        state.exportTask.suppressDialog = true;
+        state.exportTask.cancel();
+      }
       void flushActiveSessionSave();
     });
     window.addEventListener("beforeunload", () => {
+      stopStablePreview(true);
       state.exportTask?.cancel();
       // Blob URLs are released with the document. Revoking here breaks lazy
       // thumbnails if navigation is cancelled or this page enters bfcache.
@@ -6044,6 +6822,7 @@
     exportAnimation(options = {}) {
       return exportCurrentComposition("webp", options);
     },
+    captureLive: captureLiveComposition,
     cancelExport: cancelGeneratorExport,
     get catalogSize() {
       return state.catalog.length;
