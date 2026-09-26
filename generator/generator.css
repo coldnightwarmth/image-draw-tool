@@ -1518,7 +1518,7 @@ body.generator-page {
 
 .generator-bookmark-safety-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -1977,3 +1977,15 @@ body.generator-page {
 #generatorBookmarkLoadStatus { display: flex; align-items: center; gap: 7px; font-size: 13px; }
 #generatorBookmarkLoadStatus[hidden] { display: none; }
 .generator-bookmark-loading-spinner { flex: 0 0 12px; height: 12px; border: 2px solid #ccc; border-top-color: #333; border-radius: 50%; animation: generator-loading-spin 800ms linear infinite; }
+
+.generator-bookmark-card[data-export-state="pending"] .generator-bookmark-load,
+.generator-bookmark-card[data-export-state="loading"] .generator-bookmark-load,
+.generator-bookmark-card[data-export-state="exporting"] .generator-bookmark-load { opacity: .4; }
+.generator-bookmark-export-progress { display: block; width: 100%; height: 7px; accent-color: #333; }
+.generator-bookmark-export-status { display: block; padding: 3px 5px; font-size: 12px; overflow-wrap: anywhere; }
+.generator-bookmark-card[data-export-state="failed"] .generator-bookmark-export-status { color: #922; }
+.generator-bookmark-export-progress[hidden], .generator-bookmark-export-status[hidden], #generatorBatchStatus[hidden], #generatorBatchCancel[hidden] { display: none; }
+#generatorBatchStatus { font-size: 13px; }
+
+#generatorBatchOrderOptions .generator-export-label { margin-bottom: 8px; }
+#generatorBatchOrderOptions[hidden] { display: none; }

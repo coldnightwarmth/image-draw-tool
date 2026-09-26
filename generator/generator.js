@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20260920-bookmark-controls-v7";
+  const GENERATOR_ASSET_REVISION = "20260925-bookmark-batch-v3";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
@@ -160,6 +160,11 @@
     clearBookmarks: byId("generatorClearBookmarksButton"),
     bookmarkLoadStatus: byId("generatorBookmarkLoadStatus"),
     bookmarkLoadText: byId("generatorBookmarkLoadText"),
+    batchOrder: byId("generatorBatchOrder"),
+    batchOrderOptions: byId("generatorBatchOrderOptions"),
+    exportAll: byId("generatorExportAllButton"),
+    batchStatus: byId("generatorBatchStatus"),
+    batchCancel: byId("generatorBatchCancel"),
     backupBookmarks: byId("generatorBackupBookmarksButton"),
     restoreBookmarksButton: byId("generatorRestoreBookmarksButton"),
     restoreBookmarks: byId("generatorRestoreBookmarksInput"),
@@ -302,6 +307,7 @@
     dynamicUpdateIncludesNonSequence: false,
     dynamicUpdateSequenceChanges: new Set(),
     applyingHistory: false,
+    batchExport: null,
     exportTask: null,
     lastExport: null,
     sequencePaused: false,
@@ -438,6 +444,7 @@
   }
 
   function scheduleStablePreview() {
+    if (state.batchExport?.mode === "normal") return;
     if (stablePreviewTimer !== null) clearTimeout(stablePreviewTimer);
     stablePreviewTimer = setTimeout(() => {
       stablePreviewTimer = null;
@@ -896,7 +903,7 @@
 
   function updateGenerateAvailability() {
     elements.generate.disabled = state.generating ||
-      Boolean(state.exportTask) ||
+      Boolean(state.exportTask) || Boolean(state.batchExport) ||
       getActiveCatalog().length === 0 ||
       !hasValidSequenceControls();
   }
@@ -2793,6 +2800,7 @@
   }
 
   function scheduleGeneratorPixelatePreview() {
+    if (state.batchExport?.mode === "normal") return;
     if (state.pixelatePreviewFrameId !== null || state.cropInspectionActive || document.hidden || elements.canvas.classList.contains("has-stable-preview")) {
       return;
     }
@@ -2985,6 +2993,7 @@
 
   function updateBookmarkSafetyUi() {
     const persisted = state.bookmarkStoragePersisted;
+    elements.exportAll.disabled = !state.bookmarks.length || state.bookmarkSafetyBusy || Boolean(state.batchExport) || Boolean(state.exportTask);
     elements.clearBookmarks.disabled = state.bookmarkSafetyBusy || !state.bookmarks.length;
     elements.backupBookmarks.disabled = state.bookmarkSafetyBusy || state.bookmarks.length < 1;
     elements.restoreBookmarksButton.disabled = state.bookmarkSafetyBusy;
@@ -3029,8 +3038,8 @@
     elements.bookmark.setAttribute("aria-pressed", String(bookmarked));
     elements.bookmark.querySelector("span:last-child").textContent = bookmarked ? "bookmarked" : "bookmark";
     const exportDisabled = !state.currentCount || state.generating || Boolean(state.exportTask);
-    elements.download.disabled = exportDisabled;
-    elements.backgroundOnly.disabled = !state.currentCount || state.generating || Boolean(state.exportTask);
+    elements.download.disabled = exportDisabled || Boolean(state.batchExport);
+    elements.backgroundOnly.disabled = !state.currentCount || state.generating || Boolean(state.exportTask) || Boolean(state.batchExport);
     updateBookmarkSafetyUi();
     updateHistoryUi();
   }
@@ -3412,7 +3421,7 @@
   function updateHistoryUi() {
     const count = state.history.length;
     elements.undo.hidden = count === 0;
-    elements.undo.disabled = count === 0 || state.generating || Boolean(state.exportTask);
+    elements.undo.disabled = count === 0 || state.generating || Boolean(state.exportTask) || Boolean(state.batchExport);
     const label = count
       ? `Undo last generator action. ${count} ${count === 1 ? "action" : "actions"} available.`
       : "No generator actions to undo";
@@ -3432,7 +3441,7 @@
   }
 
   async function randomizeActiveBackground() {
-    if (!state.currentCount || state.generating || state.exportTask) {
+    if (state.batchExport || !state.currentCount || state.generating || state.exportTask) {
       return false;
     }
     if (state.dynamicUpdateBase) {
@@ -3461,7 +3470,7 @@
   }
 
   async function undoLastGeneratorAction() {
-    if (state.generating || state.exportTask) {
+    if (state.batchExport || state.generating || state.exportTask) {
       return false;
     }
     const pending = takePendingDynamicUpdate();
@@ -3583,7 +3592,7 @@
     if (!state.dynamicUpdateBase) {
       return false;
     }
-    if (state.generating || state.exportTask) {
+    if (state.batchExport || state.generating || state.exportTask) {
       state.dynamicUpdateTimer = setTimeout(() => {
         state.dynamicUpdateTimer = null;
         void applyPendingDynamicUpdate();
@@ -3657,7 +3666,7 @@
       .then(async () => {
         if (
           revision !== state.activeSessionSaveRevision ||
-          state.restoringActiveSession ||
+          state.restoringActiveSession || state.batchExport ||
           !state.currentCount ||
           !state.currentSettingsUsed
         ) {
@@ -3674,6 +3683,7 @@
   }
 
   function scheduleActiveSessionSave() {
+    if (state.batchExport) return;
     if (
       state.restoringActiveSession ||
       state.applyingHistory ||
@@ -3693,6 +3703,7 @@
   }
 
   function flushActiveSessionSave() {
+    if (state.batchExport) return Promise.resolve(false);
     if (state.activeSessionSaveTimer !== null) {
       clearTimeout(state.activeSessionSaveTimer);
       state.activeSessionSaveTimer = null;
@@ -3953,6 +3964,7 @@
     for (const record of state.bookmarks) {
       const card = document.createElement("article");
       card.className = "generator-bookmark-card";
+      card.dataset.bookmarkId = record.id;
       card.classList.toggle("is-current", record.id === state.currentBookmarkId);
       const loadButton = document.createElement("button");
       loadButton.type = "button";
@@ -3994,7 +4006,15 @@
       deleteButton.textContent = "×";
       deleteButton.setAttribute("aria-label", `Delete composition saved ${dateText}`);
       deleteButton.addEventListener("click", () => void deleteBookmark(record));
-      card.append(loadButton, deleteButton);
+      const progress = document.createElement("progress");
+      progress.className = "generator-bookmark-export-progress";
+      progress.max = 100;
+      progress.hidden = true;
+      progress.setAttribute("aria-label", "Bookmark export progress");
+      const status = document.createElement("span");
+      status.className = "generator-bookmark-export-status";
+      status.hidden = true;
+      card.append(loadButton, deleteButton, progress, status);
       fragment.appendChild(card);
     }
     elements.bookmarkGallery.appendChild(fragment);
@@ -4077,7 +4097,7 @@
     state.generationToken += 1;
     elements.emptyState.hidden = true;
     const fragment = document.createDocumentFragment();
-    specs.forEach((spec, index) => fragment.appendChild(createStampElement(spec, index)));
+    if (!options.skipDom) specs.forEach((spec, index) => fragment.appendChild(createStampElement(spec, index)));
     elements.composition.replaceChildren(fragment, elements.marginOverlay);
     const background = String(record.composition.background || "#ffffff");
     state.currentWidth = Number(settings.width);
@@ -4155,7 +4175,7 @@
   }
 
   async function loadBookmark(record) {
-    if (state.generating || state.exportTask) {
+    if (state.batchExport || state.generating || state.exportTask) {
       return;
     }
     const pending = takePendingDynamicUpdate();
@@ -4381,9 +4401,11 @@
     elements.exportProgress.setAttribute("aria-valuetext", `${label} ${progress}%`);
     elements.exportProgressBar.style.width = `${progress}%`;
     setActionStatus(`${label.toLowerCase()} ${progress}%`);
+    if (state.batchExport?.currentId) updateBatchCard(state.batchExport.currentId, "exporting", progress, `${label.toLowerCase()} ${progress}%`);
   }
 
   function setGeneratorExportUi(active, task = null) {
+    active ||= Boolean(state.batchExport);
     elements.exportCancel.hidden = !active;
     elements.exportCancel.disabled = !active;
     elements.exportProgress.hidden = !active;
@@ -4429,6 +4451,11 @@
   }
 
   function cancelGeneratorExport() {
+    if (state.batchExport) {
+      state.batchExport.cancelled = true;
+      state.batchExport.abort.abort();
+      state.batchExport.stream?.getTracks().forEach(track => track.stop());
+    }
     if (!state.exportTask) {
       return false;
     }
@@ -4459,7 +4486,7 @@
         readySettled = true;
         rejectReady(new Error("The animation renderer took too long to start"));
       }
-    }, task.format === "preview" ? 30000 : EXPORT_STARTUP_TIMEOUT_MS);
+    }, task.format === "preview" || state.batchExport ? 30000 : EXPORT_STARTUP_TIMEOUT_MS);
 
     const close = (error = null) => {
       if (closed) {
@@ -4490,11 +4517,14 @@
         return;
       }
       const requestId = `${jobId}-${nextRequestId++}`;
-      const timer = window.setTimeout(() => {
+      const timeout = () => {
         pending.delete(requestId);
-        reject(new Error(`The animation renderer timed out during ${type}`));
-      }, timeoutMs);
-      pending.set(requestId, { resolve, reject, timer, type });
+        const error = new Error(`The animation renderer timed out during ${type}`);
+        reject(error);
+        close(error);
+      };
+      const timer = window.setTimeout(timeout, timeoutMs);
+      pending.set(requestId, { resolve, reject, timer, type, timeoutMs, timeout });
       try {
         worker.postMessage({
           protocol: EXPORT_RASTER_PROTOCOL,
@@ -4531,6 +4561,13 @@
         return;
       }
       if (message.type === "progress") {
+        // Treat the timeout as an inactivity limit: active decoding/rendering
+        // may legitimately take longer for dense saved compositions.
+        const request = pending.get(message.requestId);
+        if (request) {
+          window.clearTimeout(request.timer);
+          request.timer = window.setTimeout(request.timeout, request.timeoutMs);
+        }
         onProgress?.(message);
         return;
       }
@@ -5037,6 +5074,7 @@
       },
       assets,
       // Reserve both canvases plus readback/compositing or encoding storage.
+      skipFailedFetches: true,
       outputWorkingSetFrames: 4,
       memoryBudgetBytes: getExportRasterBudgetBytes()
     };
@@ -5551,6 +5589,153 @@
       typeof window.MediaRecorder === "function";
   }
 
+  let exportAllRequested = false;
+
+  function updateBatchCard(id, phase, percent = 0, message = phase) {
+    const card = Array.from(elements.bookmarkGallery.children).find(card => card.dataset.bookmarkId === id);
+    if (!card) return;
+    card.dataset.exportState = phase;
+    const progress = card.querySelector("progress");
+    progress.hidden = phase !== "loading" && phase !== "exporting";
+    if (phase === "loading") progress.removeAttribute("value");
+    else progress.value = percent;
+    const status = card.querySelector(".generator-bookmark-export-status");
+    status.hidden = false;
+    status.textContent = message;
+    for (const button of card.querySelectorAll("button")) button.disabled = Boolean(state.batchExport);
+  }
+
+  async function batchExportFilename(record, options) {
+    const bytes = new TextEncoder().encode(JSON.stringify({ composition: record.composition,
+      controls: record.controls, mode: options.mode, format: options.format,
+      duration: options.durationSeconds, version: 1 }));
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+      .map(value => value.toString(16).padStart(2, "0")).join("").slice(0, 20);
+    return `composition-${formatSeed(record.composition.seed)}-${hash}-${options.durationSeconds}s-${options.mode}.${options.format}`;
+  }
+
+  async function exportAllBookmarks(options) {
+    if (state.batchExport || state.exportTask || state.generating || state.bookmarkSafetyBusy || !state.bookmarks.length || !options.directoryHandle) return;
+    const original = captureGeneratorSnapshot(captureControlState());
+    const records = state.bookmarks.slice().sort((left, right) => {
+      const countDifference = options.order === "gif-count"
+        ? (left.composition?.specs?.length || 0) - (right.composition?.specs?.length || 0) : 0;
+      return countDifference || Number(left.savedAt) - Number(right.savedAt) || left.id.localeCompare(right.id);
+    });
+    const batch = { mode: options.mode, cancelled: false, abort: new AbortController(), stream: null, currentId: null };
+    state.batchExport = batch;
+    state.bookmarkSafetyBusy = true;
+    elements.controlsMain.inert = true;
+    elements.batchStatus.hidden = false;
+    elements.batchCancel.hidden = false;
+    let completed = 0, skipped = 0, failed = 0;
+    const check = () => { if (batch.cancelled) throw createExportCancellationError(); };
+    const report = () => {
+      elements.batchStatus.textContent = `${completed + skipped + failed} / ${records.length} · ${completed} exported · ${skipped} already saved · ${failed} failed`;
+    };
+    const guardTask = { captureAbort: batch.abort };
+    setGeneratorExportUi(true);
+    records.forEach(record => updateBatchCard(record.id, "pending", 0, "waiting"));
+    report();
+    try {
+      // Sharing must be requested in this click task, once for the whole queue.
+      if (options.mode === "realtime") {
+        const permission = navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 }, displaySurface: "browser" },
+          audio: false, preferCurrentTab: true, selfBrowserSurface: "include", surfaceSwitching: "exclude", monitorTypeSurfaces: "exclude"
+        }).then(stream => {
+          if (batch.cancelled) { stream.getTracks().forEach(track => track.stop()); throw createExportCancellationError(); }
+          batch.stream = stream;
+          stream.getVideoTracks()[0]?.addEventListener("ended", () => cancelGeneratorExport(), { once: true });
+          return stream;
+        });
+        await awaitCaptureStep(permission, guardTask);
+        const surface = batch.stream.getVideoTracks()[0]?.getSettings().displaySurface;
+        if (surface && surface !== "browser") throw new Error("Select this generator tab to record the bookmark queue.");
+      }
+      // Wait for any previously queued draft write before temporarily switching scenes.
+      await state.activeSessionWritePromise;
+      for (const record of records) {
+        check();
+        batch.currentId = record.id;
+        updateBatchCard(record.id, "loading", 0, "checking saved file…");
+        try {
+          const filename = await batchExportFilename(record, options);
+          let exists = false;
+          try {
+            const handle = await options.directoryHandle.getFileHandle(filename);
+            exists = (await handle.getFile()).size > 0;
+          } catch (error) { if (error.name !== "NotFoundError") throw error; }
+          check();
+          if (exists) {
+            skipped++;
+            updateBatchCard(record.id, "done", 100, "already saved");
+            report();
+            continue;
+          }
+          const attempts = options.mode === "normal" ? 2 : 1;
+          for (let attempt = 0; attempt < attempts; attempt++) {
+            check();
+            updateBatchCard(record.id, "loading", 0, attempt ? "retrying with a fresh renderer…" : "loading composition…");
+            try {
+              await restoreCompositionRecord(record, { currentBookmarkId: record.id, skipDom: options.mode === "normal" });
+              if (options.mode === "realtime") {
+                // Allow layout and GIF requests to settle without blocking sidebar scrolling.
+                await awaitCaptureStep(new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))), guardTask, 15000);
+                const loads = Array.from(elements.composition.querySelectorAll("img"), image => image.decode().catch(() => {}));
+                await awaitCaptureStep(Promise.all(loads), guardTask, 60000);
+                if (stablePreview) await awaitCaptureStep(stablePreview.ready, guardTask, 180000);
+              }
+              check();
+              const exportOptions = { ...options, batch: true, filename, stream: batch.stream, showResult: false };
+              const result = options.mode === "realtime"
+                ? await captureLiveComposition(exportOptions)
+                : await exportCurrentComposition(options.format, exportOptions);
+              check();
+              if (!result) throw new Error(elements.exportStatus.textContent || "Export failed");
+              completed++;
+              updateBatchCard(record.id, "done", 100, "exported");
+              break;
+            } catch (error) {
+              check();
+              if (attempt + 1 === attempts || ["NotAllowedError", "QuotaExceededError"].includes(error.name)) throw error;
+              await new Promise(resolve => setTimeout(resolve, 250));
+            }
+          }
+        } catch (error) {
+          check();
+          failed++;
+          updateBatchCard(record.id, "failed", 0, error.message || "export failed");
+          if (["NotAllowedError", "QuotaExceededError"].includes(error.name)) throw error;
+        }
+        report();
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    } catch (error) {
+      batch.error = batch.cancelled ? "cancelled" : error.message;
+    } finally {
+      batch.stream?.getTracks().forEach(track => track.stop());
+      batch.currentId = null;
+      try { await restoreCompositionRecord(original, { currentBookmarkId: original.currentBookmarkId }); }
+      catch (error) { batch.error ||= `Could not restore preview: ${error.message}`; }
+      state.batchExport = null;
+      state.bookmarkSafetyBusy = false;
+      elements.controlsMain.inert = false;
+      elements.batchCancel.hidden = true;
+      for (const card of elements.bookmarkGallery.children) {
+        for (const button of card.querySelectorAll("button")) button.disabled = false;
+        if (["loading", "exporting"].includes(card.dataset.exportState)) updateBatchCard(card.dataset.bookmarkId, "pending", 0, "not exported");
+      }
+      setGeneratorExportUi(false);
+      scheduleStablePreview();
+      scheduleGeneratorPixelatePreview();
+      report();
+      elements.batchStatus.textContent += batch.error ? ` · ${batch.error}` : " · finished";
+      setActionStatus(elements.batchStatus.textContent);
+      await flushActiveSessionSave();
+    }
+  }
+
   let exportDirectoryHandle = null;
   let choosingExportDirectory = false;
 
@@ -5560,21 +5745,25 @@
 
   function liveRecordingMimeType(format) {
     if (!supportsLiveCapture()) return "";
-    const types = format === "mp4"
-      ? ["video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4"]
-      : ["video/webm;codecs=vp8", "video/mp4", "video/webm"];
+    // Capture with VP8 where possible; finalize MP4 offline with explicit
+    // timestamps and a seekable sample table instead of saving recorder fragments.
+    if (format === "mp4" && typeof VideoEncoder !== "function") return "";
+    const types = ["video/webm;codecs=vp8", "video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm"];
     return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
   }
 
   function syncExportOptionsUi() {
-    const busy = Boolean(state.exportTask);
+    const busy = Boolean(state.exportTask) || Boolean(state.batchExport);
     const recording = state.exportTask?.format === "capture";
+    elements.batchOrderOptions.hidden = !exportAllRequested;
     const realtime = elements.exportMode.dataset.value === "realtime";
     const format = elements.exportFormat.dataset.value;
     const supported = !realtime || Boolean(liveRecordingMimeType(format));
     elements.exportSettings.disabled = busy || choosingExportDirectory;
-    elements.exportSubmit.disabled = busy || choosingExportDirectory || !state.currentCount || state.generating || !supported;
-    elements.exportSubmit.textContent = realtime ? `record ${format}` : `export ${format}`;
+    elements.exportSubmit.disabled = busy || choosingExportDirectory || !state.currentCount || state.generating || !supported || (exportAllRequested && !exportDirectoryHandle);
+    elements.exportSubmit.textContent = exportAllRequested ? `export all ${format}` : realtime ? `record ${format}` : `export ${format}`;
+    document.getElementById("generatorExportTitle").textContent = exportAllRequested ? "export all bookmarks" : "export options";
+    if (exportAllRequested && !exportDirectoryHandle && !busy) elements.exportStatus.textContent = typeof window.showDirectoryPicker === "function" ? "Choose a folder to check for completed exports and save the queue." : "Export all requires a browser with folder access, such as desktop Chrome or Edge.";
     elements.exportDialogCancel.hidden = !busy;
     elements.captureFinish.hidden = !recording;
     elements.captureFinish.disabled = !state.exportTask?.finishCapture;
@@ -5586,7 +5775,7 @@
     elements.exportChooseFolder.disabled = !canChoose;
     elements.exportDestination.textContent = exportDirectoryHandle?.name || "Downloads";
     elements.exportResetFolder.hidden = !exportDirectoryHandle;
-    for (const group of [elements.exportFormat, elements.exportMode]) {
+    for (const group of [elements.exportFormat, elements.exportMode, elements.batchOrder]) {
       for (const button of group.querySelectorAll("button")) {
         button.setAttribute("aria-pressed", String(button.value === group.dataset.value));
       }
@@ -5665,6 +5854,68 @@
       if (signal.aborted) { abort(); return; }
       try { action(); } catch (error) { cleanup(); reject(error); }
     });
+  }
+
+  async function convertRecordingToMp4(recording, task) {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    const url = URL.createObjectURL(recording.blob);
+    let encoder;
+    try {
+      await waitForCaptureVideo(video, "loadeddata", () => { video.src = url; video.load(); }, task);
+      const width = video.videoWidth + video.videoWidth % 2;
+      const height = video.videoHeight + video.videoHeight % 2;
+      if (!width || !height) throw new Error("No video frames were recorded.");
+      const { Muxer, ArrayBufferTarget } = await loadGeneratorMp4Muxer();
+      const config = await getGeneratorMp4EncoderConfig(width, height);
+      throwIfExportCancelled(task);
+      const target = new ArrayBufferTarget();
+      const muxer = new Muxer({ target, video: { codec: "avc", width, height, frameRate: 30 }, fastStart: "in-memory" });
+      let encoderError;
+      let encodedBytes = 0;
+      encoder = new VideoEncoder({
+        output(chunk, metadata) {
+          try {
+            encodedBytes += chunk.byteLength;
+            if (encodedBytes > 128 * 1024 * 1024) throw new Error("The recording is too large. Try a shorter recording.");
+            muxer.addVideoChunk(chunk, metadata);
+          } catch (error) { encoderError = error; }
+        },
+        error(error) { encoderError = error; }
+      });
+      task.videoEncoder = encoder;
+      encoder.configure(config);
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext("2d", { alpha: false });
+      const frameCount = Math.max(1, Math.round(recording.durationMs * 30 / 1000));
+      for (let index = 0; index < frameCount; index++) {
+        throwIfExportCancelled(task);
+        if (encoderError) throw encoderError;
+        const time = Math.min(index / 30, Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : index / 30);
+        if (Math.abs(video.currentTime - time) > 0.0001) {
+          await waitForCaptureVideo(video, "seeked", () => { video.currentTime = time; }, task);
+        }
+        context.drawImage(video, 0, 0, width, height);
+        const timestamp = Math.round(index * 1_000_000 / 30);
+        const frame = new VideoFrame(canvas, { timestamp, duration: Math.round((index + 1) * 1_000_000 / 30) - timestamp });
+        try { encoder.encode(frame, { keyFrame: index % 60 === 0 }); }
+        finally { frame.close(); }
+        // Keep encoder memory bounded and make cancellation responsive during conversion.
+        if (encoder.encodeQueueSize > 6) await awaitCaptureStep(encoder.flush(), task, 30000);
+        updateGeneratorExportProgress(task, (index + 1) / frameCount * 100, "Finishing MP4");
+      }
+      await awaitCaptureStep(encoder.flush(), task, 30000);
+      if (encoderError) throw encoderError;
+      throwIfExportCancelled(task);
+      muxer.finalize();
+      return { blob: new Blob([target.buffer], { type: "video/mp4" }), extension: "mp4", width, height, frameCount, durationMs: frameCount / 30 * 1000 };
+    } finally {
+      try { encoder?.close(); } catch (_) { /* cancelled encoder */ }
+      if (task.videoEncoder === encoder) task.videoEncoder = null;
+      video.pause(); video.removeAttribute("src"); video.load();
+      URL.revokeObjectURL(url);
+    }
   }
 
   async function convertRecordingToWebp(recording, task) {
@@ -5821,7 +6072,7 @@
 
   async function captureLiveComposition(options = {}) {
     if (!supportsLiveCapture() ||
-        !state.currentCount || state.generating || state.exportTask) return null;
+        (state.batchExport && !options.batch) || !state.currentCount || state.generating || state.exportTask) return null;
     setCropInspectionActive(false);
     const task = createGeneratorExportTask("capture");
     task.durationMs = normalizeExportDuration(options.durationSeconds);
@@ -5832,18 +6083,18 @@
     setGeneratorExportUi(true, task);
     setLiveCaptureStatus("select this generator tab in the browser’s share dialog…");
     let stream = null;
-    const stopTracks = (value) => value?.getTracks().forEach((track) => track.stop());
+    const stopTracks = (value) => { if (value !== options.stream) value?.getTracks().forEach((track) => track.stop()); };
     try {
       // Must run directly in the user's click task, before any await. Browser
       // permission is explicit on every recording; never request microphone/audio.
-      const permission = navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 60 }, displaySurface: "browser" },
+      const permission = (options.stream ? Promise.resolve(options.stream) : navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 }, displaySurface: "browser" },
         audio: false,
         preferCurrentTab: true,
         selfBrowserSurface: "include",
         surfaceSwitching: "exclude",
         monitorTypeSurfaces: "exclude"
-      }).then((value) => {
+      })).then((value) => {
         if (task.cancelled) { stopTracks(value); throw createExportCancellationError(); }
         task.captureStream = value;
         return value;
@@ -5879,9 +6130,12 @@
       if (task.outputFormat === "webp") {
         setLiveCaptureStatus("converting recorded frames to WebP…");
         result = await convertRecordingToWebp(result, task);
+      } else {
+        setLiveCaptureStatus("finishing recorded MP4…");
+        result = await convertRecordingToMp4(result, task);
       }
       throwIfExportCancelled(task);
-      let filename = `composition-${formatSeed(state.currentSeed)}-live.${result.extension}`;
+      let filename = options.filename || `composition-${formatSeed(state.currentSeed)}-live.${result.extension}`;
       task.saving = true;
       if (options.download !== false) filename = await saveGeneratorExportBlob(result.blob, filename, options.directoryHandle, task);
       state.lastExport = {
@@ -5935,7 +6189,7 @@
       format = options.format || "webp";
     }
     const exportFormat = format === "mp4" ? "mp4" : "webp";
-    if (!state.currentCount || state.generating || state.exportTask) {
+    if ((state.batchExport && !options.batch) || !state.currentCount || state.generating || state.exportTask) {
       return null;
     }
     setCropInspectionActive(false);
@@ -5959,7 +6213,7 @@
       if (!result?.blob) {
         throw new Error(`The ${exportFormat.toUpperCase()} encoder did not produce a file`);
       }
-      let filename = `composition-${formatSeed(state.currentSeed)}.${exportFormat}`;
+      let filename = options.filename || `composition-${formatSeed(state.currentSeed)}.${exportFormat}`;
       if (options.download !== false) {
         filename = await saveGeneratorExportBlob(result.blob, filename, options.directoryHandle, task);
       }
@@ -6008,6 +6262,7 @@
         return null;
       }
       setActionStatus(error?.message || "could not export this composition", true);
+      if (options.batch) throw error;
       return null;
     } finally {
       task.rasterSession?.release();
@@ -6135,7 +6390,7 @@
   }
 
   async function generateComposition(options = {}) {
-    if (state.generating || state.exportTask) {
+    if (state.batchExport || state.generating || state.exportTask) {
       return false;
     }
     const baseSettings = readSettings();
@@ -6334,6 +6589,7 @@
       historyDepth: state.history.length,
       historyLimit: MAX_HISTORY_ACTIONS,
       exporting: Boolean(state.exportTask),
+      batchExporting: Boolean(state.batchExport),
       lastExport: state.lastExport ? { ...state.lastExport } : null,
       previewRenderer: elements.canvas.dataset.previewRenderer || "dom",
       previewFrames: stablePreview?.frames || 0,
@@ -6584,7 +6840,15 @@
       }
     });
 
+    elements.exportAll.addEventListener("click", () => {
+      exportAllRequested = true;
+      syncExportOptionsUi();
+      elements.exportDialog.showModal();
+    });
+    elements.batchCancel.addEventListener("click", cancelGeneratorExport);
     elements.download.addEventListener("click", () => {
+      exportAllRequested = false;
+      elements.exportStatus.textContent = "";
       syncExportOptionsUi();
       elements.exportDialog.showModal();
     });
@@ -6600,6 +6864,11 @@
         format: elements.exportFormat.dataset.value,
         showResult: true
       };
+      if (exportAllRequested) {
+        elements.exportDialog.close();
+        void exportAllBookmarks({ ...options, mode: elements.exportMode.dataset.value, order: elements.batchOrder.dataset.value });
+        return;
+      }
       if (elements.exportMode.dataset.value === "realtime") {
         // Close the modal before sharing so neither it nor its backdrop appears
         // over the artwork. Finish/cancel remain available in the bottom toolbar.
@@ -6610,7 +6879,7 @@
       }
     });
     elements.exportDuration.addEventListener("input", syncExportOptionsUi);
-    for (const group of [elements.exportFormat, elements.exportMode]) {
+    for (const group of [elements.exportFormat, elements.exportMode, elements.batchOrder]) {
       group.addEventListener("click", (event) => {
         const button = event.target.closest("button");
         if (!button || !group.contains(button) || elements.exportSettings.disabled) return;
@@ -6715,7 +6984,7 @@
         void undoLastGeneratorAction();
         return;
       }
-      if (event.key === "Escape" && state.exportTask) {
+      if (event.key === "Escape" && (state.exportTask || state.batchExport)) {
         event.preventDefault();
         cancelGeneratorExport();
         return;
@@ -6757,6 +7026,7 @@
     });
     window.addEventListener("resize", scheduleCanvasFit);
     window.addEventListener("pagehide", () => {
+      if (state.batchExport) cancelGeneratorExport();
       if (state.exportTask?.format === "capture") {
         state.exportTask.suppressDialog = true;
         state.exportTask.cancel();

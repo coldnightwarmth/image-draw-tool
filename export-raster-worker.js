@@ -962,6 +962,12 @@ async function readAssetBytes(descriptor, job) {
       transientBytes: bytes.byteLength
     });
     return { bytes, mimeType };
+  } catch (error) {
+    throwIfCancelled(job);
+    if (error instanceof TypeError) {
+      throw new ExportRasterError("ASSET_FETCH_FAILED", `Could not fetch asset ${descriptor.id}.`);
+    }
+    throw error;
   } finally {
     job.abortControllers.delete(controller);
   }
@@ -1799,6 +1805,7 @@ function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entr
 }
 
 function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
+  if (job.skippedAssets.has(entry.sourceId)) return;
   const asset = job.assets.get(entry.sourceId);
   if (!asset) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} was not prepared.`);
@@ -1907,7 +1914,7 @@ function drawBackground(job, context, scene, background, timeMs) {
 
 function validatePreparedSources(job, entries, background) {
   for (const entry of entries) {
-    if (!job.assets.has(entry.sourceId)) {
+    if (!job.assets.has(entry.sourceId) && !job.skippedAssets.has(entry.sourceId)) {
       throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} was not declared during prepare.`);
     }
   }
@@ -2145,6 +2152,7 @@ function createJob(jobId, memoryBudgetBytes = null) {
     pendingOperations: 0,
     cancelled: false,
     released: false,
+    skippedAssets: new Set(),
     prepared: false,
     capabilities: null
   };
@@ -2340,9 +2348,15 @@ async function handlePrepare(message) {
               Math.floor(getAvailableDecodedBytes(job) / remainingAssetCount)
             );
           }
-          const asset = await decodeAsset(descriptor, job);
-          throwIfCancelled(job);
-          job.assets.set(descriptor.id, asset);
+          try {
+            const asset = await decodeAsset(descriptor, job);
+            throwIfCancelled(job);
+            job.assets.set(descriptor.id, asset);
+          } catch (error) {
+            throwIfCancelled(job);
+            if (message.scene?.skipFailedFetches !== true || error.code !== "ASSET_FETCH_FAILED") throw error;
+            job.skippedAssets.add(descriptor.id);
+          }
           completed += 1;
           post("progress", {
             action: "prepare",
@@ -2368,6 +2382,7 @@ async function handlePrepare(message) {
     throw error;
   }
   post("prepared", {
+    skippedAssets: Array.from(job.skippedAssets),
     action: "prepare",
     jobId,
     ...(getRequestId(message) != null ? { requestId: getRequestId(message) } : {}),

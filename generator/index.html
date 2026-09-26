@@ -13,10 +13,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles.css?v=20260909-generator-v1">
-  <link rel="stylesheet" href="generator.css?v=20260920-bookmark-controls-v7">
+  <link rel="stylesheet" href="generator.css?v=20260925-bookmark-batch-v3">
   <script defer src="../stock-brushes.js?v=20260721-all-gif-arc-export-v5"></script>
   <script defer src="../brush-metadata.js?v=20260721-all-gif-arc-export-v5"></script>
-  <script defer src="generator.js?v=20260920-bookmark-controls-v7"></script>
+  <script defer src="generator.js?v=20260925-bookmark-batch-v3"></script>
 </head>
 <body class="generator-page">
   <a class="generator-skip-link" href="#generatorControlsMain">skip to generator controls</a>
@@ -662,12 +662,15 @@
         </summary>
         <div class="generator-bookmark-safety" aria-label="Bookmark storage and backups">
           <div class="generator-bookmark-safety-actions">
+            <button id="generatorExportAllButton" type="button" disabled>export all</button>
             <button id="generatorBackupBookmarksButton" type="button" disabled>backup</button>
             <button id="generatorRestoreBookmarksButton" class="generator-restore-bookmarks-button" type="button">load</button>
             <button id="generatorClearBookmarksButton" type="button" disabled>clear</button>
             <input id="generatorRestoreBookmarksInput" type="file" accept="application/json,.json" hidden>
           </div>
           <p id="generatorBookmarkLoadStatus" role="status" aria-live="polite" hidden><span class="generator-bookmark-loading-spinner" aria-hidden="true"></span><span id="generatorBookmarkLoadText">loading bookmarks…</span></p>
+          <p id="generatorBatchStatus" role="status" aria-live="polite" hidden></p>
+          <button id="generatorBatchCancel" type="button" hidden>cancel exports</button>
           <p id="generatorBookmarkStorageStatus" role="status">checking browser storage protection…</p>
         </div>
         <div id="generatorBookmarkGallery" class="generator-bookmark-gallery" aria-label="Bookmarked compositions"></div>
@@ -764,6 +767,13 @@
       <div id="generatorExportMode" class="generator-export-choices" role="group" aria-labelledby="generatorExportModeLabel" data-value="normal">
         <button type="button" value="normal" aria-pressed="true">normal</button>
         <button type="button" value="realtime" aria-pressed="false">realtime</button>
+      </div>
+      <div id="generatorBatchOrderOptions" hidden>
+        <span id="generatorBatchOrderLabel" class="generator-export-label">order</span>
+        <div id="generatorBatchOrder" class="generator-export-choices" role="group" aria-labelledby="generatorBatchOrderLabel" data-value="saved">
+          <button type="button" value="saved" aria-pressed="true">saved order</button>
+          <button type="button" value="gif-count" aria-pressed="false">fewest gifs first</button>
+        </div>
       </div>
     </fieldset>
     <p id="generatorExportStatus" role="status" aria-live="polite"></p>

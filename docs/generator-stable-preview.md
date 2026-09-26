@@ -44,8 +44,11 @@ grant after cancellation.
 Where [Region Capture](https://developer.chrome.com/docs/web-platform/region-capture)
 is available, the stream is cropped to the artwork. Otherwise the whole tab is
 recorded, as explained in the popup. Known screen/window selections and crop
-failures are rejected with guidance to choose this tab. Realtime MP4 requires a
-browser-supported MP4 MediaRecorder codec; unsupported combinations are disabled.
+failures are rejected with guidance to choose this tab. Realtime MP4 records VP8 video where supported, then converts the captured
+frames to a seekable H.264 MP4 using explicit 30fps timestamps and a complete
+sample table. This avoids saving browser MP4 recorder fragments directly.
+Capture requests at most 1920×1080 at 30fps to limit live encoding load. MP4
+conversion requires WebCodecs; unsupported combinations are disabled.
 Realtime WebP first records a video, stops sharing, then samples its actual frames
 at 20fps into an animated WebP. It does not reconstruct the composition. Recording
 and WebP frame storage each have a 128MiB limit; conversion is cancellable.
@@ -97,3 +100,42 @@ mobile popup bounds, and smooth-preview continuity during capture. The tab
 capture smoke test uses actual Chromium tab sharing and Region Capture in an
 isolated test browser; its test-only autoaccept flag selects that test tab and
 checks playable cropped MP4 output and release of all capture tracks.
+
+The realtime smoke test seeks to six points throughout a 15-second capture and
+checks a changing color fixture, finite duration, and valid decoded frames.
+
+## Exporting all bookmarks
+
+**export all**, left of **backup**, opens the same settings popup with an extra
+order control: **saved order** (oldest first, default) or **fewest gifs first**
+(stamp count ascending, with saved order breaking ties). The gallery itself keeps
+its existing order. A writable folder must be selected so the browser can inspect
+existing files; automatic browser Downloads cannot be enumerated by the page.
+
+The queue uses a snapshot of the bookmarks and processes one at a time. Names
+include a content/settings fingerprint, duration and mode. Nonempty files matching
+that exact name are skipped; unrelated or legacy filenames are not guessed to be
+matches. Changing the queue order does not change filenames. Failed exports stay
+marked failed; running the queue again skips completed files and retries missing
+ones. Existing files are never overwritten.
+
+Pending cards are faded, the active card has loading/progress feedback, and saved
+or already-present cards return to normal. The popup closes during the queue,
+leaving the gallery scrollable. Bookmark editing and composition controls are
+locked until completion/cancellation, and the original composition is restored.
+Temporary queue scenes are not written to the active-session backup.
+
+Normal jobs omit the animated DOM scene during export, release their worker and
+encoder after each item, and retry once with a fresh renderer before marking that
+item failed and proceeding. Timeouts measure inactivity and reset on worker
+progress. Storage permission/quota errors stop the queue. These measures bound
+resources and prevent one broken item from stopping every subsequent item; they
+cannot guarantee completion under browser crashes or device resource exhaustion.
+Realtime jobs share the selected tab once, load each scene, record sequentially,
+then stop sharing when finished or cancelled. Realtime failures are not retried
+automatically because a second recording would capture different live frames.
+
+Run `node scripts/tests/run-generator-batch-export-regression.mjs` for queue,
+ordering, duplicate detection, fresh-renderer retry, folder saving, cancellation,
+sidebar accessibility and restoration checks. Folder writes use an isolated
+origin filesystem, and realtime capture uses a fixture stream with real encoding.

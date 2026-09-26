@@ -165,3 +165,13 @@ The export suite also checks 1- and 15-second normal WebP/MP4 output. The live
 recording suite checks popup defaults, realtime MP4/WebP, chosen-folder writes
 using an isolated origin filesystem, filename collisions, folder errors, mobile
 popup bounds and smooth-preview continuity during capture.
+
+## Bookmark export queue
+
+```sh
+node scripts/tests/run-generator-batch-export-regression.mjs
+```
+
+Checks saved order and fewest-GIFs-first order, sequential normal/realtime exports,
+matching-file skips, fresh-worker retry, folder outputs, sidebar access during the
+queue, cancellation, and restoration of the original preview.

@@ -460,6 +460,39 @@ try {
       else assert.ok(Math.abs((await inspectMp4Video(page, bytes)).duration - seconds) < 0.05);
     }
   }
+  // A missing source must not abort either export format, including crop overlays.
+  const missingResults = await page.evaluate(async () => {
+    const NativeWorker = window.Worker;
+    const skipped = [];
+    let failureUrl;
+    window.Worker = class extends NativeWorker {
+      constructor(...args) {
+        super(...args);
+        this.addEventListener('message', ({ data }) => {
+          if (data.type === 'prepared') skipped.push(data.skippedAssets);
+        });
+      }
+      postMessage(message, ...args) {
+        if (message.type === 'prepare') message.scene.assets[0].url = failureUrl;
+        return super.postMessage(message, ...args);
+      }
+    };
+    try {
+      const results = [];
+      for (const url of [location.origin + '/missing-export-fixture.gif', 'http://127.0.0.1:1/missing.gif']) {
+        failureUrl = url;
+        for (const exportFile of [GeneratorApp.exportWebp, GeneratorApp.exportMp4]) {
+          const result = await exportFile({ durationSeconds: 1, download: false });
+          if (!result) throw new Error(document.querySelector('#generatorActionStatus').textContent);
+          results.push(result.size);
+        }
+      }
+      return { results, skipped };
+    } finally { window.Worker = NativeWorker; }
+  });
+  assert.ok(missingResults.results.every(size => size > 0));
+  assert.equal(missingResults.skipped.length, 4);
+  assert.ok(missingResults.skipped.every(sources => sources.length === 1));
   assert.deepEqual(errors, []);
   process.stdout.write(
     `generator WebP + MP4 export regression passed (${result.width}x${result.height}, ` +

@@ -45,10 +45,19 @@ try {
     document.querySelector('#generatorCountSlider').value = '4';
     await window.GeneratorApp.generate(0xabcdef01);
   });
+  // A deterministic moving patch lets us detect frozen captures, not just a valid header.
+  await page.evaluate(() => {
+    const patch = document.createElement('div');
+    Object.assign(patch.style, { position: 'absolute', left: '10px', top: '10px', width: '80px', height: '80px', zIndex: '99999' });
+    document.querySelector('#generatorCanvas').append(patch);
+    const start = performance.now();
+    const update = () => { const t = (performance.now() - start) / 1000; patch.style.background = `rgb(${Math.floor(t * 31) % 256},${Math.floor(t * 67) % 256},100)`; requestAnimationFrame(update); };
+    update();
+  });
   await page.locator('#generatorDownloadButton').click();
   await page.locator('#generatorExportMode button[value="realtime"]').click();
   await page.locator('#generatorExportDuration').fill('15');
-  const downloadPromise = page.waitForEvent('download', { timeout: 35000 });
+  const downloadPromise = page.waitForEvent('download', { timeout: 120000 });
   await page.locator('#generatorExportSubmit').click({ force: true });
   const download = await downloadPromise;
   await page.waitForFunction(() => !window.GeneratorApp.getSummary().exporting);
@@ -62,11 +71,21 @@ try {
     const video = document.createElement('video'); video.muted = true;
     video.src = `data:video/mp4;base64,${base64}`;
     await new Promise((resolve, reject) => { video.onloadeddata = resolve; video.onerror = reject; });
-    await video.play();
-    const size = { width: video.videoWidth, height: video.videoHeight };
+    const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    const samples = [];
+    for (const time of [0.5, 3, 6, 9, 12, 14]) {
+      await new Promise((resolve, reject) => { video.onseeked = resolve; video.onerror = reject; video.currentTime = time; });
+      ctx.drawImage(video, 0, 0);
+      samples.push(Array.from(ctx.getImageData(30, 30, 1, 1).data).join(','));
+    }
+    const size = { width: video.videoWidth, height: video.videoHeight, duration: video.duration, samples };
+
     video.pause(); video.removeAttribute('src'); video.load();
     return size;
   }, bytes.toString('base64'));
+  assert.ok(Number.isFinite(videoSize.duration) && Math.abs(videoSize.duration - 15) < 0.5);
+  assert.ok(new Set(videoSize.samples).size >= 5, `Frozen capture: ${videoSize.samples}`);
   assert.ok(videoSize.width > 0 && videoSize.width < 1280);
   assert.ok(videoSize.height > 0 && videoSize.height < 900);
   assert.equal(await page.evaluate(() => testCaptureStreams.length === 1 && testCaptureStreams.every(s => s.getTracks().every(t => t.readyState === 'ended'))), true);
