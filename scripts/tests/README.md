@@ -175,3 +175,13 @@ node scripts/tests/run-generator-batch-export-regression.mjs
 Checks saved order and fewest-GIFs-first order, sequential normal/realtime exports,
 matching-file skips, fresh-worker retry, folder outputs, sidebar access during the
 queue, cancellation, and restoration of the original preview.
+
+## Main-page GIF timing
+
+```sh
+node scripts/tests/run-main-gif-timing-regression.mjs
+```
+
+Checks native variable frame delays and animated pixels in a 60-frame 1024px
+export that exceeded the former raw-frame memory budget, fallback encoding,
+centisecond rounding, long-timeline frame limits, and encoder cancellation.

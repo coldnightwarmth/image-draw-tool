@@ -438,7 +438,6 @@ const EXPORT_GIF_MAX_SIZE_BYTES = 15 * 1000 * 1000;
 const EXPORT_GIF_SIZE_TARGET_BYTES = Math.floor(EXPORT_GIF_MAX_SIZE_BYTES * 0.985);
 const EXPORT_GIF_SIZE_LIMIT_MAX_ATTEMPTS = 8;
 const EXPORT_GIF_SIZE_LIMIT_MIN_FRAMES = 4;
-const EXPORT_GIF_ENCODER_DEFAULT_FRAME_BUDGET_BYTES = 160 * 1024 * 1024;
 const EXPORT_MANUAL_SECONDS_PRESETS = [0.5, 1, 2, 3, 4, 5];
 const EXPORT_VIDEO_MAX_DIMENSION = 1600;
 const EXPORT_VIDEO_MAX_SECONDS = 300;
@@ -453,7 +452,7 @@ const EXPORT_BG_TILE_MID_SIZE = 1000;
 const EXPORT_BG_TILE_MAX_SIZE = 5000;
 const EXPORT_BG_TILE_SLIDER_MAX = 1000;
 const EXPORT_BG_TILE_SLIDER_MID = 750;
-const RUNTIME_ASSET_REVISION = "20260721-optimization-closeout-v1";
+const RUNTIME_ASSET_REVISION = "20260930-gif-timing-v2";
 const GIF_JS_LIBRARY_URL = `gif.js?v=${RUNTIME_ASSET_REVISION}`;
 const GIF_JS_WORKER_URL = `gif.worker.js?v=${RUNTIME_ASSET_REVISION}`;
 const GIFUCT_MODULE_URL = `./gifuct-js.bundle.mjs?v=${RUNTIME_ASSET_REVISION}`;
@@ -17487,44 +17486,17 @@ function createExportFrameDelays(durationMs, frameCountOverride = null) {
     );
   }
 
-  const duration = Math.max(EXPORT_GIF_FRAME_DELAY_MS, Math.round(Number(durationMs) || EXPORT_GIF_DURATION_MS));
-  const frameCount = clamp(Math.ceil(duration / EXPORT_GIF_FRAME_DELAY_MS), 1, EXPORT_MAX_FRAME_COUNT);
-  if (frameCount === 1) {
-    return [duration];
-  }
-
-  const delays = Array.from({ length: frameCount }, () => EXPORT_GIF_FRAME_DELAY_MS);
-  const finalDelay = duration - EXPORT_GIF_FRAME_DELAY_MS * (frameCount - 1);
-  if (finalDelay >= 20) {
-    delays[delays.length - 1] = finalDelay;
-  } else {
-    delays[delays.length - 2] += finalDelay;
-    delays.pop();
-  }
-  return delays;
+  const duration = Math.max(20, Math.round(Number(durationMs) || EXPORT_GIF_DURATION_MS));
+  return createExportFrameDelaysForCount(duration, Math.ceil(duration / 20));
 }
 
 function createExportFrameDelaysForCount(durationMs, frameCount) {
-  const duration = Math.max(EXPORT_GIF_FRAME_DELAY_MS, Math.round(Number(durationMs) || EXPORT_GIF_DURATION_MS));
-  const maxCountForDuration = Math.max(1, Math.floor(duration / 20));
-  const safeFrameCount = clamp(
-    Math.round(Number(frameCount) || 1),
-    1,
-    Math.min(EXPORT_MAX_FRAME_COUNT, maxCountForDuration)
+  // GIF delays are centiseconds. Distribute rounding over the whole timeline.
+  const units = Math.max(2, Math.round((Number(durationMs) || EXPORT_GIF_DURATION_MS) / 10));
+  const count = clamp(Math.round(Number(frameCount) || 1), 1, Math.min(EXPORT_MAX_FRAME_COUNT, Math.floor(units / 2)));
+  return Array.from({ length: count }, (_, index) =>
+    (Math.round((index + 1) * units / count) - Math.round(index * units / count)) * 10
   );
-  if (safeFrameCount <= 1) {
-    return [duration];
-  }
-
-  let remainingDuration = duration;
-  const delays = [];
-  for (let index = 0; index < safeFrameCount; index += 1) {
-    const remainingFrames = safeFrameCount - index;
-    const delay = Math.max(20, Math.round(remainingDuration / remainingFrames));
-    delays.push(delay);
-    remainingDuration -= delay;
-  }
-  return delays;
 }
 
 function normalizeFrameDelays(frameDelays) {
@@ -17555,9 +17527,8 @@ function getExportGifDurationMs(gifAnimationMap, options = {}) {
   if (options.animationAuto !== false) {
     return Math.max(
       getLongestGifAnimationDuration(gifAnimationMap),
-      getBackgroundAnimationDuration(options),
-      EXPORT_GIF_DURATION_MS
-    );
+      getBackgroundAnimationDuration(options)
+    ) || EXPORT_GIF_DURATION_MS;
   }
 
   const manualSeconds = EXPORT_MANUAL_SECONDS_PRESETS.includes(Number(options.animationSeconds))
@@ -17588,6 +17559,11 @@ function getExportGifFrameDelays(gifAnimationMap, options = {}) {
       getLongestGifAnimationDuration(gifAnimationMap),
       getBackgroundAnimationDuration(options)
     );
+    const animated = Array.from(gifAnimationMap.values()).filter(animation => animation?.durations?.length > 1);
+    if (animated.length === 1 && !options.sequenceExportActive && getBackgroundAnimationDuration(options) === 0) {
+      const native = normalizeFrameDelays(animated[0].durations);
+      if (native.length <= EXPORT_MAX_FRAME_COUNT) return native;
+    }
     return createExportFrameDelays(longestDuration || EXPORT_GIF_DURATION_MS);
   }
 
@@ -19138,44 +19114,6 @@ function releaseGifEncoderFrames(gif) {
   gif.running = false;
 }
 
-function getGifEncoderFrameBudgetBytes() {
-  const deviceMemory = Number(navigator.deviceMemory);
-  if (Number.isFinite(deviceMemory) && deviceMemory <= 4) {
-    return 80 * 1024 * 1024;
-  }
-  if (Number.isFinite(deviceMemory) && deviceMemory <= 8) {
-    return 128 * 1024 * 1024;
-  }
-  if (Number.isFinite(deviceMemory) && deviceMemory > 8) {
-    return 192 * 1024 * 1024;
-  }
-  return EXPORT_GIF_ENCODER_DEFAULT_FRAME_BUDGET_BYTES;
-}
-
-function getMemoryBoundedGifFrameDelays(width, height, frameDelays) {
-  const normalizedDelays = normalizeFrameDelays(frameDelays);
-  const safeDelays = normalizedDelays.length ? normalizedDelays : [EXPORT_GIF_FRAME_DELAY_MS];
-  const bytesPerFrame = Math.max(1, Math.round(Number(width) || 1)) *
-    Math.max(1, Math.round(Number(height) || 1)) * 4;
-  const maxFrameCount = Math.floor(getGifEncoderFrameBudgetBytes() / bytesPerFrame);
-  if (maxFrameCount < 1) {
-    const error = new Error("The requested GIF dimensions exceed the safe encoder memory budget.");
-    error.code = "MEMORY_BUDGET_EXCEEDED";
-    throw error;
-  }
-  if (safeDelays.length <= maxFrameCount) {
-    return safeDelays;
-  }
-  const boundedDelays = createExportFrameDelaysForCount(
-    getFrameDelaysDuration(safeDelays),
-    maxFrameCount
-  );
-  updateBrushStatus(
-    `GIF sampled to ${boundedDelays.length} frames at this resolution to fit memory safely.`
-  );
-  return boundedDelays;
-}
-
 function estimateGifExportBytes(width, height, frameCount, entries) {
   const pixels = Math.max(1, Number(width) || 1) *
     Math.max(1, Number(height) || 1) *
@@ -19441,6 +19379,67 @@ async function renderExportGifBlobWithSizeLimit(
   throw new Error("Could not reduce GIF below 15mb.");
 }
 
+// Encode each frame before requesting the next one. Only compressed GIF pages
+// accumulate; resolution no longer forces us to discard animation frames.
+function createIncrementalGifEncoder(width, height, includeBackground, task) {
+  const worker = new Worker(GIF_JS_WORKER_URL);
+  let pending = null;
+  let index = 0;
+  let palette = includeBackground ? true : false;
+  let closed = false;
+  const parts = [];
+  const close = (error = createCancellationError()) => {
+    if (closed) return;
+    closed = true;
+    worker.terminate();
+    if (pending) { clearTimeout(pending.timer); pending.reject(error); pending = null; }
+    parts.length = 0;
+    if (task?.gif === encoder) task.gif = null;
+  };
+  const encoder = {
+    abort: close,
+    async addFrame(imageData, options) {
+      throwIfTaskCancelled(task);
+      if (closed) throw createCancellationError();
+      if (pending) throw new Error("GIF encoder already has a pending frame.");
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => close(new Error("GIF frame encoding timed out.")), 120000);
+        pending = { resolve, reject, timer };
+        const data = imageData.data;
+        try {
+          worker.postMessage({ index: index++, last: options.last, width, height,
+            delay: options.delay, repeat: 0, quality: 1, dither: false,
+            globalPalette: palette, transparent: includeBackground ? null : GIF_TRANSPARENT_MATTE_HEX,
+            canTransfer: true, data }, [data.buffer]);
+        } catch (error) { close(error); }
+      });
+    },
+    finish() {
+      throwIfTaskCancelled(task);
+      if (closed || pending || !index) throw new Error("GIF encoding did not finish.");
+      const blob = new Blob(parts, { type: "image/gif" });
+      close();
+      return blob;
+    }
+  };
+  worker.onmessage = ({ data }) => {
+    if (!pending || closed) return;
+    try {
+      if (includeBackground && palette === true) palette = data.globalPalette;
+      for (let page = 0; page < data.data.length; page++) {
+        const length = page === data.data.length - 1 ? data.cursor : data.pageSize;
+        parts.push(data.data[page].subarray(0, length));
+      }
+      const request = pending; pending = null;
+      clearTimeout(request.timer); request.resolve();
+    } catch (error) { close(error); }
+  };
+  worker.onerror = () => close(new Error("GIF frame encoder failed."));
+  worker.onmessageerror = () => close(new Error("GIF frame encoder returned invalid data."));
+  if (task) task.gif = encoder;
+  return encoder;
+}
+
 async function renderExportGifBlobWithRasterWorker(
   selectionBounds,
   outputWidth,
@@ -19481,27 +19480,9 @@ async function renderExportGifBlobWithRasterWorker(
     const requestedFrameDelays = overrideFrameDelays.length
       ? overrideFrameDelays
       : getExportGifFrameDelays(raster.timingMap, options);
-    const frameDelays = getMemoryBoundedGifFrameDelays(
-      outputWidth,
-      outputHeight,
-      requestedFrameDelays
-    );
+    const frameDelays = requestedFrameDelays;
 
-    gif = new window.GIF({
-      workers: 2,
-      quality: 1,
-      width: outputWidth,
-      height: outputHeight,
-      repeat: 0,
-      dither: false,
-      background: includeBackground ? backgroundColor : GIF_TRANSPARENT_MATTE,
-      globalPalette: includeBackground ? true : false,
-      workerScript: GIF_JS_WORKER_URL,
-      ...(includeBackground ? {} : { transparent: GIF_TRANSPARENT_MATTE_HEX })
-    });
-    if (task) {
-      task.gif = gif;
-    }
+    gif = createIncrementalGifEncoder(outputWidth, outputHeight, includeBackground, task);
 
     let elapsedMs = 0;
     for (let index = 0; index < frameDelays.length; index += 1) {
@@ -19524,15 +19505,15 @@ async function renderExportGifBlobWithRasterWorker(
       if (!includeBackground) {
         imageData = prepareTransparentGifFrameImageData(imageData);
       }
-      gif.addFrame(imageData, {
+      await gif.addFrame(imageData, {
         delay: frameDelays[index],
-        dispose: 2
+        last: index === frameDelays.length - 1
       });
       elapsedMs += frameDelays[index];
       updateExportProgress(
         task,
         EXPORT_PROGRESS_DECODE_END +
-          (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_DECODE_END) *
+          (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DECODE_END) *
             ((index + 1) / Math.max(1, frameDelays.length)),
         "Drawing"
       );
@@ -19540,37 +19521,7 @@ async function renderExportGifBlobWithRasterWorker(
 
     raster.session.release();
     raster = null;
-    const blob = await new Promise((resolve, reject) => {
-      const clearGifTask = () => {
-        if (task?.gif === gif) {
-          task.gif = null;
-        }
-      };
-      gif.on("progress", (ratio) => {
-        updateExportProgress(
-          task,
-          EXPORT_PROGRESS_DRAW_END +
-            (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DRAW_END) * ratio,
-          "Encoding"
-        );
-      });
-      gif.on("finished", (blob) => {
-        clearGifTask();
-        releaseGifEncoderFrames(gif);
-        if (task?.cancelled) {
-          reject(createCancellationError());
-          return;
-        }
-        resolve(blob);
-      });
-      gif.on("abort", () => {
-        clearGifTask();
-        releaseGifEncoderFrames(gif);
-        reject(createCancellationError());
-      });
-      throwIfTaskCancelled(task);
-      gif.render();
-    });
+    const blob = gif.finish();
     return options.returnRenderDetails === true
       ? { blob, frameDelays }
       : blob;
@@ -19578,7 +19529,7 @@ async function renderExportGifBlobWithRasterWorker(
     if (task?.gif === gif) {
       task.gif = null;
     }
-    releaseGifEncoderFrames(gif);
+    gif?.abort();
     throw error;
   } finally {
     raster?.session.release();
@@ -19649,97 +19600,45 @@ async function renderExportGifBlob(selectionBounds, outputWidth, outputHeight, e
   const requestedFrameDelays = overrideFrameDelays.length
     ? overrideFrameDelays
     : getExportGifFrameDelays(gifAnimationMap, options);
-  const frameDelays = getMemoryBoundedGifFrameDelays(
-    outputWidth,
-    outputHeight,
-    requestedFrameDelays
-  );
+  const frameDelays = requestedFrameDelays;
 
-  const gif = new window.GIF({
-    workers: 2,
-    quality: 1,
-    width: outputWidth,
-    height: outputHeight,
-    repeat: 0,
-    dither: false,
-    background: includeBackground ? backgroundColor : GIF_TRANSPARENT_MATTE,
-    globalPalette: includeBackground ? true : false,
-    workerScript: GIF_JS_WORKER_URL,
-    ...(includeBackground ? {} : { transparent: GIF_TRANSPARENT_MATTE_HEX })
-  });
-  if (task) {
-    task.gif = gif;
-  }
-
-  let elapsedMs = 0;
-  const sequencePrewarmMs = Number(options.sequencePrewarmMs) || 0;
-  for (let index = 0; index < frameDelays.length; index += 1) {
-    throwIfTaskCancelled(task);
-    const frameStartRatio = index / Math.max(1, frameDelays.length);
-    const frameEndRatio = (index + 1) / Math.max(1, frameDelays.length);
-    await drawExportFrameAsync(
-      frameCtx,
-      selectionBounds,
-      outputWidth,
-      outputHeight,
-      entries,
-      gifAnimationMap,
-      elapsedMs,
-      { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? sequencePrewarmMs + elapsedMs : null },
-      task,
-      (entryRatio) => updateExportProgress(
+  const gif = createIncrementalGifEncoder(outputWidth, outputHeight, includeBackground, task);
+  try {
+    let elapsedMs = 0;
+    const sequencePrewarmMs = Number(options.sequencePrewarmMs) || 0;
+    for (let index = 0; index < frameDelays.length; index += 1) {
+      throwIfTaskCancelled(task);
+      const frameStartRatio = index / Math.max(1, frameDelays.length);
+      const frameEndRatio = (index + 1) / Math.max(1, frameDelays.length);
+      await drawExportFrameAsync(
+        frameCtx,
+        selectionBounds,
+        outputWidth,
+        outputHeight,
+        entries,
+        gifAnimationMap,
+        elapsedMs,
+        { ...frameOptions, sequenceTimeMs: options.sequenceExportActive ? sequencePrewarmMs + elapsedMs : null },
         task,
-        EXPORT_PROGRESS_DECODE_END +
-          (EXPORT_PROGRESS_DRAW_END - EXPORT_PROGRESS_DECODE_END) *
-            (frameStartRatio + (frameEndRatio - frameStartRatio) * entryRatio),
-        "Drawing"
-      )
-    );
-    if (includeBackground) {
-      gif.addFrame(frameCanvas, {
-        copy: true,
-        delay: frameDelays[index],
-        dispose: 2
-      });
-    } else {
-      gif.addFrame(createTransparentGifFrameImageData(frameCtx, outputWidth, outputHeight), {
-        delay: frameDelays[index],
-        dispose: 2
-      });
-    }
-    elapsedMs += frameDelays[index];
-  }
-
-  return new Promise((resolve, reject) => {
-    const clearGifTask = () => {
-      if (task && task.gif === gif) {
-        task.gif = null;
-      }
-    };
-    gif.on("progress", (ratio) => {
-      updateExportProgress(
-        task,
-        EXPORT_PROGRESS_DRAW_END + (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DRAW_END) * ratio,
-        "Encoding"
+        (entryRatio) => updateExportProgress(
+          task,
+          EXPORT_PROGRESS_DECODE_END +
+            (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DECODE_END) *
+              (frameStartRatio + (frameEndRatio - frameStartRatio) * entryRatio),
+          "Drawing"
+        )
       );
-    });
-    gif.on("finished", (blob) => {
-      clearGifTask();
-      releaseGifEncoderFrames(gif);
-      if (task && task.cancelled) {
-        reject(createCancellationError());
-        return;
-      }
-      resolve(blob);
-    });
-    gif.on("abort", () => {
-      clearGifTask();
-      releaseGifEncoderFrames(gif);
-      reject(createCancellationError());
-    });
-    throwIfTaskCancelled(task);
-    gif.render();
-  });
+      const imageData = includeBackground
+        ? frameCtx.getImageData(0, 0, outputWidth, outputHeight)
+        : createTransparentGifFrameImageData(frameCtx, outputWidth, outputHeight);
+      await gif.addFrame(imageData, { delay: frameDelays[index], last: index === frameDelays.length - 1 });
+      elapsedMs += frameDelays[index];
+      updateExportProgress(task, EXPORT_PROGRESS_DECODE_END +
+        (EXPORT_PROGRESS_ENCODE_END - EXPORT_PROGRESS_DECODE_END) * frameEndRatio, "Encoding");
+    }
+
+    return gif.finish();
+  } finally { gif.abort(); }
 }
 
 async function renderExportVideoBlob(selectionBounds, outputWidth, outputHeight, entries, options = {}, task = null) {
