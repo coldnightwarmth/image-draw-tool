@@ -185,3 +185,15 @@ node scripts/tests/run-main-gif-timing-regression.mjs
 Checks native variable frame delays and animated pixels in a 60-frame 1024px
 export that exceeded the former raw-frame memory budget, fallback encoding,
 centisecond rounding, long-timeline frame limits, and encoder cancellation.
+
+## Generator quality exports
+
+```sh
+node scripts/tests/run-quality-gif-decoder-regression.mjs
+node scripts/tests/run-generator-quality-regression.mjs
+```
+
+Checks full source GIF fidelity with cache eviction/disposal/rewinds, a 300-layer
+quality export, decoded MP4 compression error and seeking, exact lossless WebP
+pixels, mobile choices and cancellation. The batch suite also covers quality mode.
+See [quality export details](../../docs/generator-quality-export.md).

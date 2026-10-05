@@ -231,7 +231,10 @@ function assertJobMemoryBudget(job, options = {}) {
       }
     );
   }
-  const requiredBytes = getProjectedJobMemoryBytes(job, options);
+  let requiredBytes = getProjectedJobMemoryBytes(job, options);
+  while (requiredBytes > job.memoryBudgetBytes && job.qualityDecoder?.evictOne()) {
+    requiredBytes = getProjectedJobMemoryBytes(job, options);
+  }
   if (requiredBytes <= job.memoryBudgetBytes) {
     return;
   }
@@ -1546,6 +1549,7 @@ async function decodeAsset(descriptor, job) {
   throwIfCancelled(job);
   const shouldDecodeGif = descriptor.kind === "gif" || (descriptor.kind !== "static" && hasGifSignature(bytes));
   if (shouldDecodeGif) {
+    if (job.qualityDecoder) return job.qualityDecoder.prepare(bytes, descriptor.id);
     const decoded = await decodeGifBytes(bytes, job, descriptor);
     decoded.id = descriptor.id;
     for (const frame of decoded.frames) {
@@ -1771,6 +1775,7 @@ function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entr
   const scratchHeight = Math.max(1, Math.ceil(drawHeight));
   const scratch = ensureScratch(job, "tint", scratchWidth, scratchHeight, { willReadFrequently: true });
   scratch.context.imageSmoothingEnabled = entry.imageRendering === "auto";
+  if (job.qualityDecoder) scratch.context.imageSmoothingQuality = "high";
   scratch.context.drawImage(source, 0, 0, scratchWidth, scratchHeight);
   for (const layer of entry.tintLayers) {
     scratch.context.globalCompositeOperation = "source-atop";
@@ -1804,62 +1809,67 @@ function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entr
   context.restore();
 }
 
-function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
+async function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
   if (job.skippedAssets.has(entry.sourceId)) return;
   const asset = job.assets.get(entry.sourceId);
   if (!asset) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} was not prepared.`);
   }
-  const source = resolveAssetFrame(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+  const source = asset.quality
+    ? await job.qualityDecoder.resolve(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate)
+    : resolveAssetFrame(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
   if (!source) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} has no renderable frame.`);
   }
-  const bounds = scene.selectionBounds;
-  const drawWidth = entry.width * scaleX;
-  const drawHeight = entry.height * scaleY;
-  const centerX = (entry.centerX - bounds.left) * scaleX;
-  const centerY = (entry.centerY - bounds.top) * scaleY;
-  context.save();
-  context.globalAlpha = entry.opacity;
-  const operation = entry.blendMode === "normal" ? "source-over" : entry.blendMode;
-  if (!job.capabilities?.blendModes?.includes(entry.blendMode)) {
+  try {
+    const bounds = scene.selectionBounds;
+    const drawWidth = entry.width * scaleX;
+    const drawHeight = entry.height * scaleY;
+    const centerX = (entry.centerX - bounds.left) * scaleX;
+    const centerY = (entry.centerY - bounds.top) * scaleY;
+    context.save();
+    context.globalAlpha = entry.opacity;
+    const operation = entry.blendMode === "normal" ? "source-over" : entry.blendMode;
+    if (!job.capabilities?.blendModes?.includes(entry.blendMode)) {
+      context.restore();
+      throw new ExportRasterError(
+        "UNSUPPORTED_BLEND_MODE",
+        `This worker cannot reproduce blend mode ${entry.blendMode}.`,
+        { capability: true }
+      );
+    }
+    context.globalCompositeOperation = operation;
+    if (context.globalCompositeOperation !== operation) {
+      context.restore();
+      throw new ExportRasterError(
+        "UNSUPPORTED_BLEND_MODE",
+        `This worker rejected blend mode ${entry.blendMode}.`,
+        { capability: true }
+      );
+    }
+    context.imageSmoothingEnabled = entry.imageRendering === "auto";
+    context.translate(centerX, centerY);
+    if (entry.transformMatrix) {
+      const [a, b, c, d] = entry.transformMatrix;
+      context.transform(
+        a,
+        b * scaleY / Math.max(0.000001, scaleX),
+        c * scaleX / Math.max(0.000001, scaleY),
+        d,
+        0,
+        0
+      );
+    } else {
+      context.rotate((entry.rotation * Math.PI) / 180);
+    }
+    const effectScale = Math.sqrt(Math.max(0, Math.abs(scaleX * scaleY)));
+    if (asset.quality) context.imageSmoothingQuality = "high";
+    drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
     context.restore();
-    throw new ExportRasterError(
-      "UNSUPPORTED_BLEND_MODE",
-      `This worker cannot reproduce blend mode ${entry.blendMode}.`,
-      { capability: true }
-    );
-  }
-  context.globalCompositeOperation = operation;
-  if (context.globalCompositeOperation !== operation) {
-    context.restore();
-    throw new ExportRasterError(
-      "UNSUPPORTED_BLEND_MODE",
-      `This worker rejected blend mode ${entry.blendMode}.`,
-      { capability: true }
-    );
-  }
-  context.imageSmoothingEnabled = entry.imageRendering === "auto";
-  context.translate(centerX, centerY);
-  if (entry.transformMatrix) {
-    const [a, b, c, d] = entry.transformMatrix;
-    context.transform(
-      a,
-      b * scaleY / Math.max(0.000001, scaleX),
-      c * scaleX / Math.max(0.000001, scaleY),
-      d,
-      0,
-      0
-    );
-  } else {
-    context.rotate((entry.rotation * Math.PI) / 180);
-  }
-  const effectScale = Math.sqrt(Math.max(0, Math.abs(scaleX * scaleY)));
-  drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
-  context.restore();
+  } finally { if (job.qualityDecoder) job.qualityDecoder.pinned = null; }
 }
 
-function drawBackground(job, context, scene, background, timeMs) {
+async function drawBackground(job, context, scene, background, timeMs) {
   resetContext(context);
   context.clearRect(0, 0, scene.outputWidth, scene.outputHeight);
   if (background.include || background.matteColor) {
@@ -1873,7 +1883,9 @@ function drawBackground(job, context, scene, background, timeMs) {
   if (!asset) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Background asset ${background.image.sourceId} was not prepared.`);
   }
-  const image = resolveAssetFrame(
+  const image = asset.quality ? await job.qualityDecoder.resolve(
+    asset, timeMs, background.image.phaseOffsetMs, background.image.playbackRate
+  ) : resolveAssetFrame(
     asset,
     timeMs,
     background.image.phaseOffsetMs,
@@ -1884,6 +1896,7 @@ function drawBackground(job, context, scene, background, timeMs) {
   }
   context.save();
   context.globalAlpha = background.image.opacity;
+  if (asset.quality) context.imageSmoothingQuality = "high";
   context.imageSmoothingEnabled = true;
   if (background.image.mode === "tile") {
     const selectionWidth = Math.max(1, scene.selectionBounds.right - scene.selectionBounds.left);
@@ -1910,6 +1923,7 @@ function drawBackground(job, context, scene, background, timeMs) {
     );
   }
   context.restore();
+  if (job.qualityDecoder) job.qualityDecoder.pinned = null;
 }
 
 function validatePreparedSources(job, entries, background) {
@@ -1946,14 +1960,14 @@ async function rasterizeFrame(job, frame = {}, progress = null) {
 
   for (let index = 0; index < entries.length; index += 1) {
     throwIfCancelled(job);
-    drawStamp(job, artwork.context, scene, entries[index], timeMs, scaleX, scaleY);
-    if (index > 0 && index % STAMP_YIELD_INTERVAL === 0) {
+    await drawStamp(job, artwork.context, scene, entries[index], timeMs, scaleX, scaleY);
+    if (index > 0 && index % (job.qualityDecoder ? 8 : STAMP_YIELD_INTERVAL) === 0) {
       progress?.((index + 1) / Math.max(1, entries.length));
       await yieldToWorker(job);
     }
   }
   progress?.(1);
-  drawBackground(job, output.context, scene, background, timeMs);
+  await drawBackground(job, output.context, scene, background, timeMs);
   output.context.save();
   output.context.globalAlpha = 1;
   output.context.globalCompositeOperation = "source-over";
@@ -2033,7 +2047,10 @@ async function encodeWebpResult(job, rendered, retainedReadback = false) {
   assertJobMemoryBudget(job, {
     phase: "webp-encode", transientBytes: getSafeRgbaByteLength(width, height, retainedReadback ? 2 : 1)
   });
-  const blob = await rendered.canvas.convertToBlob({ type: "image/webp", quality: 1 });
+  const blob = job.qualityDecoder
+    ? await (await import("./generator/quality-webp.mjs?v=20261005-quality-v1")).encodeLosslessWebp(
+      rendered.context.getImageData(0, 0, rendered.canvas.width, rendered.canvas.height))
+    : await rendered.canvas.convertToBlob({ type: "image/webp", quality: 1 });
   throwIfCancelled(job);
   if (blob.type !== "image/webp") {
     throw new ExportRasterError("WEBP_OUTPUT_UNAVAILABLE", "Full-quality WebP encoding is unavailable.");
@@ -2175,6 +2192,8 @@ function cleanupJob(job) {
     }
   }
   job.ownedBitmaps.clear();
+  job.qualityDecoder?.clear();
+  job.qualityDecoder = null;
   job.assets.clear();
   for (const target of Object.values(job.scratch)) {
     if (target?.canvas) {
@@ -2322,13 +2341,26 @@ async function handlePrepare(message) {
   try {
     await enqueueJobOperation(job, async () => {
       job.scene = normalizeScene(message.scene);
+      if (message.scene?.quality === true) {
+        const { QualityGifDecoder } = await import("./generator/quality-gif-decoder.mjs?v=20261005-quality-v1");
+        job.qualityDecoder = new QualityGifDecoder({
+          reserve: bytes => reserveDecodedBitmapBytes(job, bytes, { phase: "quality-source" }),
+          release: bytes => releaseDecodedBitmapBytes(job, bytes),
+          check: () => throwIfCancelled(job),
+          yieldWork: () => yieldToWorker(job),
+          backgroundColor: getGifLogicalBackgroundColor,
+          frameDelay: getRawGifFrameDelayMs,
+          byteLength: getSafeRgbaByteLength
+        });
+      }
       // Legacy callers retain two canvases and one transfer allocation. The
       // generator also retains pixels while compositing/encoding; reserve that
       // fourth frame before decoding assets, rather than failing at render time.
+      // Quality also reserves readback and lossless-encoder working storage.
       job.outputWorkingSetReserveBytes = getSafeRgbaByteLength(
         job.scene.outputWidth,
         job.scene.outputHeight,
-        message.scene?.outputWorkingSetFrames === 4 ? 4 : 3
+        job.qualityDecoder ? 8 : message.scene?.outputWorkingSetFrames === 4 ? 4 : 3
       );
       assertJobMemoryBudget(job, { phase: "output-working-set" });
       const rawAssets = Array.isArray(message.assets) ? message.assets : message.scene?.assets;

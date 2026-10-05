@@ -138,6 +138,14 @@ try {
   assert.equal(await page.evaluate(() => captureTest.streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))), true);
   assert.equal((await files()).length, 6);
   assert.deepEqual(await page.evaluate(() => fileOrder.slice(3).map(name => name.split('-')[1])), ['0000007c', '0000007d', '0000007b']);
+  // Quality uses the same sequential queue and distinct filenames.
+  await open(); await page.locator('#generatorExportMode button[value="quality"]').click();
+  await page.locator('#generatorExportSubmit').click(); await finish();
+  assert.equal((await files()).length, 9);
+  assert.equal((await files()).filter(f=>f.name.endsWith('-quality.mp4')).length, 3);
+  await open(); await page.locator('#generatorExportSubmit').click(); await finish();
+  assert.match(await page.locator('#generatorBatchStatus').textContent(), /3 already saved/);
+  assert.equal((await files()).length, 9);
   // Cancel while a different format is queued; current composition is restored.
   await open(); await page.locator('#generatorExportMode button[value="normal"]').click();
   await page.locator('#generatorExportFormat button[value="webp"]').click();
@@ -150,5 +158,5 @@ try {
   await page.locator('#generatorDownloadButton').click();
   assert.equal(await page.locator('#generatorBatchOrderOptions').isVisible(), false);
   assert.deepEqual(errors, []);
-  console.log('Batch regression passed: normal/realtime queue, retry, duplicate skip, folder outputs, sidebar access, cancellation and original preview restoration.');
+  console.log('Batch regression passed: normal/realtime/quality queue, retry, duplicate skip, folder outputs, sidebar access, cancellation and original preview restoration.');
 } finally { await context.close(); await browser.close(); await new Promise(resolve => server.close(resolve)); }

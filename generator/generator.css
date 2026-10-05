@@ -1989,3 +1989,5 @@ body.generator-page {
 
 #generatorBatchOrderOptions .generator-export-label { margin-bottom: 8px; }
 #generatorBatchOrderOptions[hidden] { display: none; }
+
+#generatorExportMode { grid-template-columns: repeat(3, minmax(0, 1fr)); }

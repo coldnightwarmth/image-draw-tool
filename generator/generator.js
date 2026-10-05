@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20260925-bookmark-batch-v3";
+  const GENERATOR_ASSET_REVISION = "20261005-quality-v1";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
@@ -444,7 +444,7 @@
   }
 
   function scheduleStablePreview() {
-    if (state.batchExport?.mode === "normal") return;
+    if (state.batchExport && state.batchExport.mode !== "realtime") return;
     if (stablePreviewTimer !== null) clearTimeout(stablePreviewTimer);
     stablePreviewTimer = setTimeout(() => {
       stablePreviewTimer = null;
@@ -2800,7 +2800,7 @@
   }
 
   function scheduleGeneratorPixelatePreview() {
-    if (state.batchExport?.mode === "normal") return;
+    if (state.batchExport && state.batchExport.mode !== "realtime") return;
     if (state.pixelatePreviewFrameId !== null || state.cropInspectionActive || document.hidden || elements.canvas.classList.contains("has-stable-preview")) {
       return;
     }
@@ -5024,7 +5024,7 @@
     };
   }
 
-  function createGeneratorExportScene(specs, dimensions, background, loopPlan, transparentBackground = false) {
+  function createGeneratorExportScene(specs, dimensions, background, loopPlan, transparentBackground = false, quality = false) {
     const scaleX = dimensions.width / Math.max(1, state.currentWidth);
     const scaleY = dimensions.height / Math.max(1, state.currentHeight);
     const assetUsage = new Map();
@@ -5058,6 +5058,7 @@
       imageSmoothing: true
     }));
     return {
+      quality,
       outputWidth: dimensions.width,
       outputHeight: dimensions.height,
       selectionBounds: {
@@ -5278,7 +5279,8 @@
         dimensions,
         background,
         metadataPlan,
-        uncroppedSpecs.length > 0
+        uncroppedSpecs.length > 0,
+        task.quality === true
       );
       const prepared = await session.prepare(scene);
       throwIfExportCancelled(task);
@@ -5294,7 +5296,7 @@
       );
       const delays = createGeneratorFrameDelays(
         loopPlan.durationMs,
-        getGeneratorExportFrameInterval(specs, loopPlan)
+        task.quality ? 20 : getGeneratorExportFrameInterval(specs, loopPlan)
       );
       const frames = [];
       let elapsedMs = 0;
@@ -5397,13 +5399,47 @@
     return { ...config, ...support.config, avc: { format: "avc" } };
   }
 
+  async function getGeneratorQualityMp4EncoderConfig(width, height) {
+    if (typeof VideoEncoder !== "function" || typeof VideoFrame !== "function") {
+      throw new Error("Quality MP4 needs a browser with WebCodecs support. Choose WebP for lossless output.");
+    }
+    const common = { width, height, framerate: 60, latencyMode: "quality", avc: { format: "avc" } };
+    const requestedBitrate = Math.max(64_000_000, Math.round(width * height * 60 * 4));
+    // Quantizer zero asks for H.264's finest quantization without a bitrate cap.
+    // Not all browsers expose it; retain a very generous bitrate on that fallback.
+    for (const bitrateMode of ["quantizer", "variable"]) {
+      for (const codec of ["avc1.640034", "avc1.640033", "avc1.4d0034", "avc1.420034"]) {
+        const bitrates = bitrateMode === "quantizer" ? [null] : [...new Set([
+          Math.min(requestedBitrate, codec.startsWith("avc1.64") ? 300_000_000 : 240_000_000),
+          Math.min(requestedBitrate, 240_000_000)
+        ])];
+        for (const bitrate of bitrates) {
+          for (const hardwareAcceleration of ["prefer-software", "no-preference"]) {
+            const config = { ...common, codec, hardwareAcceleration, bitrateMode,
+              ...(bitrateMode === "variable" ? { bitrate } : {}) };
+            try {
+              const support = await VideoEncoder.isConfigSupported(config);
+              if (support.supported && support.config.bitrateMode === bitrateMode) {
+                return { ...config, ...support.config };
+              }
+            } catch (_) { /* Try the next supported high-quality configuration. */ }
+          }
+        }
+      }
+    }
+    throw new Error("Quality MP4 encoding is unavailable at this canvas size. Try quality WebP.");
+  }
+
   async function renderGeneratorMp4(task, specs, background) {
-    const { Muxer, ArrayBufferTarget } = await loadGeneratorMp4Muxer();
+    const { Muxer, ArrayBufferTarget, StreamTarget } = await loadGeneratorMp4Muxer();
     throwIfExportCancelled(task);
     const dimensions = getGeneratorExportDimensions();
     const encodedWidth = dimensions.width + (dimensions.width % 2);
     const encodedHeight = dimensions.height + (dimensions.height % 2);
-    const encoderConfig = await getGeneratorMp4EncoderConfig(encodedWidth, encodedHeight);
+    const encoderConfig = task.quality
+      ? await getGeneratorQualityMp4EncoderConfig(encodedWidth, encodedHeight)
+      : await getGeneratorMp4EncoderConfig(encodedWidth, encodedHeight);
+    const frameRate = encoderConfig.framerate;
     const metadataPlan = createGeneratorLoopPlan(specs, null, task.durationMs);
     const session = createGeneratorRasterSession(task, (message) => {
       if (message.action === "prepare" && Number(message.total) > 0) {
@@ -5427,7 +5463,8 @@
         dimensions,
         background,
         metadataPlan,
-        uncroppedSpecs.length > 0
+        uncroppedSpecs.length > 0,
+        task.quality === true
       );
       const prepared = await session.prepare(scene);
       throwIfExportCancelled(task);
@@ -5441,16 +5478,19 @@
         decodedDurations,
         task.durationMs
       );
-      const target = new ArrayBufferTarget();
+      const qualityTarget = task.quality
+        ? (await import(`./quality-mp4-target.mjs?v=${GENERATOR_ASSET_REVISION}`)).createQualityMp4Target(StreamTarget)
+        : null;
+      const target = qualityTarget?.target || new ArrayBufferTarget();
       const muxer = new Muxer({
         target,
         video: {
           codec: "avc",
           width: encodedWidth,
           height: encodedHeight,
-          frameRate: EXPORT_MP4_FRAME_RATE
+          frameRate: frameRate
         },
-        fastStart: "in-memory"
+        fastStart: task.quality ? false : "in-memory"
       });
       let encoderError = null;
       let queueWaiter = null;
@@ -5485,14 +5525,14 @@
         throw new Error("This browser cannot prepare MP4 video frames");
       }
       const frameCount = Math.round(
-        task.durationMs / 1000 * EXPORT_MP4_FRAME_RATE
+        task.durationMs / 1000 * frameRate
       );
       for (let index = 0; index < frameCount; index += 1) {
         throwIfExportCancelled(task);
         if (encoderError) {
           throw encoderError;
         }
-        const timeMs = index * 1000 / EXPORT_MP4_FRAME_RATE;
+        const timeMs = index * 1000 / frameRate;
         const pixels = await renderGeneratorFramePixels(
           session,
           regularSpecs,
@@ -5510,14 +5550,17 @@
           0,
           0
         );
-        const timestamp = Math.round(index * 1_000_000 / EXPORT_MP4_FRAME_RATE);
-        const nextTimestamp = Math.round((index + 1) * 1_000_000 / EXPORT_MP4_FRAME_RATE);
+        const timestamp = Math.round(index * 1_000_000 / frameRate);
+        const nextTimestamp = Math.round((index + 1) * 1_000_000 / frameRate);
         const frame = new VideoFrame(frameCanvas, {
           timestamp,
           duration: nextTimestamp - timestamp
         });
         try {
-          encoder.encode(frame, { keyFrame: index % (EXPORT_MP4_FRAME_RATE * 2) === 0 });
+          encoder.encode(frame, {
+            keyFrame: index % (frameRate * (task.quality ? 1 : 2)) === 0,
+            ...(encoderConfig.bitrateMode === "quantizer" ? { avc: { quantizer: 0 } } : {})
+          });
         } finally {
           frame.close();
         }
@@ -5549,7 +5592,7 @@
         throw encoderError;
       }
       muxer.finalize();
-      const blob = new Blob([target.buffer], { type: "video/mp4" });
+      const blob = qualityTarget ? qualityTarget.finish() : new Blob([target.buffer], { type: "video/mp4" });
       encoder.removeEventListener("dequeue", wakeQueueWaiter);
       encoder.close();
       encoder = null;
@@ -5562,8 +5605,10 @@
         encodedHeight,
         durationMs: task.durationMs,
         frameCount,
-        fps: EXPORT_MP4_FRAME_RATE,
-        bitrate: encoderConfig.bitrate,
+        fps: frameRate,
+        bitrate: encoderConfig.bitrate || null,
+        bitrateMode: encoderConfig.bitrateMode,
+        quantizer: encoderConfig.bitrateMode === "quantizer" ? 0 : null,
         codec: encoderConfig.codec
       };
     } finally {
@@ -5673,12 +5718,12 @@
             report();
             continue;
           }
-          const attempts = options.mode === "normal" ? 2 : 1;
+          const attempts = options.mode === "realtime" ? 1 : 2;
           for (let attempt = 0; attempt < attempts; attempt++) {
             check();
             updateBatchCard(record.id, "loading", 0, attempt ? "retrying with a fresh renderer…" : "loading composition…");
             try {
-              await restoreCompositionRecord(record, { currentBookmarkId: record.id, skipDom: options.mode === "normal" });
+              await restoreCompositionRecord(record, { currentBookmarkId: record.id, skipDom: options.mode !== "realtime" });
               if (options.mode === "realtime") {
                 // Allow layout and GIF requests to settle without blocking sidebar scrolling.
                 await awaitCaptureStep(new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))), guardTask, 15000);
@@ -6195,6 +6240,7 @@
     setCropInspectionActive(false);
     const task = createGeneratorExportTask(exportFormat);
     task.durationMs = normalizeExportDuration(options.durationSeconds);
+    task.quality = options.mode === "quality";
     stopStablePreview(true);
     state.exportTask = task;
     state.lastExport = null;
@@ -6213,7 +6259,7 @@
       if (!result?.blob) {
         throw new Error(`The ${exportFormat.toUpperCase()} encoder did not produce a file`);
       }
-      let filename = options.filename || `composition-${formatSeed(state.currentSeed)}.${exportFormat}`;
+      let filename = options.filename || `composition-${formatSeed(state.currentSeed)}${task.quality ? "-quality" : ""}.${exportFormat}`;
       if (options.download !== false) {
         filename = await saveGeneratorExportBlob(result.blob, filename, options.directoryHandle, task);
       }
@@ -6221,6 +6267,7 @@
         format: exportFormat === "mp4" ? "mp4" : "animated-webp",
         filename,
         flashing: false,
+        renderingMode: task.quality ? "quality" : "normal",
         size: result.blob.size,
         width: result.width,
         height: result.height,
@@ -6228,6 +6275,8 @@
         frameCount: result.frameCount,
         ...(exportFormat === "mp4" ? {
           bitrate: result.bitrate,
+          bitrateMode: result.bitrateMode,
+          quantizer: result.quantizer,
           codec: result.codec,
           encodedWidth: result.encodedWidth,
           encodedHeight: result.encodedHeight,
@@ -6241,13 +6290,13 @@
           ? ` · ${result.encodedWidth}×${result.encodedHeight} encoded`
           : "";
         setActionStatus(
-          `mp4 ready · ${(result.durationMs / 1000).toFixed(1)}s · ${result.fps}fps · ` +
+          `${task.quality ? "quality " : ""}mp4 ready · ${(result.durationMs / 1000).toFixed(1)}s · ${result.fps}fps · ` +
           `${result.width}×${result.height} full resolution${paddedSize} · ` +
           formatExportByteSize(result.blob.size)
         );
       } else {
         setActionStatus(
-          `webp ready · ${(result.durationMs / 1000).toFixed(1)}s loop · ` +
+          `${task.quality ? "quality " : ""}webp ready · ${(result.durationMs / 1000).toFixed(1)}s loop · ` +
           `${result.width}×${result.height} full resolution · ` +
           `${result.lossless ? "lossless color · " : "full color · "}` +
           formatExportByteSize(result.blob.size)
@@ -6862,6 +6911,7 @@
         durationSeconds: Number(elements.exportDuration.value),
         directoryHandle: exportDirectoryHandle,
         format: elements.exportFormat.dataset.value,
+        mode: elements.exportMode.dataset.value,
         showResult: true
       };
       if (exportAllRequested) {
