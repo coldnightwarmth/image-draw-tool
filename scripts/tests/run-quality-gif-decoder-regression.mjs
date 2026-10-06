@@ -34,8 +34,8 @@ try {
     // Small delta-frame GIF exercises both background and restore-previous disposal.
     const bytes=[...new TextEncoder().encode('GIF89a'),3,0,2,0,0x81,0,0, 0,0,0, 255,0,0, 0,0,255, 0,255,0];
     const delays=[20,30,50,70,30,40];
-    const add=(left,top,width,height,pixels,disposal,index)=>{
-      bytes.push(0x21,0xf9,4,(disposal<<2)|1,delays[index]/10,0,0,0,0x2c,left,0,top,0,width,0,height,0,0,2);
+    const add=(left,top,width,height,pixels,disposal,index,transparent=true)=>{
+      bytes.push(0x21,0xf9,4,(disposal<<2)|Number(transparent),delays[index]/10,0,0,0,0x2c,left,0,top,0,width,0,height,0,0,2);
       const codes=pixels.flatMap(pixel=>[4,pixel]);codes.push(5);
       const packed=[];let value=0,bits=0;
       for(const code of codes){value|=code<<bits;bits+=3;while(bits>=8){packed.push(value&255);value>>>=8;bits-=8;}}
@@ -57,6 +57,7 @@ try {
     }} finally {native.close();}
     let allocated=0,budget=Infinity,evictions=0,cancelled=false,peak=0;
     const decoder=new QualityGifDecoder({
+      availableBytes:()=>Math.max(0,budget-allocated),frameCacheLimit:1024*1024,
       reserve:bytes=>{while(allocated+bytes>budget&&decoder.evictOne())evictions++;if(allocated+bytes>budget)throw Error('Budget exceeded');allocated+=bytes;peak=Math.max(peak,allocated);},
       release:bytes=>{allocated-=bytes;},check:()=>{if(cancelled)throw new DOMException('Cancelled','AbortError');},
       yieldWork:()=>Promise.resolve(),backgroundColor:()=>'',frameDelay:frame=>Math.max(20,frame.gce.delay*10),byteLength:(w,h)=>w*h*4
@@ -76,11 +77,69 @@ try {
       }
     }
     if(!evictions||peak>budget)throw Error('Cache did not stay bounded');
+    decoder.clear();
+    budget=compressedBytes+1024*1024;
+    // Cold jumps, backward jumps and restore-previous checkpoints must remain exact.
+    const frameTimes=[0,20,50,100,170,200];
+    for(const target of [4,1,3,2,5,0]) {
+      const source=await decoder.resolve(assets[0],frameTimes[target]);
+      ctx.clearRect(0,0,3,2);ctx.drawImage(source,0,0);decoder.pinned=null;
+      if(JSON.stringify(Array.from(ctx.getImageData(0,0,3,2).data))!==JSON.stringify(expected[target]))throw Error('Checkpoint pixel mismatch');
+    }
+    const decodedBefore=decoder.stats.decodedFrames;
+    for(let i=0;i<120;i++) {
+      const target=i%6;
+      const source=await decoder.resolve(assets[0],frameTimes[target]);
+      ctx.clearRect(0,0,3,2);ctx.drawImage(source,0,0);decoder.pinned=null;
+      if(JSON.stringify(Array.from(ctx.getImageData(0,0,3,2).data))!==JSON.stringify(expected[target]))throw Error('Cached pixel mismatch');
+    }
+    if(decoder.stats.decodedFrames!==decodedBefore||decoder.stats.cacheHits<120||!decoder.stats.checkpoints)throw Error('Exact frame reuse did not avoid redundant decoding');
+    // Apply pressure after snapshots/checkpoints exist, including disposal-3
+    // restore buffers shared with a compositor. Optional caches must be evictable.
+    budget=compressedBytes+12288;peak=0;
+    const previousEvictions=evictions;
+    decoder.reserve(0);
+    for(let turn=0;turn<8;turn++)for(const asset of assets) {
+      const target=(turn+Number(asset.id))%6;
+      const source=await decoder.resolve(asset,frameTimes[target]);
+      ctx.clearRect(0,0,3,2);ctx.drawImage(source,0,0);decoder.pinned=null;
+      if(JSON.stringify(Array.from(ctx.getImageData(0,0,3,2).data))!==JSON.stringify(expected[target]))throw Error('Evicted checkpoint pixel mismatch');
+      if(allocated>budget||decoder.frameCacheBytes>decoder.frameCacheLimit)throw Error('Frame cache exceeded budget');
+      comparisons++;
+    }
+    if(evictions<=previousEvictions||peak>budget)throw Error('Snapshot pressure did not reclaim memory');
+    decoder.clear();budget=Infinity;
+    bytes.splice(25);
+    for(let index=0;index<200;index++)add(0,0,3,2,Array(6).fill(1+index%3),1,0,false);
+    // A full opaque restore-previous frame is NOT an independent seek point.
+    add(0,0,3,2,Array(6).fill(3),3,0,false);
+    add(0,0,1,1,[1],1,0,true);
+    // Partial opaque frames and full transparent frames also depend on history.
+    add(1,0,1,1,[3],1,0,false);
+    add(0,0,3,2,[0,0,0,1,0,0],1,0,true);
+    bytes.push(0x3b);
+    const longBytes=new Uint8Array(bytes).buffer;
+    const long=decoder.prepare(longBytes,'long'),longNative=new ImageDecoder({data:longBytes,type:'image/gif'});
+    const beforeSeek=decoder.stats.decodedFrames;
+    try {
+      for(const target of [199,201,203,198,202,0,200]) {
+        const {image}=await longNative.decode({frameIndex:target});
+        ctx.clearRect(0,0,3,2);ctx.drawImage(image,0,0);image.close();
+        const reference=Array.from(ctx.getImageData(0,0,3,2).data);
+        const source=await decoder.resolve(long,target*20);
+        ctx.clearRect(0,0,3,2);ctx.drawImage(source,0,0);decoder.pinned=null;
+        if(JSON.stringify(Array.from(ctx.getImageData(0,0,3,2).data))!==JSON.stringify(reference))throw Error('Independent seek/disposal mismatch');
+        comparisons++;
+      }
+    } finally {longNative.close();}
+    const seekDecodedFrames=decoder.stats.decodedFrames-beforeSeek;
+    if(seekDecodedFrames>12)throw Error('Long GIF seek replayed independent frames');
+    const retainedSourceBytes=compressedBytes+longBytes.byteLength*2+long.frames.length*256;
     cancelled=true;
     let aborted=false;try{await decoder.resolve(assets[0],0);}catch(error){aborted=error.name==='AbortError';}
     if(!aborted)throw Error('Decode cancellation ignored');
-    decoder.clear();if(allocated!==compressedBytes)throw Error('Decode cache leaked');
-    return {comparisons,evictions,budget,peak};
+    decoder.clear();if(allocated!==retainedSourceBytes||decoder.frameCacheBytes!==0)throw Error('Decode cache leaked');
+    return {comparisons,evictions,peak,seekDecodedFrames,stats:decoder.stats};
   });
   assert.deepEqual(errors,[]);
   console.log('Quality native GIF decoder passed:',JSON.stringify(result));

@@ -97,6 +97,7 @@ const MEMORY_BUDGET_BYTES_PER_DEVICE_GIB = 96 * MEBIBYTE;
 const MIN_BITMAP_ALLOCATION_BYTES = 4096;
 const MAX_DECODED_GIF_FRAMES = 20000;
 const STAMP_YIELD_INTERVAL = 192;
+const QUALITY_WORK_SLICE_MS = 8;
 const FRAME_LIMIT = 4096;
 const workerScope = typeof self !== "undefined" ? self : null;
 const jobs = new Map();
@@ -372,6 +373,28 @@ function yieldToWorker(job) {
       }
     }, 0);
   });
+}
+
+let qualityYieldChannel;
+const qualityYieldCallbacks = [];
+
+async function yieldQualityToWorker(job) {
+  // Let cancellation/progress messages through without the nested setTimeout
+  // clamp adding several milliseconds to every small batch of stamps.
+  if (globalThis.scheduler?.yield) {
+    await globalThis.scheduler.yield();
+  } else {
+    if (!qualityYieldChannel) {
+      qualityYieldChannel = new MessageChannel();
+      qualityYieldChannel.port1.onmessage = () => qualityYieldCallbacks.shift()?.();
+    }
+    await new Promise(resolve => {
+      qualityYieldCallbacks.push(resolve);
+      qualityYieldChannel.port2.postMessage(null);
+    });
+  }
+  throwIfCancelled(job);
+  job.qualityYieldDeadline = performance.now() + QUALITY_WORK_SLICE_MS;
 }
 
 function normalizeBounds(raw, outputWidth, outputHeight) {
@@ -1957,13 +1980,14 @@ async function rasterizeFrame(job, frame = {}, progress = null) {
   const scaleX = scene.outputWidth / selectionWidth;
   const scaleY = scene.outputHeight / selectionHeight;
   const timeMs = finiteNumber(frame.timeMs, 0);
+  if (job.qualityDecoder) job.qualityYieldDeadline = performance.now() + QUALITY_WORK_SLICE_MS;
 
   for (let index = 0; index < entries.length; index += 1) {
     throwIfCancelled(job);
     await drawStamp(job, artwork.context, scene, entries[index], timeMs, scaleX, scaleY);
-    if (index > 0 && index % (job.qualityDecoder ? 8 : STAMP_YIELD_INTERVAL) === 0) {
+    if (job.qualityDecoder ? performance.now() >= job.qualityYieldDeadline : index > 0 && index % STAMP_YIELD_INTERVAL === 0) {
       progress?.((index + 1) / Math.max(1, entries.length));
-      await yieldToWorker(job);
+      await (job.qualityDecoder ? yieldQualityToWorker(job) : yieldToWorker(job));
     }
   }
   progress?.(1);
@@ -2042,15 +2066,23 @@ function compositeRgbaOver(base, overlay) {
   }
 }
 
-async function encodeWebpResult(job, rendered, retainedReadback = false) {
+async function encodeWebpResult(job, rendered, image = null) {
   const { outputWidth: width, outputHeight: height } = job.scene;
   assertJobMemoryBudget(job, {
-    phase: "webp-encode", transientBytes: getSafeRgbaByteLength(width, height, retainedReadback ? 2 : 1)
+    // Quality retains one comparison frame and one encoded frame, inside its
+    // eight-frame output reserve. Normal WebP retains the canvas/readback.
+    phase: "webp-encode", transientBytes: getSafeRgbaByteLength(width, height, job.qualityDecoder ? 4 : image ? 2 : 1)
   });
-  const blob = job.qualityDecoder
-    ? await (await import("./generator/quality-webp.mjs?v=20261005-quality-v1")).encodeLosslessWebp(
-      rendered.context.getImageData(0, 0, rendered.canvas.width, rendered.canvas.height))
-    : await rendered.canvas.convertToBlob({ type: "image/webp", quality: 1 });
+  let blob;
+  if (job.qualityDecoder) {
+    if (!job.qualityWebpEncoder) {
+      const { createLosslessWebpEncoder } = await import("./generator/quality-webp.mjs?v=20261005-quality-speed-v1");
+      job.qualityWebpEncoder = createLosslessWebpEncoder();
+    }
+    blob = await job.qualityWebpEncoder.encode(image || rendered.context.getImageData(0, 0, width, height));
+  } else {
+    blob = await rendered.canvas.convertToBlob({ type: "image/webp", quality: 1 });
+  }
   throwIfCancelled(job);
   if (blob.type !== "image/webp") {
     throw new ExportRasterError("WEBP_OUTPUT_UNAVAILABLE", "Full-quality WebP encoding is unavailable.");
@@ -2092,8 +2124,8 @@ async function encodeFrameResult(job, frame, outputKind, progress = null) {
     }
     throwIfCancelled(job);
     if (outputKind === "webp") {
-      rendered.context.putImageData(image, 0, 0);
-      return encodeWebpResult(job, rendered, true);
+      if (!job.qualityDecoder) rendered.context.putImageData(image, 0, 0);
+      return encodeWebpResult(job, rendered, image);
     }
     if (outputKind === "bitmap") {
       rendered.context.putImageData(image, 0, 0);
@@ -2194,6 +2226,8 @@ function cleanupJob(job) {
   job.ownedBitmaps.clear();
   job.qualityDecoder?.clear();
   job.qualityDecoder = null;
+  job.qualityWebpEncoder?.clear();
+  job.qualityWebpEncoder = null;
   job.assets.clear();
   for (const target of Object.values(job.scratch)) {
     if (target?.canvas) {
@@ -2342,15 +2376,17 @@ async function handlePrepare(message) {
     await enqueueJobOperation(job, async () => {
       job.scene = normalizeScene(message.scene);
       if (message.scene?.quality === true) {
-        const { QualityGifDecoder } = await import("./generator/quality-gif-decoder.mjs?v=20261005-quality-v1");
+        const { QualityGifDecoder } = await import("./generator/quality-gif-decoder.mjs?v=20261005-quality-speed-v1");
         job.qualityDecoder = new QualityGifDecoder({
           reserve: bytes => reserveDecodedBitmapBytes(job, bytes, { phase: "quality-source" }),
           release: bytes => releaseDecodedBitmapBytes(job, bytes),
           check: () => throwIfCancelled(job),
-          yieldWork: () => yieldToWorker(job),
+          yieldWork: () => yieldQualityToWorker(job),
           backgroundColor: getGifLogicalBackgroundColor,
           frameDelay: getRawGifFrameDelayMs,
-          byteLength: getSafeRgbaByteLength
+          byteLength: getSafeRgbaByteLength,
+          availableBytes: () => getAvailableDecodedBytes(job),
+          frameCacheLimit: Math.floor(job.memoryBudgetBytes * 0.4)
         });
       }
       // Legacy callers retain two canvases and one transfer allocation. The
@@ -2398,7 +2434,7 @@ async function handlePrepare(message) {
             completed,
             total: descriptors.size
           });
-          await yieldToWorker(job);
+          await (job.qualityDecoder ? yieldQualityToWorker(job) : yieldToWorker(job));
         }
       };
       // Decoding two animated sources concurrently doubles their composite,

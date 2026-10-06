@@ -29,6 +29,10 @@ page.setDefaultTimeout(30000);
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 try {
+  if (process.env.QUALITY_FORCE_MESSAGE_CHANNEL) await page.route('**/export-raster-worker.js?*', async route => {
+    const response=await route.fetch();
+    await route.fulfill({response,body:(await response.text()).replace('if (globalThis.scheduler?.yield)', 'if (false)')});
+  });
   await page.route('**/generator.js?*', async route => {
     const response = await route.fetch();
     const source = (await response.text()).replace('  window.GeneratorApp = {',
@@ -130,6 +134,42 @@ try {
   console.log('Decoded MP4 pixel MSE (lower is better):',JSON.stringify(fidelity));
   assert.ok(fidelity.quality.reduce((a,b)=>a+b,0)<fidelity.normal.reduce((a,b)=>a+b,0)*0.5,'quality MP4 should substantially reduce compression error');
   assert.ok(fidelity.quality.every(error=>error<20),'quality frames should remain faithful to the raster');
+  const losslessReuse=await page.evaluate(async()=>{
+    const {createLosslessWebpEncoder}=await import('/generator/quality-webp.mjs');
+    const encoder=createLosslessWebpEncoder();
+    const image=new ImageData(64,64);
+    for(let i=0;i<image.data.length;i++)image.data[i]=(Math.imul(i,37)+(i>>>4))&255;
+    const assertPixels=async(blob,source)=>{
+      const decoder=new ImageDecoder({data:await blob.arrayBuffer(),type:'image/webp',premultiplyAlpha:'none'});
+      try {
+        const {image:frame}=await decoder.decode();
+        try {
+          // Browser image decoders premultiply translucent RGB internally;
+          // compare using the same canvas conversion on both sides.
+          const canvas=new OffscreenCanvas(source.width,source.height),ctx=canvas.getContext('2d',{willReadFrequently:true});
+          ctx.putImageData(source,0,0);
+          const expected=ctx.getImageData(0,0,source.width,source.height).data;
+          ctx.clearRect(0,0,source.width,source.height);ctx.drawImage(frame,0,0);
+          const actual=ctx.getImageData(0,0,source.width,source.height).data;
+          if(actual.some((v,i)=>v!==expected[i]))throw Error('Lossless translucent pixels changed');
+        } finally {frame.close();}
+      } finally {decoder.close();}
+    };
+    const original=await encoder.encode(image);
+    await assertPixels(original,image);
+    if(await encoder.encode(new ImageData(image.data.slice(),64,64))!==original)throw Error('Repeated pixels were encoded again');
+    image.data[16]^=1;
+    const changed=await encoder.encode(image);
+    if(changed===original)throw Error('Mutating the input confused frame reuse');
+    await assertPixels(changed,image);
+    const reshaped=new ImageData(image.data,32,128);
+    if(await encoder.encode(reshaped)===changed)throw Error('Frame dimensions ignored');
+    encoder.clear();
+    if(await encoder.encode(image)===changed)throw Error('Frame cache survived release');
+    encoder.clear();
+    return {exactVisibleRgba:true,repeatedFrameReuse:true};
+  });
+  console.log('Lossless encoder:',losslessReuse);
   // Three adjacent choices remain usable at phone width, and the UI passes quality through.
   await page.locator('#generatorDownloadButton').click();
   await page.locator('#generatorExportMode button[value="quality"]').click();

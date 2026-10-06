@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20261005-quality-v1";
+  const GENERATOR_ASSET_REVISION = "20261005-quality-speed-v1";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;

@@ -10,7 +10,9 @@ runtime package dependency. Its MIT license is preserved in
 [`@jsquash/webp` 1.5.0](https://github.com/jamsinclair/jSquash/tree/main/packages/webp).
 Only quality WebP exports load this local WebAssembly encoder. There is no CDN
 or runtime package dependency. The wrapper explicitly enables lossless mode,
-exact pixels, full alpha quality, and maximum compression effort.
+exact pixels, full alpha quality, and fastest lossless compression effort.
+Lossless effort affects encoding time and file size; it does not lower pixel
+quality. See [WebP's configuration reference](https://developers.google.com/speed/webp/docs/api).
 
 Source archive: `https://registry.npmjs.org/@jsquash/webp/-/webp-1.5.0.tgz`
 with npm SHA-512 integrity

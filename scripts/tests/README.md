@@ -191,9 +191,15 @@ centisecond rounding, long-timeline frame limits, and encoder cancellation.
 ```sh
 node scripts/tests/run-quality-gif-decoder-regression.mjs
 node scripts/tests/run-generator-quality-regression.mjs
+QUALITY_FORCE_MESSAGE_CHANNEL=1 node scripts/tests/run-generator-quality-regression.mjs
+node scripts/tests/run-generator-quality-benchmark.mjs
+QUALITY_BENCHMARK_CASE=large node scripts/tests/run-generator-quality-benchmark.mjs
 ```
 
-Checks full source GIF fidelity with cache eviction/disposal/rewinds, a 300-layer
-quality export, decoded MP4 compression error and seeking, exact lossless WebP
-pixels, mobile choices and cancellation. The batch suite also covers quality mode.
+Checks full source GIF fidelity with cache eviction/disposal/rewinds, exact frame
+reuse and independent seeks, a 300-layer quality export, decoded MP4 compression
+error and seeking, exact lossless WebP pixels (including translucent RGBA), repeated
+WebP frame reuse, mobile choices and cancellation through both worker yield paths.
+The benchmark reports timings, sizes and raster hashes for small/busy, large/many-source,
+and still compositions. The batch suite also covers quality mode.
 See [quality export details](../../docs/generator-quality-export.md).
