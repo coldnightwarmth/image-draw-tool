@@ -1,0 +1,104 @@
+:root { --photo-panel-width: 332px; }
+body.photo-page { background: linear-gradient(#00000006 1px, transparent 1px), linear-gradient(90deg, #00000006 1px, transparent 1px), #ececec; background-size: 18px 18px; }
+[hidden] { display: none !important; }
+.skip-link { position: fixed; top: 5px; left: 5px; z-index: 100; padding: 6px; background: white; transform: translateY(-150%); }
+.skip-link:focus { transform: none; }
+#photoStage { position: fixed; inset: 0; display: grid; place-items: center; padding: 30px calc(var(--photo-panel-width) + 48px) 65px 32px; }
+#photoFrame { display: flex; flex-direction: column; box-shadow: 7px 8px 0 #0000001f; max-width: 100%; }
+.canvas-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 25px; padding: 3px 7px; border: 1px solid #111; background: #fafafa; font-size: 13px; line-height: 1; }
+header.canvas-bar { border-bottom: 0; }
+footer.canvas-bar { border-top: 0; color: #666; }
+#photoMeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#photoSurface { position: relative; border: 1px solid #111; background: #fff; }
+#photoCanvas { display: block; width: 100%; height: 100%; }
+#photoOriginal { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; }
+#photoEmpty { position: absolute; inset: 0; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; border: 0; background: #fafafa; color: #555; font-size: 22px; cursor: pointer; }
+#photoEmpty small { font-size: 15px; color: #888; }
+.empty-mark { font-size: 42px; color: #111; }
+#photoSurface.is-dragging { outline: 3px dashed #555; outline-offset: 7px; }
+.render-status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid #bbb; border-top-color: #222; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#controls.photo-controls { width: min(var(--photo-panel-width), calc(100vw - 28px)); max-height: calc(100dvh - 78px); overflow: hidden; display: flex; flex-direction: column; }
+#photoControls { overflow: auto; min-height: 0; padding-right: 1px; padding-bottom: 3px; overscroll-behavior: contain; }
+#sidebarToggleButton { font-size: 20px; line-height: 12px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.panel-heading h1 { font-size: 23px; font-weight: 400; margin: 0; line-height: 1; }
+.panel-heading nav { display: flex; gap: 10px; font-size: 13px; }
+.panel-heading a { color: #777; text-decoration: none; }
+.panel-heading a:hover { color: #111; text-decoration: underline; }
+.photo-controls details { border: 1px solid #c8c8c8; margin-bottom: 8px; background: #ffffff5e; }
+.photo-controls summary { padding: 6px 7px; font-size: 15px; cursor: pointer; user-select: none; }
+.photo-controls summary span { float: right; color: #888; font-size: 12px; margin-top: 2px; }
+.details-body { border-top: 1px solid #dedede; padding: 8px; }
+.photo-page button { color: #333; }
+.photo-page button:disabled { opacity: .42; cursor: default; }
+.photo-page button:focus-visible, .photo-page a:focus-visible, .photo-page input:focus-visible, summary:focus-visible { outline: 2px solid #285aa3; outline-offset: 2px; }
+.photo-controls button, .workspace-actions button, dialog button { border: 1px solid #bcbcbc; border-radius: 0; padding: 5px 8px; background: #fff; font: inherit; font-size: 14px; cursor: pointer; }
+.photo-controls button:hover:not(:disabled), .workspace-actions button:hover:not(:disabled), dialog button:hover:not(:disabled) { border-color: #333; background: #f3f3f3; }
+.choices { display: flex; gap: 3px; margin-bottom: 8px; }
+.choices button { flex: 1; min-width: 0; padding: 4px; font-size: 13px; }
+.choices button[aria-pressed="true"] { background: #e5e5e5; border-color: #111; color: #111; }
+.reference-row { display: flex; gap: 9px; align-items: center; margin-bottom: 7px; }
+.reference-row > div { flex: 1; min-width: 0; }
+#referenceThumbnail { width: 52px; height: 58px; object-fit: contain; background: #eee; border: 1px solid #ccc; }
+.hint { color: #777; font-size: 12px; line-height: 1.2; margin: 5px 0 2px; }
+#referenceName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check-row { display: flex; align-items: center; gap: 7px; font-size: 13px; line-height: 1.2; margin-top: 8px; cursor: pointer; }
+.check-row input { margin: 0; accent-color: #222; }
+.small-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: #666; margin-bottom: 5px; }
+.small-toolbar button { font-size: 11px; padding: 2px 6px; margin-left: 3px; }
+#categoryList { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; max-height: 98px; overflow-y: auto; border: 1px solid #ddd; padding: 6px; }
+#categoryList label { margin: 0; font-size: 12px; min-width: 0; }
+#categoryList label span { overflow: hidden; text-overflow: ellipsis; }
+.photo-slider { margin-bottom: 9px; }
+.photo-slider:last-child { margin-bottom: 0; }
+.photo-slider label, .photo-slider output { font-size: 13px; }
+.photo-slider output { color: #777; }
+.photo-slider input { display: block; margin: 0; height: 20px; }
+.slider-extremes { display: flex; justify-content: space-between; font-size: 10px; color: #888; }
+.button-row { display: flex; gap: 5px; }
+.button-row button { flex: 1; }
+.seed-row { display: flex; align-items: center; justify-content: space-between; margin: 10px 0; font-size: 13px; color: #777; }
+.seed-row input { max-width: 100px; padding: 3px 5px; border: 1px solid #ccc; border-radius: 0; background: #ffffff80; font-size: 13px; color: #555; }
+#photoStatus { font-size: 12px; color: #666; line-height: 1.25; margin: 8px 0 0; min-height: 16px; }
+#photoStatus.is-error, #exportStatus.is-error { color: #9d2525; }
+progress { display: block; width: 100%; height: 4px; border: 0; margin-top: 8px; accent-color: #444; }
+progress::-webkit-progress-bar { background: #ddd; }
+progress::-webkit-progress-value { background: #555; }
+.workspace-actions { position: fixed; bottom: 16px; right: 16px; display: flex; gap: 6px; z-index: 11; max-width: calc(100vw - 32px); }
+.workspace-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-size: 16px; min-height: 32px; }
+.workspace-actions #exportButton { width: auto; flex: none; }
+body.controls-collapsed #photoStage { padding-right: 32px; }
+body.controls-collapsed #controls { width: 28px; height: 28px; padding: 0; }
+body.controls-collapsed #photoControls { display: none; }
+dialog { width: min(360px, calc(100vw - 28px)); padding: 15px; border: 1px solid #333; border-radius: 0; background: #f8f8f8; color: #222; box-shadow: 7px 8px 0 #0002; }
+dialog::backdrop { background: #0004; }
+.dialog-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.dialog-heading h2 { font: inherit; font-size: 22px; margin: 0; }
+.dialog-heading button { font-size: 19px; padding: 0 6px; }
+dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.export-label { display: block; margin: 12px 0 6px; font-size: 14px; }
+#exportDestination { font-size: 13px; color: #777; overflow-wrap: anywhere; margin: 0 0 12px; }
+#durationOptions { margin: 12px 0; }
+#exportWidth { width: 100%; padding: 4px; border: 1px solid #bbb; border-radius: 0; background: white; font-size: 15px; }
+#exportStatus { min-height: 18px; font-size: 13px; color: #666; margin: 10px 0; }
+@media (max-width: 760px) {
+  #photoStage { position: relative; padding: 18px 18px 12px; min-height: 40dvh; }
+  #controls.photo-controls { position: relative; inset: auto; width: calc(100% - 28px); margin: 4px 14px 65px; max-height: none; }
+  body.photo-page { overflow-y: auto; height: auto; min-height: 100dvh; }
+  #photoControls { overflow: visible; }
+  #photoFrame { margin: auto; }
+  body.controls-collapsed #controls { margin-left: auto; }
+  body.controls-collapsed #photoStage { padding-right: 18px; }
+  .workspace-actions { background: #ecececf0; padding: 5px; right: 9px; bottom: 9px; max-width: calc(100vw - 18px); gap: 4px; }
+  .workspace-actions button { min-width: 0; padding-inline: 6px; gap: 4px; }
+  .photo-slider input { height: 28px; }
+  .photo-controls button, .workspace-actions button, dialog button { min-height: 36px; }
+  .check-row { min-height: 28px; }
+  #sidebarToggleButton { min-height: 20px; }
+}
+@media (max-width: 360px) {
+  .workspace-actions button, .workspace-actions #exportButton { font-size: 14px; padding-inline: 5px; }
+}
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.8s; } }

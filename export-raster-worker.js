@@ -1,4 +1,5 @@
 import { decompressFrame, parseGIF } from "./gifuct-js.bundle.mjs";
+import { PHOTO_EXPORT_MEMORY_PROFILE, resolveRasterMemoryBudget } from "./raster-memory-budget.mjs?v=20261009-photo-memory-v2";
 
 /**
  * Brush export raster worker protocol v1
@@ -42,6 +43,8 @@ import { decompressFrame, parseGIF } from "./gifuct-js.bundle.mjs";
  * Scene DTO (all fields are structured-cloneable):
  *   {
  *     outputWidth, outputHeight,
+ *     quality?: boolean, cacheRepeatedSources?: boolean, // opt-in exact collage caches
+ *     memoryProfile?: "photo-export", // larger device-aware allowance for quality photo exports
  *     selectionBounds: { left, top, right, bottom },
  *     entries: StampDTO[],
  *     background?: BackgroundDTO,
@@ -88,12 +91,6 @@ const MIN_GIF_FRAME_DELAY_MS = 20;
 const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 const MAX_OUTPUT_PIXELS = 128 * 1024 * 1024;
 const MAX_OUTPUT_DIMENSION = 32768;
-const MEBIBYTE = 1024 * 1024;
-const MIN_REQUESTED_MEMORY_BUDGET_BYTES = 32 * MEBIBYTE;
-const MIN_MEMORY_BUDGET_BYTES = 64 * MEBIBYTE;
-const DEFAULT_MEMORY_BUDGET_BYTES = 384 * MEBIBYTE;
-const MAX_MEMORY_BUDGET_BYTES = 768 * MEBIBYTE;
-const MEMORY_BUDGET_BYTES_PER_DEVICE_GIB = 96 * MEBIBYTE;
 const MIN_BITMAP_ALLOCATION_BYTES = 4096;
 const MAX_DECODED_GIF_FRAMES = 20000;
 const STAMP_YIELD_INTERVAL = 192;
@@ -146,28 +143,8 @@ function positiveNumber(value, fallback = 1) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
 }
 
-function getDeviceAwareMemoryBudgetBytes(requestedBytes = null) {
-  const deviceMemoryGiB = Number(workerScope?.navigator?.deviceMemory);
-  const detectedBudget = Number.isFinite(deviceMemoryGiB) && deviceMemoryGiB > 0
-    ? deviceMemoryGiB * MEMORY_BUDGET_BYTES_PER_DEVICE_GIB
-    : DEFAULT_MEMORY_BUDGET_BYTES;
-  const automaticBudget = clamp(
-    Math.round(detectedBudget),
-    MIN_MEMORY_BUDGET_BYTES,
-    MAX_MEMORY_BUDGET_BYTES
-  );
-  const requested = Number(requestedBytes);
-  if (!Number.isFinite(requested) || requested <= 0) {
-    return automaticBudget;
-  }
-  return Math.min(
-    automaticBudget,
-    clamp(
-      Math.round(requested),
-      MIN_REQUESTED_MEMORY_BUDGET_BYTES,
-      MAX_MEMORY_BUDGET_BYTES
-    )
-  );
+function getDeviceAwareMemoryBudgetBytes(requestedBytes = null, profile) {
+  return resolveRasterMemoryBudget(requestedBytes, { deviceMemoryGiB: workerScope?.navigator?.deviceMemory, profile });
 }
 
 function getSafeRgbaByteLength(width, height, multiplier = 1) {
@@ -234,6 +211,9 @@ function assertJobMemoryBudget(job, options = {}) {
   }
   let requiredBytes = getProjectedJobMemoryBytes(job, options);
   while (requiredBytes > job.memoryBudgetBytes && job.qualityDecoder?.evictOne()) {
+    requiredBytes = getProjectedJobMemoryBytes(job, options);
+  }
+  while (requiredBytes > job.memoryBudgetBytes && evictRepeatedSource(job)) {
     requiredBytes = getProjectedJobMemoryBytes(job, options);
   }
   if (requiredBytes <= job.memoryBudgetBytes) {
@@ -1789,11 +1769,59 @@ function applyPixelation(job, context, width, height, pixelSize) {
   context.drawImage(reduced.canvas, 0, 0, reducedWidth, reducedHeight, 0, 0, width, height);
 }
 
-function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale = 1) {
-  if (!entry.tintLayers.length && !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) {
-    context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-    return;
+// Optional for collages with thousands of repeated samples. Keep one exact,
+// full-resolution current frame per source, independent of the decoder's
+// compositor/checkpoint LRU. Entries retain their original order and effects.
+// Other callers keep the existing cache policy unless they explicitly opt in.
+function evictRepeatedSource(job) {
+  for (const [id, record] of job.repeatedSources || []) {
+    if (record === job.pinnedRepeatedSource) continue;
+    record.canvas.width = record.canvas.height = 1;
+    job.repeatedSources.delete(id);
+    job.repeatedSourceBytes -= record.bytes;
+    releaseDecodedBitmapBytes(job, record.bytes);
+    return true;
   }
+  return false;
+}
+
+async function resolveQualitySource(job, asset, timeMs, entry) {
+  if (!job.repeatedSources) return job.qualityDecoder.resolve(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+  const index = job.qualityDecoder.frameIndex(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+  const cached = job.repeatedSources.get(asset.id);
+  if (cached?.index === index) {
+    job.repeatedSources.delete(asset.id); job.repeatedSources.set(asset.id, cached);
+    job.pinnedRepeatedSource = cached;
+    return cached.canvas;
+  }
+  if (cached) {
+    cached.canvas.width = cached.canvas.height = 1;
+    job.repeatedSources.delete(asset.id); job.repeatedSourceBytes -= cached.bytes;
+    releaseDecodedBitmapBytes(job, cached.bytes);
+  }
+  const source = await job.qualityDecoder.resolve(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+  const bytes = getEstimatedBitmapByteLength(asset.width, asset.height);
+  const limit = Math.floor(job.memoryBudgetBytes * .3);
+  if (bytes > limit) return source;
+  while (job.repeatedSourceBytes + bytes > limit && evictRepeatedSource(job)) { /* bounded LRU */ }
+  try { reserveDecodedBitmapBytes(job, bytes, { phase: "repeated-source" }); }
+  catch (error) { if (error.code === "MEMORY_BUDGET_EXCEEDED") return source; throw error; }
+  let canvas;
+  try {
+    canvas = new OffscreenCanvas(asset.width, asset.height);
+    canvas.getContext("2d", { willReadFrequently: true }).drawImage(source, 0, 0);
+    const record = { canvas, bytes, index };
+    job.repeatedSources.set(asset.id, record); job.repeatedSourceBytes += bytes;
+    job.pinnedRepeatedSource = record;
+    return canvas;
+  } catch (error) {
+    if (canvas) canvas.width = canvas.height = 1;
+    releaseDecodedBitmapBytes(job, bytes);
+    throw error;
+  }
+}
+
+function createTintedSource(job, source, drawWidth, drawHeight, entry) {
   const scratchWidth = Math.max(1, Math.ceil(drawWidth));
   const scratchHeight = Math.max(1, Math.ceil(drawHeight));
   const scratch = ensureScratch(job, "tint", scratchWidth, scratchHeight, { willReadFrequently: true });
@@ -1812,6 +1840,59 @@ function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entr
   if (entry.pixelateAmount > 0) {
     applyPixelation(job, scratch.context, scratchWidth, scratchHeight, entry.pixelateAmount);
   }
+  return scratch;
+}
+
+// For fixed, tinted collage entries, cache exactly the intermediate raster the
+// regular renderer already creates. Build missing tiles grouped by GIF/frame,
+// then paint them in the original z order. This avoids decoding a large GIF
+// repeatedly just to draw many differently tinted, tiny uses of that frame.
+async function prepareTintedTiles(job, entries, timeMs, scaleX, scaleY, progress) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const asset = job.assets.get(entry.sourceId);
+    if (!asset?.quality || !entry.tintLayers.length || entry.colorMatrix || entry.pixelateAmount || entry.blurAmount) continue;
+    const index = job.qualityDecoder.frameIndex(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+    let tile = job.tintedTiles.get(entry);
+    if (tile?.index === index) continue;
+    const width = Math.max(1, Math.ceil(entry.width * scaleX)), height = Math.max(1, Math.ceil(entry.height * scaleY));
+    if (!tile) {
+      const bytes = getEstimatedBitmapByteLength(width, height);
+      if (job.tintedTileBytes + bytes > job.memoryBudgetBytes * .15) continue;
+      try { reserveDecodedBitmapBytes(job, bytes, { phase: "tinted-tile" }); }
+      catch (error) { if (error.code === "MEMORY_BUDGET_EXCEEDED") continue; throw error; }
+      tile = { canvas: new OffscreenCanvas(width, height), bytes, index: -1 };
+      job.tintedTileBytes += bytes; job.tintedTiles.set(entry, tile);
+    }
+    const key = `${asset.id}\n${index}`;
+    if (!groups.has(key)) groups.set(key, { asset, entries: [] });
+    groups.get(key).entries.push({ entry, tile, index });
+  }
+  let completed = 0;
+  for (const group of groups.values()) {
+    throwIfCancelled(job);
+    const first = group.entries[0].entry;
+    const source = await job.qualityDecoder.resolve(group.asset, timeMs, first.phaseOffsetMs, first.playbackRate);
+    try {
+      for (const { entry, tile, index } of group.entries) {
+        const scratch = createTintedSource(job, source, entry.width * scaleX, entry.height * scaleY, entry);
+        const context = tile.canvas.getContext("2d", { willReadFrequently: true });
+        context.globalCompositeOperation = "copy";
+        context.drawImage(scratch.canvas, 0, 0);
+        tile.index = index;
+        if (performance.now() >= job.qualityYieldDeadline) await yieldQualityToWorker(job);
+      }
+    } finally { job.qualityDecoder.pinned = null; }
+    progress?.(.5 * ++completed / Math.max(1, groups.size));
+  }
+}
+
+function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale = 1) {
+  if (!entry.tintLayers.length && !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) {
+    context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    return;
+  }
+  const scratch = createTintedSource(job, source, drawWidth, drawHeight, entry);
   context.save();
   if (entry.blurAmount > 0) {
     if (!("filter" in context)) {
@@ -1838,9 +1919,10 @@ async function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
   if (!asset) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} was not prepared.`);
   }
-  const source = asset.quality
-    ? await job.qualityDecoder.resolve(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate)
-    : resolveAssetFrame(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+  const tile = job.activeTintedTiles?.get(entry);
+  const source = tile?.canvas || (asset.quality
+    ? await resolveQualitySource(job, asset, timeMs, entry)
+    : resolveAssetFrame(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate));
   if (!source) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} has no renderable frame.`);
   }
@@ -1887,9 +1969,13 @@ async function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
     }
     const effectScale = Math.sqrt(Math.max(0, Math.abs(scaleX * scaleY)));
     if (asset.quality) context.imageSmoothingQuality = "high";
-    drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
+    if (tile) context.drawImage(tile.canvas, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    else drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
     context.restore();
-  } finally { if (job.qualityDecoder) job.qualityDecoder.pinned = null; }
+  } finally {
+    if (job.qualityDecoder) job.qualityDecoder.pinned = null;
+    job.pinnedRepeatedSource = null;
+  }
 }
 
 async function drawBackground(job, context, scene, background, timeMs) {
@@ -1981,12 +2067,18 @@ async function rasterizeFrame(job, frame = {}, progress = null) {
   const scaleY = scene.outputHeight / selectionHeight;
   const timeMs = finiteNumber(frame.timeMs, 0);
   if (job.qualityDecoder) job.qualityYieldDeadline = performance.now() + QUALITY_WORK_SLICE_MS;
+  job.activeTintedTiles = null;
+  if (job.tintedTiles && !Array.isArray(frame.entries)) {
+    await prepareTintedTiles(job, entries, timeMs, scaleX, scaleY, progress);
+    job.activeTintedTiles = job.tintedTiles;
+  }
 
   for (let index = 0; index < entries.length; index += 1) {
     throwIfCancelled(job);
     await drawStamp(job, artwork.context, scene, entries[index], timeMs, scaleX, scaleY);
     if (job.qualityDecoder ? performance.now() >= job.qualityYieldDeadline : index > 0 && index % STAMP_YIELD_INTERVAL === 0) {
-      progress?.((index + 1) / Math.max(1, entries.length));
+      const fraction = (index + 1) / Math.max(1, entries.length);
+      progress?.(job.activeTintedTiles ? .5 + fraction * .5 : fraction);
       await (job.qualityDecoder ? yieldQualityToWorker(job) : yieldToWorker(job));
     }
   }
@@ -2185,7 +2277,7 @@ function normalizeOutputKind(value) {
   return "png";
 }
 
-function createJob(jobId, memoryBudgetBytes = null) {
+function createJob(jobId, memoryBudgetBytes = null, memoryProfile) {
   return {
     id: jobId,
     scene: null,
@@ -2193,7 +2285,7 @@ function createJob(jobId, memoryBudgetBytes = null) {
     scratch: Object.create(null),
     ownedBitmaps: new Set(),
     abortControllers: new Set(),
-    memoryBudgetBytes: getDeviceAwareMemoryBudgetBytes(memoryBudgetBytes),
+    memoryBudgetBytes: getDeviceAwareMemoryBudgetBytes(memoryBudgetBytes, memoryProfile),
     decodedBitmapBytes: 0,
     canvasBytes: 0,
     outputWorkingSetReserveBytes: 0,
@@ -2224,6 +2316,13 @@ function cleanupJob(job) {
     }
   }
   job.ownedBitmaps.clear();
+  job.pinnedRepeatedSource = null;
+  while (evictRepeatedSource(job)) { /* release optional exact source copies */ }
+  for (const tile of job.tintedTiles?.values() || []) {
+    tile.canvas.width = tile.canvas.height = 1;
+    releaseDecodedBitmapBytes(job, tile.bytes);
+  }
+  job.tintedTiles?.clear(); job.tintedTileBytes = 0; job.activeTintedTiles = null;
   job.qualityDecoder?.clear();
   job.qualityDecoder = null;
   job.qualityWebpEncoder?.clear();
@@ -2369,7 +2468,9 @@ async function handlePrepare(message) {
     );
   }
   const requestedMemoryBudget = message.options?.memoryBudgetBytes ?? message.scene?.memoryBudgetBytes;
-  const job = createJob(jobId, requestedMemoryBudget);
+  const memoryProfile = message.scene?.quality === true && message.scene?.memoryProfile === PHOTO_EXPORT_MEMORY_PROFILE
+    ? PHOTO_EXPORT_MEMORY_PROFILE : undefined;
+  const job = createJob(jobId, requestedMemoryBudget, memoryProfile);
   job.capabilities = capabilities;
   jobs.set(jobId, job);
   try {
@@ -2388,6 +2489,12 @@ async function handlePrepare(message) {
           availableBytes: () => getAvailableDecodedBytes(job),
           frameCacheLimit: Math.floor(job.memoryBudgetBytes * 0.4)
         });
+        if (message.scene?.cacheRepeatedSources === true) {
+          job.repeatedSources = new Map();
+          job.repeatedSourceBytes = 0;
+          job.tintedTiles = new Map();
+          job.tintedTileBytes = 0;
+        }
       }
       // Legacy callers retain two canvases and one transfer allocation. The
       // generator also retains pixels while compositing/encoding; reserve that

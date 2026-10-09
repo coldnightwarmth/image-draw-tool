@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ececec">
+  <title>photo — image draw tool</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A6%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles.css?v=20260909-generator-v1">
+  <link rel="stylesheet" href="photo.css?v=20261009-photo-memory-v2">
+  <script type="module" src="photo.js?v=20261009-photo-memory-v2"></script>
+</head>
+<body class="photo-page">
+  <a class="skip-link" href="#photoControls">skip to controls</a>
+  <main id="photoStage" aria-label="Photo collage workspace">
+    <div id="photoFrame">
+      <header class="canvas-bar"><span id="photoTitle">photo collage</span><span id="photoDimensions">—</span></header>
+      <div id="photoSurface" aria-busy="false">
+        <canvas id="photoCanvas" width="720" height="600" role="img" aria-label="Upload a reference to create a collage"></canvas>
+        <img id="photoOriginal" alt="Original reference for comparison" hidden>
+        <button id="photoEmpty" type="button"><span class="empty-mark" aria-hidden="true">✦</span><span>drop a photo here</span><small>or click to choose an image</small></button>
+      </div>
+      <footer class="canvas-bar"><span id="photoMeta">an image, made of images</span><span class="render-status"><span id="photoSpinner" class="spinner" aria-label="Loading" hidden></span><span id="photoLowFps" hidden>[low fps]</span></span></footer>
+    </div>
+  </main>
+
+  <aside id="controls" class="photo-controls" aria-label="Photo collage controls">
+    <button id="sidebarToggleButton" type="button" aria-expanded="true" aria-controls="photoControls" aria-label="Hide controls">›</button>
+    <div id="photoControls" tabindex="-1">
+      <header class="panel-heading"><h1>photo</h1><nav aria-label="Tools"><a href="../">draw</a><a href="../generator/">generator</a></nav></header>
+      <details open>
+        <summary>reference</summary>
+        <div class="details-body">
+          <div class="reference-row"><img id="referenceThumbnail" alt="Selected reference" hidden><div><button id="chooseReference" type="button">choose image</button><p id="referenceName" class="hint">a still image to reconstruct</p></div></div>
+          <input id="referenceInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" hidden>
+          <label class="check-row"><input id="showReference" type="checkbox" disabled> show original</label>
+        </div>
+      </details>
+      <details open>
+        <summary>image samples <span id="assetCount">loading…</span></summary>
+        <div class="details-body">
+          <div id="sourceMode" class="choices" role="group" aria-label="Asset source"><button type="button" value="stock" aria-pressed="true">stock</button><button type="button" value="local" aria-pressed="false">folder</button><button type="button" value="both" aria-pressed="false">both</button></div>
+          <div id="stockOptions"><div class="small-toolbar"><span>categories</span><span><button type="button" id="selectAllCategories">all</button><button type="button" id="selectNoCategories">none</button></span></div><div id="categoryList" aria-label="Stock categories"></div></div>
+          <div id="localOptions" hidden><div class="button-row"><button type="button" id="chooseFolder">choose folder</button><button type="button" id="chooseFiles">choose images</button></div><p id="localStatus" class="hint">GIFs, PNGs, JPEGs, and WebPs · processed on your device</p><progress id="importProgress" max="1" value="0" hidden aria-label="Analyzing local images"></progress></div>
+          <input id="folderInput" type="file" multiple webkitdirectory accept="image/*" hidden>
+          <input id="assetsInput" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" hidden>
+          <label class="check-row"><input id="animatePreview" type="checkbox" checked> animate GIFs</label>
+        </div>
+      </details>
+      <details open>
+        <summary>composition</summary>
+        <div class="details-body">
+          <div id="photoPresets" class="choices" role="group" aria-label="Collage starting point"><button type="button" value="loose">loose</button><button type="button" value="balanced" aria-pressed="true">balanced</button><button type="button" value="detailed">detailed</button></div>
+          <div id="primarySliders"></div>
+          <label class="check-row"><input id="gridMode" type="checkbox"> grid mode</label>
+        </div>
+      </details>
+      <details id="placementDetails" open><summary>placement</summary><div id="placementSliders" class="details-body"></div></details>
+      <details id="appearanceDetails" open><summary>color + transparency</summary><div id="appearanceSliders" class="details-body"></div></details>
+      <div class="seed-row"><label for="photoSeed">seed</label><input id="photoSeed" type="text" value="1a2b3c4d" maxlength="8" pattern="[0-9a-fA-F]{1,8}" aria-label="Composition seed in hexadecimal" spellcheck="false"></div>
+      <div class="button-row generation-actions"><button id="stopButton" type="button" hidden>stop</button></div>
+      <progress id="fitProgress" max="1" value="0" hidden aria-label="Matching image"></progress>
+      <p id="photoStatus" role="status" aria-live="polite">choose a reference to begin</p>
+    </div>
+  </aside>
+
+  <div class="workspace-actions"><button id="rerollButton" type="button" disabled>reroll</button><button id="refineButton" type="button" disabled>refine</button><button type="button" id="playButton" disabled aria-label="Pause animation">pause</button><button type="button" id="exportButton" disabled><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg> export</button></div>
+
+  <dialog id="exportDialog" aria-labelledby="exportTitle">
+    <header class="dialog-heading"><h2 id="exportTitle">export options</h2><button id="closeExport" type="button" aria-label="Close export options">×</button></header>
+    <fieldset id="exportSettings">
+      <div class="small-toolbar"><label>downloads</label><button id="chooseExportFolder" type="button">choose folder</button></div><p id="exportDestination">downloads folder</p>
+      <label class="export-label">format</label><div id="exportFormat" class="choices" role="group" aria-label="Export format"><button type="button" value="png" aria-pressed="false">png</button><button type="button" value="webp" aria-pressed="false">webp</button><button type="button" value="mp4" aria-pressed="true">mp4</button></div>
+      <div id="durationOptions"><div class="control-label-row"><label for="exportDuration">length</label><output id="durationValue" for="exportDuration">6 sec</output></div><input id="exportDuration" type="range" min="1" max="15" value="6"></div>
+      <div class="control-label-row"><label for="exportWidth">width</label><span>px</span></div><input id="exportWidth" type="number" min="64" max="2400" step="1" value="1200">
+    </fieldset>
+    <p class="hint">full-quality rendering · PNG and WebP are lossless</p>
+    <progress id="exportProgress" max="1" value="0" hidden aria-label="Export progress"></progress>
+    <p id="exportStatus" role="status" aria-live="polite"></p>
+    <div class="button-row"><button id="cancelExport" type="button" hidden>cancel export</button><button id="startExport" type="button">export mp4</button></div>
+  </dialog>
+</body>
+</html>

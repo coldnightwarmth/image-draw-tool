@@ -1,5 +1,15 @@
 # Drawing performance/regression harness
 
+The photo collage builder has two focused suites:
+
+```sh
+node scripts/tests/run-photo-matcher-regression.mjs
+node scripts/tests/run-raster-memory-budget-regression.mjs
+node scripts/tests/run-photo-browser-regression.mjs
+```
+
+See [photo documentation](../../docs/photo.md) for coverage and optional artifact output.
+
 This harness exercises the app through its existing controls and pointer handlers. It does not import or reach into `app.js` state, and the automated runner uses a fresh browser context so it cannot overwrite a normal drawing session.
 
 The dependency-free focused regression test for animated export crop membership and unload-time session persistence is run separately:
