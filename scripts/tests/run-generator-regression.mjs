@@ -1455,6 +1455,9 @@ try {
   assert.equal(await inspectButton.getAttribute("aria-pressed"), "false");
   await inspectButton.click();
   await page.waitForFunction(() => window.GeneratorApp.getSummary().cropInspectionActive);
+  await page.waitForFunction(() => document.querySelector(
+    ".generator-stamp[data-crop-inspection-paused-src]"
+  ));
   const inspectionState = await page.evaluate(() => {
     const stamps = Array.from(document.querySelectorAll(".generator-stamp"));
     return {

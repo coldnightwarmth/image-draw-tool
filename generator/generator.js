@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20261011-generator-mark-inspection-v5";
+  const GENERATOR_ASSET_REVISION = "20261011-inspection-loading-v9";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
@@ -349,6 +349,7 @@
   };
 
   const generatorPixelateProxyMap = new WeakMap();
+  const generatorPixelateAnimationMap = new WeakMap();
   const generatorSequenceIterationHandlerMap = new WeakMap();
   const brushUrlCache = new Map();
   let mp4MuxerPromise = null;
@@ -475,6 +476,22 @@
     }, 0);
   }
 
+  async function waitForCurrentStablePreview() {
+    // A sidebar edit can be debounced before it reaches the worker. Wait for
+    // that scene as well as any replacement worker, rather than an older ready
+    // promise, when saving thumbnails or preparing a realtime recording.
+    while (true) {
+      if (stablePreviewTimer !== null) {
+        await new Promise(resolve => setTimeout(resolve, 16));
+        continue;
+      }
+      const preview = stablePreview;
+      const revision = preview?.revision;
+      if (preview) await preview.ready;
+      if (stablePreviewTimer === null && stablePreview === preview && preview?.revision === revision) return;
+    }
+  }
+
   async function startStablePreview() {
     if (state.exportTask && state.exportTask.format !== "capture") return;
     if (!state.currentCount || !elements.smoothRenderPreview.checked || state.cropInspectionActive ||
@@ -491,12 +508,43 @@
       }, Math.max(16, sidebarBusyUntil - performance.now()));
       return;
     }
+    const specs = state.currentSpecs.filter(spec => !spec.hidden).map((spec) => ({ ...spec, sequence: spec.sequence ? { ...spec.sequence } : null }));
+    const background = state.currentBackground;
+    const logicalWidth = state.currentWidth;
+    const logicalHeight = state.currentHeight;
+    const margin = state.currentMarginMode === "crop" ? state.currentMargin : 0;
+    const scale = Math.min(1, 1200 / logicalWidth, 900 / logicalHeight);
+    const dimensions = { width: Math.max(1, Math.round(logicalWidth * scale)), height: Math.max(1, Math.round(logicalHeight * scale)) };
+    const uncropped = state.currentMarginMode === "crop" ? specs.filter((spec) => spec.uncropped) : [];
+    const regular = uncropped.length ? specs.filter((spec) => !spec.uncropped) : specs;
+    const initialPlan = createGeneratorLoopPlan(specs);
+    const scene = createGeneratorExportScene(specs, dimensions, background, initialPlan, uncropped.length > 0);
+    scene.memoryBudgetBytes = Math.min(getExportRasterBudgetBytes(), 256 * 1024 * 1024);
+    // Entries/background are supplied on every frame. Reuse decoded assets only
+    // when every preparation input is identical, including target resolution.
+    const preparationKey = JSON.stringify({
+      assets: scene.assets,
+      // The worker also derives decoding size/smoothing from initial entries.
+      usage: scene.entries.map(entry => [entry.sourceId, entry.width, entry.height, entry.imageRendering]),
+      outputWidth: scene.outputWidth, outputHeight: scene.outputHeight,
+      selectionBounds: scene.selectionBounds, memoryBudgetBytes: scene.memoryBudgetBytes,
+      outputWorkingSetFrames: scene.outputWorkingSetFrames
+    });
+    const frameScene = { specs, regular, uncropped, margin, logicalWidth, logicalHeight };
+    if (stablePreview && !stablePreview.task.cancelled && stablePreview.preparationKey === preparationKey) {
+      stablePreview.scene = frameScene;
+      stablePreview.plan = createGeneratorLoopPlan(specs, stablePreview.durations);
+      stablePreview.revision += 1;
+      // Thumbnail/capture callers must wait for this edit's completed frame.
+      // Keep older waiters pending too; all are released by the latest frame.
+      stablePreview.ready = new Promise(resolve => stablePreview.readyResolvers.push(resolve));
+      stablePreview.wake?.();
+      return;
+    }
     // Keep the previous complete frame visible throughout preparation/rebuilds.
-    // The first high-count frame can be a static snapshot while GIFs decode.
     if (!elements.canvas.classList.contains("has-stable-preview")) {
       const still = renderLiveCompositionCanvas(
-        Math.min(1200, state.currentWidth),
-        Math.min(900, state.currentHeight)
+        Math.min(1200, state.currentWidth), Math.min(900, state.currentHeight)
       );
       stablePreviewCanvas.width = still.width;
       stablePreviewCanvas.height = still.height;
@@ -508,18 +556,14 @@
     elements.canvas.dataset.previewRenderer = "preparing";
     setPreviewLoading(true);
     const task = createGeneratorExportTask("preview");
-    const preview = { task, frames: 0, timer: null, wake: null, inFlight: false };
-    preview.ready = new Promise((resolve) => { preview.resolveReady = resolve; });
+    const preview = { task, frames: 0, timer: null, wake: null, inFlight: false,
+      preparationKey, scene: frameScene, revision: 0, durations: new Map(), plan: initialPlan,
+      readyResolvers: [] };
+    preview.resolveReady = () => {
+      for (const resolve of preview.readyResolvers.splice(0)) resolve();
+    };
+    preview.ready = new Promise(resolve => preview.readyResolvers.push(resolve));
     stablePreview = preview;
-    const specs = state.currentSpecs.filter(spec => !spec.hidden).map((spec) => ({ ...spec, sequence: spec.sequence ? { ...spec.sequence } : null }));
-    const background = state.currentBackground;
-    const logicalWidth = state.currentWidth;
-    const logicalHeight = state.currentHeight;
-    const margin = state.currentMarginMode === "crop" ? state.currentMargin : 0;
-    const scale = Math.min(1, 1200 / logicalWidth, 900 / logicalHeight);
-    const dimensions = { width: Math.max(1, Math.round(logicalWidth * scale)), height: Math.max(1, Math.round(logicalHeight * scale)) };
-    const uncropped = state.currentMarginMode === "crop" ? specs.filter((spec) => spec.uncropped) : [];
-    const regular = uncropped.length ? specs.filter((spec) => !spec.uncropped) : specs;
     let session;
     const fail = (error) => {
       if (stablePreview !== preview || task.cancelled) return;
@@ -533,15 +577,12 @@
     };
     try {
       session = createGeneratorRasterSession(task);
-      const initialPlan = createGeneratorLoopPlan(specs);
-      const scene = createGeneratorExportScene(specs, dimensions, background, initialPlan, uncropped.length > 0);
-      scene.memoryBudgetBytes = Math.min(getExportRasterBudgetBytes(), 256 * 1024 * 1024);
       const prepared = await session.prepare(scene);
       if (stablePreview !== preview || task.cancelled) return;
-      const durations = new Map((prepared.assets || [])
+      preview.durations = new Map((prepared.assets || [])
         .filter((asset) => asset.frameCount > 1 && asset.totalDurationMs > 0)
         .map((asset) => [String(asset.id), Number(asset.totalDurationMs)]));
-      const plan = createGeneratorLoopPlan(specs, durations);
+      preview.plan = createGeneratorLoopPlan(preview.scene.specs, preview.durations);
       const epoch = performance.now();
       let previousTime = epoch;
       let sequenceTime = 0;
@@ -553,12 +594,14 @@
           return;
         }
         preview.inFlight = true;
+        const revision = preview.revision;
+        const { regular, uncropped, margin, logicalWidth, logicalHeight } = preview.scene;
         if (!state.sequencePaused) sequenceTime += now - previousTime;
         previousTime = now;
         const timeMs = now - epoch;
         const frameBackground = state.currentBackground;
         const { regularEntries, overlayEntries } = createGeneratorFrameEntries(
-          regular, uncropped, timeMs, plan, sequenceTime
+          regular, uncropped, timeMs, preview.plan, sequenceTime
         );
         try {
           const output = await session.renderFrame(timeMs,
@@ -574,7 +617,7 @@
           const bitmap = output.bitmap;
           if (!bitmap) throw new Error("Missing completed preview frame");
           try {
-            if (stablePreview !== preview || task.cancelled) return;
+            if (stablePreview !== preview || task.cancelled || revision !== preview.revision) return;
             // Resize and copy in a single task: the compositor never sees a
             // cleared canvas or a frame with only some stamps painted.
             if (stablePreviewCanvas.width !== dimensions.width) stablePreviewCanvas.width = dimensions.width;
@@ -590,7 +633,15 @@
             preview.timer = setTimeout(() => void draw(), Math.max(16, 50 - (performance.now() - now)));
           }
         } catch (error) { fail(error); }
-        finally { preview.inFlight = false; }
+        finally {
+          preview.inFlight = false;
+          // An edit while a frame was rendering invalidates that frame, but
+          // never creates a second concurrent request or stalls the new scene.
+          if (stablePreview === preview && !task.cancelled && revision !== preview.revision && !document.hidden) {
+            clearTimeout(preview.timer);
+            preview.timer = setTimeout(() => void draw(), 0);
+          }
+        }
       };
       preview.wake = () => {
         clearTimeout(preview.timer);
@@ -1057,63 +1108,111 @@
     }
   }
 
+  let inspectionLoad = null;
+  const inspectionStillUrls = new WeakMap();
+
+  function waitForInspectionImage(image, signal) {
+    if (image.complete || signal.aborted) return Promise.resolve();
+    return new Promise(resolve => {
+      const finish = () => {
+        clearTimeout(timer);
+        image.removeEventListener("load", finish);
+        image.removeEventListener("error", finish);
+        signal.removeEventListener("abort", finish);
+        resolve();
+      };
+      // A failed/stalled source must not leave inspection loading forever.
+      const timer = setTimeout(finish, 8000);
+      image.addEventListener("load", finish);
+      image.addEventListener("error", finish);
+      signal.addEventListener("abort", finish, { once: true });
+    });
+  }
+
   function captureCropInspectionStill(image) {
-    if (!(image instanceof HTMLImageElement) || !image.complete || !image.naturalWidth || !image.naturalHeight) {
-      return "";
-    }
     const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
     const context = canvas.getContext("2d", { alpha: true });
-    if (!context) {
-      return "";
-    }
+    if (!context) return Promise.resolve(null);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/png");
+    // PNG remains lossless, but encoding/base64 no longer blocks the click task
+    // once for every stamp. Only a few small canvases are alive at a time.
+    return new Promise(resolve => canvas.toBlob(blob => {
+      canvas.width = canvas.height = 1;
+      resolve(blob);
+    }, "image/png"));
   }
 
-  function pauseStampForCropInspection(image) {
-    if (
-      !(image instanceof HTMLImageElement) ||
-      image.dataset.cropInspectionPausedSrc
-    ) {
-      return;
-    }
-    if (!image.complete || !image.naturalWidth || !image.naturalHeight) {
-      if (image.dataset.cropInspectionPausePending === "true") {
-        return;
-      }
-      image.dataset.cropInspectionPausePending = "true";
-      image.addEventListener("load", () => {
-        delete image.dataset.cropInspectionPausePending;
-        if (state.cropInspectionActive && image.isConnected) {
-          pauseStampForCropInspection(image);
-        }
-      }, { once: true });
-      return;
-    }
+  async function pauseStampForCropInspection(image, load) {
+    if (image.dataset.cropInspectionPausedSrc) return;
+    const signal = load.abort.signal;
+    await waitForInspectionImage(image, signal);
+    if (signal.aborted || !image.isConnected || !image.naturalWidth || !image.naturalHeight) return;
     try {
-      const stillSource = captureCropInspectionStill(image);
-      if (!stillSource) {
-        return;
-      }
+      const blob = await captureCropInspectionStill(image);
+      if (!blob || signal.aborted || inspectionLoad !== load || !image.isConnected) return;
+      const url = URL.createObjectURL(blob);
+      inspectionStillUrls.set(image, url);
       image.dataset.cropInspectionPausedSrc = image.getAttribute("src") || image.currentSrc;
-      image.src = stillSource;
+      image.src = url;
+      // Let decoding overlap subsequent captures; loading still waits for all
+      // assigned images before the button's busy state is cleared.
+      load.decoding.push(waitForInspectionImage(image, signal));
     } catch (error) {
-      // Keep the source visible if this browser cannot snapshot the current frame.
+      // A source that cannot be snapshotted remains inspectable as-is.
     }
+  }
+
+  function cancelInspectionLoad() {
+    if (!inspectionLoad) return;
+    clearTimeout(inspectionLoad.spinnerTimer);
+    inspectionLoad.abort.abort();
+    inspectionLoad = null;
+  }
+
+  function startInspectionLoad(images) {
+    cancelInspectionLoad();
+    const load = { abort: new AbortController(), spinner: false, spinnerTimer: null, decoding: [] };
+    inspectionLoad = load;
+    load.spinnerTimer = setTimeout(() => {
+      if (inspectionLoad !== load) return;
+      load.spinner = true;
+      updateCropInspectionUi();
+    }, 750);
+    let cursor = 0;
+    const run = async () => {
+      // Let the active state paint first. Subsequent toBlob callbacks naturally
+      // yield between captures without adding a clamped timer per stamp.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      while (!load.abort.signal.aborted && cursor < images.length) {
+        const image = images[cursor++];
+        if (image) await pauseStampForCropInspection(image, load);
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(8, images.length) }, run))
+      .then(() => Promise.all(load.decoding)).finally(() => {
+      if (inspectionLoad !== load) return;
+      clearTimeout(load.spinnerTimer);
+      inspectionLoad = null;
+      updateCropInspectionUi();
+    });
   }
 
   function resumeStampAfterCropInspection(image) {
     if (!(image instanceof HTMLImageElement)) {
       return;
     }
-    delete image.dataset.cropInspectionPausePending;
     const source = image.dataset.cropInspectionPausedSrc;
     if (source) {
       image.src = source;
       delete image.dataset.cropInspectionPausedSrc;
+    }
+    const stillUrl = inspectionStillUrls.get(image);
+    if (stillUrl) {
+      URL.revokeObjectURL(stillUrl);
+      inspectionStillUrls.delete(image);
     }
     image.tabIndex = -1;
     image.removeAttribute("role");
@@ -1131,9 +1230,14 @@
     elements.cropInspect.textContent = "inspect samples";
     elements.markInspect.disabled = elements.cropInspect.disabled;
     elements.markInspect.setAttribute("aria-pressed", String(state.cropInspectionActive && state.inspectionMode === "mark"));
+    for (const [button, mode] of [[elements.cropInspect, "sample"], [elements.markInspect, "mark"]]) {
+      const loading = Boolean(inspectionLoad) && state.inspectionMode === mode;
+      button.setAttribute("aria-busy", String(loading));
+      button.classList.toggle("is-inspection-loading", loading && inspectionLoad.spinner);
+    }
     elements.cropInspectStatus.hidden = !state.cropInspectionActive && !hiddenCount;
     elements.cropInspectStatus.textContent = state.cropInspectionActive
-      ? `preview paused · ${state.inspectionMode === "mark" ? "marks" : "samples"} · wheel: cycle layers · hold shift: solo · ctrl/cmd-click: hide/show${state.currentMarginMode === "crop" ? " · click: toggle crop" : ""} · ${hiddenCount} hidden`
+      ? `${inspectionLoad ? "loading inspection · esc: cancel" : "preview paused · esc: exit"} · ${state.inspectionMode === "mark" ? "marks" : "samples"} · wheel: cycle layers · hold shift: solo · ctrl/cmd-click: hide/show${state.currentMarginMode === "crop" ? " · click: toggle crop" : ""} · ${hiddenCount} hidden`
       : `${hiddenCount} hidden · inspect to show again`;
     elements.canvas.dataset.generatorUncroppedCount = String(uncroppedCount);
   }
@@ -1199,14 +1303,17 @@
       updateCropInspectionUi();
       return;
     }
+    const wasActive = state.cropInspectionActive;
     if (nextActive) stopStablePreview(false);
+    else cancelInspectionLoad();
     state.cropInspectionActive = nextActive;
     state.inspectionMode = nextMode;
     state.inspectionShift = false;
     state.inspectionHidePointer = false;
     selectInspectionStamp(null);
     elements.canvas.classList.toggle("crop-inspection-active", nextActive);
-    for (const image of getSortedLiveStamps()) {
+    const images = getSortedLiveStamps();
+    for (const image of images) {
       const spec = getCurrentSpecForImage(image);
       if (nextActive) {
         image.removeAttribute("aria-hidden");
@@ -1217,11 +1324,11 @@
           `Inspect ${nextMode}. Control or Command click to hide or show; click to toggle crop in crop edges mode.`
         );
         image.setAttribute("aria-pressed", String(Boolean(spec?.uncropped)));
-        pauseStampForCropInspection(image);
       } else {
         resumeStampAfterCropInspection(image);
       }
     }
+    if (nextActive && !wasActive) startInspectionLoad(images);
     if (!nextActive) {
       scheduleGeneratorPixelatePreview();
       scheduleStablePreview();
@@ -1726,6 +1833,9 @@
           : toggle.defaultChecked;
     }
     if (preset === "default") {
+      const squares = elements.categoryList.querySelector('input[value="squares"]');
+      if (squares) squares.checked = false;
+      updateSourceSummary();
       document.querySelector('.generator-mode-checkbox[value="ellipse"]').checked = true;
       byId("generatorLineCurveAmountSlider").value = "0";
       byId("generatorLineCurveStrengthSlider").value = "0";
@@ -3034,9 +3144,15 @@
   }
 
   function getGeneratorLiveSequenceProgress(image, sequence) {
-    const animation = image.getAnimations().find((candidate) =>
-      candidate.animationName === "generator-sequence-pixelate"
-    );
+    // CSSAnimation identity survives frame ticks and pause/resume. Looking it up
+    // on every stamp every frame forces repeated browser animation-tree queries.
+    let animation = generatorPixelateAnimationMap.get(image);
+    if (!animation || animation.playState === "idle") {
+      animation = image.getAnimations().find((candidate) =>
+        candidate.animationName === "generator-sequence-pixelate"
+      );
+      if (animation) generatorPixelateAnimationMap.set(image, animation);
+    }
     const currentTime = Number(animation?.currentTime);
     if (!Number.isFinite(currentTime)) {
       return null;
@@ -3167,6 +3283,7 @@
   }
 
   function clearSequenceSpecFromImage(image, spec, nextSequence = null) {
+    generatorPixelateAnimationMap.delete(image);
     const previousEffect = image.dataset.generatorSequenceEffect || "";
     const previousAlternateSource = image.dataset.generatorSequenceAlternateSource || "";
     const preserveImageCycle = previousEffect === "image-cycle" &&
@@ -3981,6 +4098,7 @@
     );
     updateCropInspectionUi();
     scheduleGeneratorPixelatePreview();
+    scheduleStablePreview();
     renderBookmarkGallery();
     syncCurrentBookmarkUI();
     await flushActiveSessionSave();
@@ -4075,30 +4193,60 @@
       for (const key of transformKeys) { transformed[key] = changes.has(key) ? sample(key, motifId) : old[key] ?? (key.includes("Stretch") ? 100 : 0); transformed.randomize[key] = false; }
       applyMarkTransforms(specs, transformed, deriveGenerationControlRandom(state.currentSeed, `edit-transform-${motifId}`));
     }
+    const sizeChanged = changes.has("size");
+    const rotationChanged = changes.has("rotation");
+    const transformChanged = transformKeys.some(key => changes.has(key));
+    const tintChanged = changes.has("tint") || changes.has("tintColor");
     for (const image of elements.composition.querySelectorAll("img.generator-stamp")) {
       const spec = getCurrentSpecForImage(image);
       if (!spec) continue;
-      image.style.left = `${spec.x-spec.width/2}px`; image.style.top = `${spec.y-spec.height/2}px`;
-      image.style.width = `${spec.width}px`; image.style.height = `${spec.height}px`;
-      image.style.opacity = String(spec.opacity); image.style.filter = spec.filter;
-      const matrix = formatCssMatrix(composeStampTransform(spec.markTransform, spec.rotation));
-      image.style.transform = matrix;
-      image.style.setProperty("--generator-base-transform", matrix);
-      image.style.setProperty("--generator-base-opacity", String(spec.opacity));
-      image.style.setProperty("--generator-base-rotation", `${spec.rotation}deg`);
-      if (spec.sequence) {
-        image.style.setProperty("--generator-sequence-filter-rest", spec.sequence.filterRest);
-        image.style.setProperty("--generator-sequence-filter-active", spec.sequence.filterActive);
+      const geometryChanged = (spec.mode === "line"
+        ? ["spacing", "lineAngle", "lineLength", "lineCurveAmount", "lineCurveStrength"]
+        : spec.mode === "spray" ? ["spraySpread"]
+        : ["box", "ellipse"].includes(spec.mode) ? ["boxWidth", "boxHeight", "boxStyle"] : [])
+        .some(key => changes.has(key));
+      // Leave unrelated DOM properties alone, including the animation's base
+      // variables. Dataset writes also invalidate selectors/MutationObservers.
+      if (sizeChanged || geometryChanged || transformChanged) {
+        image.style.left = `${spec.x-spec.width/2}px`; image.style.top = `${spec.y-spec.height/2}px`;
+        image.dataset.generatorX = String(spec.x); image.dataset.generatorY = String(spec.y);
       }
-      image.dataset.generatorX = String(spec.x); image.dataset.generatorY = String(spec.y);
-      image.dataset.generatorSize = String(spec.longestSide); image.dataset.generatorRotation = String(spec.rotation);
-      image.dataset.generatorOpacity = String(spec.opacity); image.dataset.generatorTintAmount = String(spec.tintAmount);
-      for (const key of SAMPLED_GEOMETRY_KEYS) if (Number.isFinite(spec[key])) image.dataset[key] = String(spec[key]);
-      if (spec.sampledBoxStyle) image.dataset.sampledBoxStyle = spec.sampledBoxStyle;
-      image.dataset.generatorMarkPitch = String(spec.markTransform?.pitch || 0);
-      image.dataset.generatorMarkYaw = String(spec.markTransform?.yaw || 0);
-      image.dataset.generatorMarkHorizontalStretch = String(spec.markTransform?.horizontalStretch ?? 100);
-      image.dataset.generatorMarkVerticalStretch = String(spec.markTransform?.verticalStretch ?? 100);
+      if (sizeChanged) {
+        image.style.width = `${spec.width}px`; image.style.height = `${spec.height}px`;
+        image.dataset.generatorSize = String(spec.longestSide);
+      }
+      if (changes.has("opacity")) {
+        image.style.opacity = String(spec.opacity);
+        image.style.setProperty("--generator-base-opacity", String(spec.opacity));
+        image.dataset.generatorOpacity = String(spec.opacity);
+      }
+      if (tintChanged) {
+        image.style.filter = spec.filter;
+        image.dataset.generatorTintAmount = String(spec.tintAmount);
+        if (spec.sequence) {
+          image.style.setProperty("--generator-sequence-filter-rest", spec.sequence.filterRest);
+          image.style.setProperty("--generator-sequence-filter-active", spec.sequence.filterActive);
+        }
+      }
+      if (rotationChanged || transformChanged || geometryChanged) {
+        const matrix = formatCssMatrix(composeStampTransform(spec.markTransform, spec.rotation));
+        image.style.transform = matrix;
+        image.style.setProperty("--generator-base-transform", matrix);
+      }
+      if (rotationChanged) {
+        image.style.setProperty("--generator-base-rotation", `${spec.rotation}deg`);
+        image.dataset.generatorRotation = String(spec.rotation);
+      }
+      if (geometryChanged) {
+        for (const key of SAMPLED_GEOMETRY_KEYS) if (Number.isFinite(spec[key])) image.dataset[key] = String(spec[key]);
+        if (spec.sampledBoxStyle) image.dataset.sampledBoxStyle = spec.sampledBoxStyle;
+      }
+      if (transformChanged || geometryChanged) {
+        image.dataset.generatorMarkPitch = String(spec.markTransform?.pitch || 0);
+        image.dataset.generatorMarkYaw = String(spec.markTransform?.yaw || 0);
+        image.dataset.generatorMarkHorizontalStretch = String(spec.markTransform?.horizontalStretch ?? 100);
+        image.dataset.generatorMarkVerticalStretch = String(spec.markTransform?.verticalStretch ?? 100);
+      }
     }
     syncTintColorPicker();
     state.currentSignature = buildSignature(state.currentSpecs);
@@ -4891,7 +5039,7 @@
   }
 
   async function createCompositionThumbnailBlob() {
-    if (stablePreview) await stablePreview.ready;
+    await waitForCurrentStablePreview();
     const images = elements.canvas.classList.contains("has-stable-preview") ? [] : getSortedLiveStamps();
     await Promise.race([
       Promise.all(images.map((image) => {
@@ -6317,7 +6465,7 @@
                 await awaitCaptureStep(new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))), guardTask, 15000);
                 const loads = Array.from(elements.composition.querySelectorAll("img"), image => image.decode().catch(() => {}));
                 await awaitCaptureStep(Promise.all(loads), guardTask, 60000);
-                if (stablePreview) await awaitCaptureStep(stablePreview.ready, guardTask, 180000);
+                await awaitCaptureStep(waitForCurrentStablePreview(), guardTask, 180000);
               }
               check();
               const exportOptions = { ...options, batch: true, filename, stream: batch.stream, showResult: false };
@@ -7780,6 +7928,11 @@
       ) {
         event.preventDefault();
         void undoLastGeneratorAction();
+        return;
+      }
+      if (event.key === "Escape" && state.cropInspectionActive) {
+        event.preventDefault();
+        setCropInspectionActive(false);
         return;
       }
       if (event.key === "Escape" && (state.exportTask || state.batchExport)) {

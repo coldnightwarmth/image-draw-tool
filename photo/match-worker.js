@@ -1,4 +1,4 @@
-import { fitCollage, describePixels, normalizeSettings } from "./matcher.mjs?v=20261009-photo-v1";
+import { fitCollage, describePixels, normalizeSettings } from "./matcher.mjs?v=20261011-render-performance-v6";
 import { QualityGifDecoder } from "../generator/quality-gif-decoder.mjs?v=20261005-quality-speed-v1";
 
 const TILE_SIZE = 32;

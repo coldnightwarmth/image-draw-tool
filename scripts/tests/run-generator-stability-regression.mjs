@@ -27,6 +27,43 @@ const page = await context.newPage();
 page.setDefaultTimeout(120000);
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
+const configureDenseFixture = async () => {
+  // Future-composition randomization is a product default, not part of this
+  // controlled 300-stamp stability fixture.
+  for (const toggle of document.querySelectorAll('#generatorControlsMain input[type="checkbox"][id$="RandomToggle"]')) toggle.checked = false;
+  const categories = ['radial', 'flower', 'garden', 'stroke', 'esp ra de glitch', 'esp ra de', 'esp ra de characters', 'particles', '3d', 'pixel art+games', 'anime', 'misc', 'framing', 'nu'];
+  for (const input of document.querySelectorAll('.generator-source-checkbox[data-source-kind="category"]')) input.checked = categories.includes(input.value);
+  document.querySelector('#generatorCategoryTab').click();
+  const values = {
+    generatorCanvasWidthInput: 1200, generatorCanvasHeightInput: 800,
+    generatorCountSlider: 300, generatorMarkCountSlider: 12, generatorGifsPerMarkSlider: 100,
+    generatorMarginSlider: 0, generatorMarginOpacitySlider: 100, generatorCropExemptionSlider: 0,
+    generatorSizeSlider: 92, generatorSizeRandomMinSlider: 46, generatorSizeRandomMaxSlider: 158,
+    generatorSpacingSlider: 54, generatorRotationSlider: 0, generatorOpacitySlider: 100,
+    generatorTintAmountSlider: 0, generatorPitchSlider: 0, generatorYawSlider: 0,
+    generatorHorizontalStretchSlider: 100, generatorVerticalStretchSlider: 100,
+    generatorSpraySpreadSlider: 230, generatorLineAngleSlider: 0, generatorLineLengthSlider: 460,
+    generatorLineCurveAmountSlider: 0, generatorLineCurveStrengthSlider: 0,
+    generatorBoxWidthSlider: 380, generatorBoxHeightSlider: 260, generatorBoxStyleSelect: 'outline',
+    generatorSequenceSpeedMinSlider: 52, generatorSequenceSpeedSlider: 78,
+    generatorSequenceIntensityMinSlider: 47, generatorSequenceIntensitySlider: 78,
+    generatorSequenceNoneFrequencySlider: 0, generatorBackgroundColorInput: '#ffffff', generatorTintColorInput: '#ff4fb3'
+  };
+  for (const [id, value] of Object.entries(values)) {
+    const input = document.getElementById(id);
+    if (!input) throw Error(`Missing controlled fixture input: ${id}`);
+    input.value = String(value);
+  }
+  document.querySelector('input[name="generatorMarginMode"][value="placement"]').checked = true;
+  document.querySelector('#generatorGifRandomToggle').checked = true;
+  document.querySelector('#generatorSizeRandomToggle').checked = true;
+  document.querySelector('#generatorSmoothPreviewToggle').checked = false;
+  document.querySelector('#generatorSequenceEnabledToggle').checked = true;
+  for (const input of document.querySelectorAll('.generator-mode-checkbox')) input.checked = ['scatter', 'spray', 'line', 'box', 'ellipse'].includes(input.value);
+  for (const input of document.querySelectorAll('.generator-sequence-effect-checkbox')) input.checked = ['show-hide', 'move', 'rotate', 'scale', 'color-cycle', 'image-cycle', 'pixelate', 'blur'].includes(input.value);
+  for (const input of document.querySelectorAll('.generator-sequence-timing-checkbox')) input.checked = ['pulse', 'wave', 'step', 'random', 'all', 'grouped'].includes(input.value);
+  if (!await window.GeneratorApp.generate(0x12345678)) throw Error('Could not generate the controlled dense fixture');
+};
 await page.addInitScript(() => {
   const NativeWorker = window.Worker;
   window.__rasterRequests = [];
@@ -67,15 +104,14 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   assert.equal(await page.locator('#generatorLoadingSpinner').isVisible(), true);
   delayInitialGifs = false;
-  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count === 120 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
+  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count > 0 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
   await page.waitForFunction(() => document.querySelector('#generatorLoadingSpinner').hidden);
   await page.unroute('**/*.gif?*');
   assert.equal(await page.locator('#generatorSmoothPreviewToggle').isChecked(), false);
-  assert.equal(await page.locator('#generatorSourceDetails').getByText('smooth render preview', { exact: true }).count(), 1);
-  await page.evaluate(async () => {
-    document.querySelector('#generatorCountSlider').value = '300';
-    await window.GeneratorApp.generate(0x12345678);
-  });
+  assert.equal(await page.locator('#generatorControlsMain > .generator-preview-option').getByText('smooth render preview', { exact: true }).count(), 1);
+  assert.equal(await page.locator('#generatorSmoothPreviewToggle').evaluate(input => input.closest('.generator-preview-option') === document.querySelector('#generatorControlsMain').lastElementChild), true, 'smooth preview should remain below all sidebar categories');
+  await page.evaluate(configureDenseFixture);
+  assert.equal(await page.evaluate(() => window.GeneratorApp.getSummary().count), 300);
   assert.equal(await page.evaluate(() => GeneratorApp.getSummary().previewRenderer), 'dom');
   await page.locator('#generatorSmoothPreviewToggle').check({ force: true });
   await page.waitForFunction(() => window.GeneratorApp.getSummary().previewFrames >= 5, null, { timeout: 120000 });
@@ -97,7 +133,7 @@ try {
   const secondSidebar = await page.locator('.generator-panel-header').screenshot();
   assert.deepEqual(firstSidebar, secondSidebar, 'sidebar should not repaint with artwork frames');
   console.log('300-stamp complete-frame preview and sidebar checks passed');
-  // Rebuilding a large scene must retire the previous worker and resume rendering.
+  // Editing the background must preserve complete-frame rendering.
   await page.evaluate(() => window.GeneratorApp.randomizeBackground());
   await page.waitForFunction(() => window.GeneratorApp.getSummary().previewFrames >= 3);
   // Enable crop inspection on the dense scene, then restore the flattened preview.

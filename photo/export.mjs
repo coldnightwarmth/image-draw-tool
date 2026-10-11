@@ -1,4 +1,4 @@
-import { RasterSession, createScene, abortError } from "./raster-client.mjs?v=20261009-photo-memory-v2";
+import { RasterSession, createScene, abortError } from "./raster-client.mjs?v=20261011-render-performance-v6";
 import { createQualityMp4Target } from "../generator/quality-mp4-target.mjs?v=20261005-quality-speed-v1";
 
 const fourCC = (bytes, offset) => String.fromCharCode(...bytes.subarray(offset, offset + 4));

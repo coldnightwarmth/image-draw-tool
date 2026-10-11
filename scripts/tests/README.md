@@ -240,3 +240,29 @@ The none-sequence suite checks per-mark frequency, reproducible random draws,
 restoring muted effects without reassigning other marks, and saved compositions.
 
 `node scripts/tests/run-generator-mark-inspection-regression.mjs` verifies sample/mark inspection switching, whole-mark selection, solo, hiding, and crop exemption.
+
+`node scripts/tests/run-generator-inspection-loading-regression.mjs` measures
+300-stamp inspection activation and background snapshot preparation separately.
+It verifies lossless snapshot pixels, the 750 ms loading indicator, switching modes
+while loading, Escape cancellation, late-callback safety, and object URL cleanup.
+Set `GENERATOR_BASELINE_FILE` to an older generator script for timing comparisons.
+
+## October rendering optimization checks
+
+```sh
+node scripts/tests/run-generator-preview-reuse-regression.mjs
+node scripts/tests/run-raster-effects-performance-regression.mjs
+node scripts/tests/run-drawing-tint-resources-regression.mjs
+node scripts/tests/benchmark-drawing-tint-resources.mjs 9c62926
+node scripts/tests/run-photo-shortlist-regression.mjs
+```
+
+The preview test covers 300 samples, native pixelation, scoped DOM writes, retained
+worker/decoder resources, stale-frame rejection, thumbnail readiness, decode-size
+invalidation, and inspection/native restoration. Set `GENERATOR_BASELINE_FILE` to
+an older `generator.js` to run its before-comparison; general correctness checks
+remain enabled while reuse-specific assertions are skipped. Browser tests accept
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` where supported.
+
+See [the optimization report](../../docs/render-optimization-2026-10.md) for fixture
+scope, before/after measurements, pixel-parity evidence, and hardware limitations.

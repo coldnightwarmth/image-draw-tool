@@ -86,6 +86,35 @@ function soften(input, width, height, radius) {
 
 const weights = [0.3, 0.5, 0.2];
 const colorDistance = (a, b) => weights.reduce((sum, weight, c) => sum + weight * (a[c] - b[c]) ** 2, 0);
+
+// Keep the exact first 28 assets of the stable full sort without allocating and
+// sorting a catalog-sized array for every placement. Results are reused: callers
+// must finish consuming a shortlist before requesting the next one.
+export function createAssetShortlister(assets, settings) {
+  const limit = Math.min(28, assets.length);
+  const shortlist = new Array(limit), distances = new Float64Array(limit);
+  const colorScale = 1 - settings.recolor / 100 * .8;
+  const catalog = assets.map(asset => ({ asset, color: asset.temporalMean || asset.mean,
+    coveragePenalty: (1 - asset.coverage) * 420 }));
+  return (centerColor, uses) => {
+    let length = 0;
+    for (const { asset, color, coveragePenalty } of catalog) {
+      const distance = colorDistance(color, centerColor) * colorScale + coveragePenalty +
+        (uses.get(asset.id) || 0) * settings.variety * .2;
+      if (length === limit && (limit === 0 || distance >= distances[limit - 1])) continue;
+      // Insert after equal scores, retaining the original catalog order for ties.
+      let position = length;
+      while (position > 0 && distance < distances[position - 1]) position--;
+      for (let index = Math.min(length, limit - 1); index > position; index--) {
+        shortlist[index] = shortlist[index - 1]; distances[index] = distances[index - 1];
+      }
+      shortlist[position] = asset; distances[position] = distance;
+      length = Math.min(limit, length + 1);
+    }
+    return shortlist;
+  };
+}
+
 export function imageError(actual, target) {
   let sum = 0;
   for (let p = 0; p < target.length; p += 4)
@@ -104,6 +133,7 @@ export async function fitCollage({ width, height, pixels, assets, settings: raw,
   const canvas = new Float32Array(pixels.length), coverage = new Float32Array(width * height);
   for (let p = 0; p < canvas.length; p += 4) { canvas.set(bg, p); canvas[p + 3] = 255; }
   const entries = [], uses = new Map(), byId = new Map(assets.map(asset => [asset.id, asset]));
+  const selectAssets = createAssetShortlister(assets, settings);
   const baseError = imageError(canvas, pixels);
 
   // Sampling a transformed thumbnail directly avoids allocating a canvas for
@@ -192,15 +222,11 @@ export async function fitCollage({ width, height, pixels, assets, settings: raw,
     const point = settings.grid ? { x: (index % gridColumns + .5) / gridColumns, y: (Math.floor(index / gridColumns) + .5) / gridRows } : choosePoint();
     const p = (clamp(Math.floor(point.y * height), 0, height - 1) * width + clamp(Math.floor(point.x * width), 0, width - 1)) * 4;
     const centerColor = [target[p], target[p + 1], target[p + 2]];
-    const shortlist = assets.map(asset => {
-      const color = asset.temporalMean || asset.mean;
-      const distance = colorDistance(color, centerColor) * (1 - settings.recolor / 100 * .8);
-      return { asset, distance: distance + (1 - asset.coverage) * 420 + (uses.get(asset.id) || 0) * settings.variety * .2 };
-    }).sort((a, b) => a.distance - b.distance).slice(0, 28);
+    const shortlist = selectAssets(centerColor, uses);
     const candidates = [];
     const attempts = settings.grid ? 12 : 10 + Math.round(fidelity * 6);
     for (let attempt = 0; attempt < attempts; attempt++) {
-      const asset = shortlist[attempt === 0 ? 0 : Math.floor(random() ** 1.8 * shortlist.length)].asset;
+      const asset = shortlist[attempt === 0 ? 0 : Math.floor(random() ** 1.8 * shortlist.length)];
       const size = settings.grid ? Math.min(width / gridColumns, height / gridRows) / shortSide :
         Math.max(1.8 / shortSide, settings.size / 100 * (1.7 - 1.2 * stage ** .65) * Math.exp((random() * 2 - 1) * settings.variation / 100 * 1.2));
       const jitter = settings.grid ? 0 : size * chaos * .65;

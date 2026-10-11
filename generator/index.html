@@ -13,10 +13,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles.css?v=20260909-generator-v1">
-  <link rel="stylesheet" href="generator.css?v=20261011-generator-mark-inspection-v5">
+  <link rel="stylesheet" href="generator.css?v=20261011-inspection-loading-v9">
   <script defer src="../stock-brushes.js?v=20260721-all-gif-arc-export-v5"></script>
   <script defer src="../brush-metadata.js?v=20260721-all-gif-arc-export-v5"></script>
-  <script defer src="generator.js?v=20261011-generator-mark-inspection-v5"></script>
+  <script defer src="generator.js?v=20261011-inspection-loading-v9"></script>
 </head>
 <body class="generator-page">
   <a class="generator-skip-link" href="#generatorControlsMain">skip to generator controls</a>
@@ -181,6 +181,7 @@
 
 
 
+        <div class="generator-inspect-actions" role="group" aria-label="Inspection mode">
         <button
           id="generatorCropInspectButton"
           class="generator-crop-inspect-button"
@@ -189,6 +190,7 @@
           aria-describedby="generatorCropInspectStatus"
         >inspect samples</button>
         <button id="generatorMarkInspectButton" class="generator-crop-inspect-button" type="button" aria-pressed="false" aria-describedby="generatorCropInspectStatus">inspect marks</button>
+        </div>
         <p id="generatorCropInspectStatus" class="generator-control-hint generator-crop-inspect-status" role="status" hidden></p>
 
       <p id="generatorStatus" class="generator-status" role="status" aria-live="polite">loading the ALL set…</p>
@@ -720,10 +722,10 @@
             </div>
           </fieldset>
 
-          <div class="generator-sequence-range">
-            <div class="generator-property-heading">
-              <label for="generatorSequenceNoneFrequencySlider">none frequency</label>
-              <output id="generatorSequenceNoneFrequencyValue" for="generatorSequenceNoneFrequencySlider">25%</output>
+          <div class="control-group generator-sequence-range">
+            <div class="control-label-row">
+              <label for="generatorSequenceNoneFrequencySlider" class="control-label">none frequency</label>
+              <output id="generatorSequenceNoneFrequencyValue" class="value-text" for="generatorSequenceNoneFrequencySlider">25%</output>
               <label class="generator-new-composition-switch" title="Randomize none frequency with each new composition">
                 <span class="ios-switch">
                   <input id="generatorSequenceNoneFrequencyRandomToggle" type="checkbox" checked aria-label="Randomize none frequency with new compositions">

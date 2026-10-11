@@ -1,6 +1,6 @@
-import { DEFAULTS, PRESETS, normalizeSettings } from './matcher.mjs?v=20261009-photo-v1';
-import { RasterSession, createScene } from './raster-client.mjs?v=20261009-photo-memory-v2';
-import { renderExport } from './export.mjs?v=20261009-photo-memory-v2';
+import { DEFAULTS, PRESETS, normalizeSettings } from './matcher.mjs?v=20261011-render-performance-v6';
+import { RasterSession, createScene } from './raster-client.mjs?v=20261011-render-performance-v6';
+import { renderExport } from './export.mjs?v=20261011-render-performance-v6';
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -228,7 +228,7 @@ function updateSources() {
 }
 
 try {
-  worker = new Worker(new URL('./match-worker.js?v=20261009-photo-v1', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./match-worker.js?v=20261011-render-performance-v6', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data }) => {
     if (data.type === 'catalog') {
       state.stock = data.assets.map(asset => ({ ...asset, url: sourceURL(asset.source) }));

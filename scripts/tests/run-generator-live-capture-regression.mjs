@@ -21,7 +21,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const url = `http://127.0.0.1:${server.address().port}/generator/?seed=deadbeef`;
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
 const page = await context.newPage();
 page.setDefaultTimeout(30000);
@@ -89,9 +89,11 @@ const playBlob = async () => page.evaluate(async () => {
 });
 try {
   await page.goto(url, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count === 120 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
+  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count > 0 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
   await page.evaluate(async () => {
+    for (const id of ['generatorCountRandomToggle','generatorMarkCountRandomToggle','generatorGifsPerMarkRandomToggle','generatorSequenceEffectsRandomToggle']) { const input = document.getElementById(id); if (input) input.checked = false; }
     document.querySelector('#generatorCountSlider').value = '4';
+    document.querySelector('#generatorSequenceEnabledToggle').checked = false;
     await window.GeneratorApp.generate(0xabcdef01);
   });
   assert.equal(await page.locator('#generatorSmoothPreviewToggle').isChecked(), false);

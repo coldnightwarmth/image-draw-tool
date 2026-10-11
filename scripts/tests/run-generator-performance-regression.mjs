@@ -23,6 +23,44 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const url = `http://127.0.0.1:${server.address().port}/generator/?seed=deadbeef`;
 const browser = await chromium.launch({ headless: true });
 const results = [];
+// Fix the measured workload explicitly; first-load defaults intentionally
+// randomize counts, selected effects and ranges and are not a benchmark fixture.
+const configurePixelateFixture = async () => {
+  for (const toggle of document.querySelectorAll('#generatorControlsMain input[type="checkbox"][id$="RandomToggle"]')) toggle.checked = false;
+  const categories = ['radial', 'flower', 'garden', 'stroke', 'esp ra de glitch', 'esp ra de', 'esp ra de characters', 'particles', '3d', 'pixel art+games', 'anime', 'misc', 'framing', 'nu'];
+  for (const input of document.querySelectorAll('.generator-source-checkbox[data-source-kind="category"]')) input.checked = categories.includes(input.value);
+  document.querySelector('#generatorCategoryTab').click();
+  const values = {
+    generatorCanvasWidthInput: 1200, generatorCanvasHeightInput: 800,
+    generatorCountSlider: 120, generatorMarkCountSlider: 12, generatorGifsPerMarkSlider: 100,
+    generatorMarginSlider: 0, generatorMarginOpacitySlider: 100, generatorCropExemptionSlider: 0,
+    generatorSizeSlider: 92, generatorSizeRandomMinSlider: 46, generatorSizeRandomMaxSlider: 158,
+    generatorSpacingSlider: 54, generatorRotationSlider: 0, generatorOpacitySlider: 100,
+    generatorTintAmountSlider: 0, generatorPitchSlider: 0, generatorYawSlider: 0,
+    generatorHorizontalStretchSlider: 100, generatorVerticalStretchSlider: 100,
+    generatorSpraySpreadSlider: 230, generatorLineAngleSlider: 0, generatorLineLengthSlider: 460,
+    generatorLineCurveAmountSlider: 0, generatorLineCurveStrengthSlider: 0,
+    generatorBoxWidthSlider: 380, generatorBoxHeightSlider: 260, generatorBoxStyleSelect: 'outline',
+    generatorSequenceSpeedMinSlider: 52, generatorSequenceSpeedSlider: 78,
+    generatorSequenceIntensityMinSlider: 47, generatorSequenceIntensitySlider: 78,
+    generatorSequenceNoneFrequencySlider: 0, generatorBackgroundColorInput: '#ffffff', generatorTintColorInput: '#ff4fb3'
+  };
+  for (const [id, value] of Object.entries(values)) {
+    const input = document.getElementById(id);
+    if (!input) throw Error(`Missing controlled fixture input: ${id}`);
+    input.value = String(value);
+  }
+  document.querySelector('input[name="generatorMarginMode"][value="placement"]').checked = true;
+  document.querySelector('#generatorGifRandomToggle').checked = true;
+  document.querySelector('#generatorSizeRandomToggle').checked = true;
+  document.querySelector('#generatorSmoothPreviewToggle').checked = false;
+  document.querySelector('#generatorSequenceEnabledToggle').checked = true;
+  for (const input of document.querySelectorAll('.generator-mode-checkbox')) input.checked = ['scatter', 'spray', 'line', 'box', 'ellipse'].includes(input.value);
+  for (const input of document.querySelectorAll('.generator-sequence-effect-checkbox')) input.checked = input.value === 'pixelate';
+  for (const input of document.querySelectorAll('.generator-sequence-timing-checkbox')) input.checked = input.value === 'all';
+  if (!await window.GeneratorApp.generate(0x12345678)) throw Error('Could not generate the controlled pixelate fixture');
+  await Promise.all(Array.from(document.querySelectorAll('#generatorComposition img'), image => image.decode().catch(() => {})));
+};
 try {
   for (const profile of [
     { name: 'desktop', viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, hasTouch: false, rate: 1 },
@@ -49,14 +87,10 @@ try {
       });
     }
     await page.goto(url, { waitUntil: 'load' });
-    await page.waitForFunction(() => window.GeneratorApp?.getSummary().count === 120 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
+    await page.waitForFunction(() => window.GeneratorApp?.getSummary().count > 0 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
     // Worst-case live pixelation: all 120 stamps need a canvas proxy.
-    await page.evaluate(async () => {
-      document.querySelector('#generatorSequenceEnabledToggle').checked = true;
-      for (const input of document.querySelectorAll('.generator-sequence-effect-checkbox')) input.checked = input.value === 'pixelate';
-      for (const input of document.querySelectorAll('.generator-sequence-timing-checkbox')) input.checked = input.value === 'all';
-      await window.GeneratorApp.generate(0x12345678);
-    });
+    await page.evaluate(configurePixelateFixture);
+    assert.equal(await page.locator('#generatorComposition img.generator-sequence-pixelate').count(), 120, 'the measured fixture must have 120 pixelated stamps');
     await page.waitForFunction(() => document.querySelector('.generator-pixelate-proxy:not([hidden])'));
     const before = (await cdp.send('Performance.getMetrics')).metrics;
     const frameGaps = await page.evaluate(() => new Promise(resolve => {

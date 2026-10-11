@@ -1,4 +1,4 @@
-import { PHOTO_EXPORT_MEMORY_PROFILE, MAX_PHOTO_EXPORT_MEMORY_BYTES } from "../raster-memory-budget.mjs?v=20261009-photo-memory-v2";
+import { PHOTO_EXPORT_MEMORY_PROFILE, MAX_PHOTO_EXPORT_MEMORY_BYTES } from "../raster-memory-budget.mjs?v=20261011-render-performance-v6";
 
 const protocol = "brush-export-raster";
 const hexColor = rgb => '#' + rgb.map(value => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0')).join('');
@@ -12,7 +12,7 @@ export class RasterSession {
     this.nextId = 0;
     this.progress = progress;
     this.signal = signal;
-    this.worker = new Worker(new URL("../export-raster-worker.js?v=20261009-photo-memory-v2", import.meta.url), { type: "module" });
+    this.worker = new Worker(new URL("../export-raster-worker.js?v=20261011-render-performance-v6", import.meta.url), { type: "module" });
     this.worker.onmessage = ({ data }) => {
       const request = this.pending.get(data.requestId);
       if (!request) { data.output?.bitmap?.close(); return; }

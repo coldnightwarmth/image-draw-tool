@@ -452,7 +452,7 @@ const EXPORT_BG_TILE_MID_SIZE = 1000;
 const EXPORT_BG_TILE_MAX_SIZE = 5000;
 const EXPORT_BG_TILE_SLIDER_MAX = 1000;
 const EXPORT_BG_TILE_SLIDER_MID = 750;
-const RUNTIME_ASSET_REVISION = "20260930-gif-timing-v2";
+const RUNTIME_ASSET_REVISION = "20261011-render-performance-v6";
 const GIF_JS_LIBRARY_URL = `gif.js?v=${RUNTIME_ASSET_REVISION}`;
 const GIF_JS_WORKER_URL = `gif.worker.js?v=${RUNTIME_ASSET_REVISION}`;
 const GIFUCT_MODULE_URL = `./gifuct-js.bundle.mjs?v=${RUNTIME_ASSET_REVISION}`;
@@ -900,7 +900,11 @@ function cancelExportTask() {
 }
 let suppressNextTintInputClick = false;
 let suppressNextCanvasBgInputClick = false;
+// Only resources currently used by connected elements are retained here. A changing
+// tint can reuse its sole owner's matrix instead of adding an SVG node every frame.
 const tintFilterCache = new Map();
+const elementTintFilters = new WeakMap();
+let nextTintFilterId = 1;
 const pixelateFilterCache = new Map();
 const sequencePixelateProxyMap = new WeakMap();
 let exportTintScratchCanvas = null;
@@ -1104,63 +1108,146 @@ function getTintMatrixValues(tintSettings) {
   ];
 }
 
-function getTintFilterId(tintSettings) {
-  const layers = getTintLayerList(tintSettings);
-  if (!layers.length) {
-    return "";
+function releaseElementTintFilter(element, forget = false) {
+  const binding = elementTintFilters.get(element);
+  if (!binding) {
+    return;
   }
-
-  const key = layers
-    .map((layer) => {
-      const colorToken = layer.color.replace("#", "");
-      const amountToken = String(layer.amountPercent).replace(/[^0-9a-z]+/gi, "_");
-      return `${colorToken}-${amountToken}`;
-    })
-    .join("__");
-  const cachedFilterId = tintFilterCache.get(key);
-  if (cachedFilterId) {
-    return cachedFilterId;
+  const resource = binding.resource;
+  if (resource && binding.active) {
+    resource.references -= 1;
+    if (resource.references === 0) {
+      if (tintFilterCache.get(resource.key) === resource) {
+        tintFilterCache.delete(resource.key);
+      }
+      resource.element.remove();
+    }
   }
-
-  const filterId = `brushTintFilter-${key}`;
-  const existingFilter = document.getElementById(filterId);
-  if (existingFilter) {
-    tintFilterCache.set(key, filterId);
-    return filterId;
+  binding.resource = null;
+  binding.active = false;
+  if (forget) {
+    elementTintFilters.delete(element);
+    delete element.dataset.brushTintResource;
   }
-
-  const defs = filterDefs ? filterDefs.querySelector("defs") : null;
-  if (!defs) {
-    return "";
-  }
-
-  const svgNamespace = "http://www.w3.org/2000/svg";
-  const filterElement = document.createElementNS(svgNamespace, "filter");
-  filterElement.setAttribute("id", filterId);
-  filterElement.setAttribute("color-interpolation-filters", "sRGB");
-
-  const colorMatrix = document.createElementNS(svgNamespace, "feColorMatrix");
-  colorMatrix.setAttribute("type", "matrix");
-  const matrixValues = getTintMatrixValues({ layers });
-  colorMatrix.setAttribute("values", matrixValues.map((value) => value.toFixed(6)).join(" "));
-
-  filterElement.appendChild(colorMatrix);
-  defs.appendChild(filterElement);
-  tintFilterCache.set(key, filterId);
-  return filterId;
 }
 
-function getBrushTintCssFilter(disabled = false, tintSettings = null) {
-  const normalized = tintSettings == null ? getCurrentTintSettings() : tintSettings;
-  if (!getTintLayerList(normalized).length) {
-    return disabled ? "grayscale(0.75)" : "";
+function acquireElementTintFilter(element, key, matrixValues) {
+  let binding = elementTintFilters.get(element);
+  const connected = element.isConnected;
+  const previous = binding?.resource;
+  if (previous && binding.key === key && binding.active === connected) {
+    return previous.id;
   }
+  const cached = connected ? tintFilterCache.get(key) : null;
+  let resource;
+  if (cached && cached !== previous) {
+    releaseElementTintFilter(element);
+    resource = cached;
+    resource.references += 1;
+  } else if (previous && (!binding.active || previous.references === 1)) {
+    // Exclusive ownership lets animated colors update in place, with the same
+    // exact six-decimal matrix as before. Shared static colors remain immutable.
+    if (binding.active && tintFilterCache.get(previous.key) === previous) {
+      tintFilterCache.delete(previous.key);
+    }
+    resource = previous;
+    resource.key = key;
+    resource.references = connected ? 1 : 0;
+    if (resource.matrixValues !== matrixValues) {
+      resource.matrix.setAttribute("values", matrixValues);
+      resource.matrixValues = matrixValues;
+    }
+  } else {
+    releaseElementTintFilter(element);
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    const filterElement = document.createElementNS(svgNamespace, "filter");
+    const matrix = document.createElementNS(svgNamespace, "feColorMatrix");
+    const id = `brushTintFilter-resource-${nextTintFilterId++}`;
+    filterElement.setAttribute("id", id);
+    filterElement.setAttribute("color-interpolation-filters", "sRGB");
+    matrix.setAttribute("type", "matrix");
+    matrix.setAttribute("values", matrixValues);
+    filterElement.appendChild(matrix);
+    resource = {
+      id, key, element: filterElement, matrix, matrixValues,
+      references: connected ? 1 : 0
+    };
+  }
+  if (connected) {
+    const defs = filterDefs?.querySelector("defs");
+    if (!defs) {
+      return "";
+    }
+    if (resource.element.parentNode !== defs) {
+      defs.appendChild(resource.element);
+    }
+    tintFilterCache.set(key, resource);
+  } else {
+    resource.element.remove();
+  }
+  binding = { key, matrixValues, resource, active: connected, filterId: resource.id };
+  elementTintFilters.set(element, binding);
+  element.dataset.brushTintResource = "";
+  return resource.id;
+}
 
-  const filterId = getTintFilterId(normalized);
+function getTintFilterId(tintSettings, element) {
+  const layers = getTintLayerList(tintSettings);
+  if (!layers.length) {
+    releaseElementTintFilter(element, true);
+    return "";
+  }
+  const key = layers
+    .map((layer) => `${layer.color}:${layer.amountPercent}`)
+    .join(";");
+  const binding = elementTintFilters.get(element);
+  const matrixValues = binding?.key === key
+    ? binding.matrixValues
+    : getTintMatrixValues({ layers }).map((value) => value.toFixed(6)).join(" ");
+  return acquireElementTintFilter(element, key, matrixValues);
+}
+
+function replaceElementTintFilterId(filterValue, filterId) {
+  return filterValue.replace(/url\(["']?#brushTintFilter-resource-\d+["']?\)/g, `url(#${filterId})`);
+}
+
+function syncTintFilterConnections(node) {
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  const elements = node.matches("[data-brush-tint-resource]") ? [node] : [];
+  elements.push(...node.querySelectorAll("[data-brush-tint-resource]"));
+  for (const element of elements) {
+    const binding = elementTintFilters.get(element);
+    if (!binding || binding.active === element.isConnected) {
+      continue;
+    }
+    if (!element.isConnected) {
+      releaseElementTintFilter(element);
+    } else {
+      const filterId = acquireElementTintFilter(element, binding.key, binding.matrixValues);
+      element.style.filter = replaceElementTintFilterId(element.style.filter, filterId);
+    }
+  }
+}
+
+const tintFilterObserver = new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    for (const node of mutation.removedNodes) {
+      syncTintFilterConnections(node);
+    }
+    for (const node of mutation.addedNodes) {
+      syncTintFilterConnections(node);
+    }
+  }
+});
+
+function getBrushTintCssFilter(disabled = false, tintSettings = null, element) {
+  const normalized = tintSettings == null ? getCurrentTintSettings() : tintSettings;
+  const filterId = getTintFilterId(normalized, element);
   if (!filterId) {
     return disabled ? "grayscale(0.75)" : "";
   }
-
   const tintFilter = `url(#${filterId})`;
   return disabled ? `grayscale(0.75) ${tintFilter}` : tintFilter;
 }
@@ -1266,7 +1353,7 @@ function applyBrushTintStyle(element, disabled = false, tintSettings = null, eff
   if (!element) {
     return;
   }
-  const filterValue = [getBrushTintCssFilter(disabled, tintSettings), getSequenceEffectCssFilter(effects)]
+  const filterValue = [getBrushTintCssFilter(disabled, tintSettings, element), getSequenceEffectCssFilter(effects)]
     .filter(Boolean)
     .join(" ");
   if (filterValue) {
@@ -1379,7 +1466,11 @@ function setElementTintData(element, tintSettings) {
 }
 
 function updateBrushTintMatrix() {
-  getTintFilterId(getCurrentTintSettings());
+  const matrix = document.getElementById("brushTintMatrix");
+  if (matrix) {
+    matrix.setAttribute("values", getTintMatrixValues(getCurrentTintSettings())
+      .map((value) => value.toFixed(6)).join(" "));
+  }
 }
 
 function refreshBrushTintOnVisibleElements() {
@@ -8783,6 +8874,10 @@ function createSequenceExportSnapshot() {
         opacity: element.style.opacity,
         transform: element.style.transform,
         filter: element.style.filter,
+        tintFilter: elementTintFilters.has(element) ? {
+          key: elementTintFilters.get(element).key,
+          matrixValues: elementTintFilters.get(element).matrixValues
+        } : null,
         imageRendering: element.style.imageRendering
       };
     })
@@ -8823,7 +8918,14 @@ function restoreSequenceExportSnapshot(snapshot) {
       }
       element.style.opacity = elementSnapshot.opacity;
       element.style.transform = elementSnapshot.transform;
-      element.style.filter = elementSnapshot.filter || "";
+      if (elementSnapshot.tintFilter) {
+        const { key, matrixValues } = elementSnapshot.tintFilter;
+        const filterId = acquireElementTintFilter(element, key, matrixValues);
+        element.style.filter = replaceElementTintFilterId(elementSnapshot.filter || "", filterId);
+      } else {
+        releaseElementTintFilter(element, true);
+        element.style.filter = elementSnapshot.filter || "";
+      }
       element.style.imageRendering = elementSnapshot.imageRendering || "";
     }
   }
@@ -23279,6 +23381,7 @@ document.addEventListener("visibilitychange", () => {
   refreshLayerSequenceLoop();
 });
 gifPauseObserver.observe(document.body, { childList: true, subtree: true });
+tintFilterObserver.observe(document.body, { childList: true, subtree: true });
 
 async function initializeApp() {
   loadFavoriteBrushSources();

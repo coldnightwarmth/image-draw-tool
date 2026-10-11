@@ -636,7 +636,8 @@ body.generator-page {
 .generator-margin-group .control-label-row > .control-label,
 .generator-count-group .control-label-row > .control-label,
 .generator-mark-count-group .control-label-row > .control-label,
-.generator-gifs-per-mark-group .control-label-row > .control-label {
+.generator-gifs-per-mark-group .control-label-row > .control-label,
+.generator-sequence-range .control-label-row > .control-label {
   flex: 1 1 auto;
 }
 
@@ -725,7 +726,14 @@ body.generator-page {
   outline-offset: 1px;
 }
 
+.generator-inspect-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .generator-crop-inspect-button {
+  min-width: 0;
   width: 100%;
   min-height: 28px;
   margin-top: 5px;
@@ -740,6 +748,24 @@ body.generator-page {
   font-size: 11px;
   line-height: 1;
   text-transform: lowercase;
+}
+
+/* A pseudo-element preserves the button's accessible name and click target. */
+.generator-crop-inspect-button.is-inspection-loading::after {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 5px;
+  border: 1px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: generator-inspection-spin .7s linear infinite;
+}
+
+@keyframes generator-inspection-spin {
+  to { transform: rotate(360deg); }
 }
 
 .generator-crop-inspect-button[aria-pressed="true"] {

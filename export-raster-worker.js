@@ -210,6 +210,11 @@ function assertJobMemoryBudget(job, options = {}) {
     );
   }
   let requiredBytes = getProjectedJobMemoryBytes(job, options);
+  // Reusable effect rasters are optional. Retire them before exact GIF frames
+  // or compositors when an essential allocation needs their memory.
+  while (requiredBytes > job.memoryBudgetBytes && evictEffectRaster(job)) {
+    requiredBytes = getProjectedJobMemoryBytes(job, options);
+  }
   while (requiredBytes > job.memoryBudgetBytes && job.qualityDecoder?.evictOne()) {
     requiredBytes = getProjectedJobMemoryBytes(job, options);
   }
@@ -475,6 +480,7 @@ function normalizeEntry(raw, index) {
     ? rawTransformMatrix
     : null;
   return {
+    cacheIndex: index,
     sourceId,
     sourceUrl,
     centerX,
@@ -1631,26 +1637,34 @@ async function decodeAsset(descriptor, job) {
   };
 }
 
-function resolveAssetFrame(asset, timeMs, phaseOffsetMs = 0, playbackRate = 1) {
+function resolveAssetFrameIndex(asset, timeMs, phaseOffsetMs = 0, playbackRate = 1) {
   if (!asset || !asset.frames.length) {
-    return null;
+    return -1;
   }
   if (asset.frames.length === 1 || asset.totalDurationMs <= 0 || playbackRate <= 0) {
-    return asset.frames[0].bitmap;
+    return 0;
   }
   const duration = Math.max(1, asset.totalDurationMs);
   let wrapped = (finiteNumber(timeMs, 0) * playbackRate + phaseOffsetMs) % duration;
   if (wrapped < 0) {
     wrapped += duration;
   }
-  let elapsed = 0;
-  for (const frame of asset.frames) {
-    elapsed += Math.max(MIN_GIF_FRAME_DELAY_MS, finiteNumber(frame.durationMs, DEFAULT_GIF_FRAME_DELAY_MS));
-    if (wrapped < elapsed) {
-      return frame.bitmap;
-    }
+  if (!asset.frameEnds) {
+    let elapsed = 0;
+    asset.frameEnds = Float64Array.from(asset.frames, frame =>
+      (elapsed += Math.max(MIN_GIF_FRAME_DELAY_MS, finiteNumber(frame.durationMs, DEFAULT_GIF_FRAME_DELAY_MS))));
   }
-  return asset.frames[asset.frames.length - 1].bitmap;
+  let low = 0, high = asset.frames.length - 1;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (wrapped >= asset.frameEnds[middle]) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function resolveAssetFrame(asset, timeMs, phaseOffsetMs = 0, playbackRate = 1) {
+  return asset?.frames[resolveAssetFrameIndex(asset, timeMs, phaseOffsetMs, playbackRate)]?.bitmap || null;
 }
 
 function resetContext(context) {
@@ -1851,6 +1865,103 @@ function createTintedSource(job, source, drawWidth, drawHeight, entry) {
   return scratch;
 }
 
+function evictEffectRaster(job) {
+  const first = job?.effectRasters?.entries().next();
+  if (!first || first.done) return false;
+  const [key, raster] = first.value;
+  job.effectRasters.delete(key);
+  raster.canvas.width = raster.canvas.height = 1;
+  job.effectRasterBytes -= raster.bytes;
+  releaseDecodedBitmapBytes(job, raster.bytes);
+  return true;
+}
+
+function getEffectRasterKey(job, asset, frameIndex, entry, drawWidth, drawHeight) {
+  if ((!entry.colorFilter || entry.colorFilter === "none") && !entry.tintLayers.length &&
+      !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) return null;
+  const previous = job.effectRasterStyles.get(entry.cacheIndex);
+  const changed = previous && (previous.width !== entry.width || previous.height !== entry.height ||
+    previous.imageRendering !== entry.imageRendering || previous.colorFilter !== entry.colorFilter ||
+    previous.pixelateAmount !== entry.pixelateAmount ||
+    ((previous.tintLayers.length || entry.tintLayers.length) && JSON.stringify(previous.tintLayers) !== JSON.stringify(entry.tintLayers)) ||
+    (previous.colorMatrix !== entry.colorMatrix && JSON.stringify(previous.colorMatrix) !== JSON.stringify(entry.colorMatrix)));
+  job.effectRasterStyles.delete(entry.cacheIndex);
+  // Do not retain an entire normalized entry: uploaded source URLs can be large.
+  job.effectRasterStyles.set(entry.cacheIndex, previous && !changed ? previous : {
+    width: entry.width, height: entry.height, imageRendering: entry.imageRendering,
+    colorFilter: entry.colorFilter, pixelateAmount: entry.pixelateAmount,
+    tintLayers: entry.tintLayers, colorMatrix: entry.colorMatrix
+  });
+  if (job.effectRasterStyles.size > 2048) job.effectRasterStyles.delete(job.effectRasterStyles.keys().next().value);
+  // Continuously animated effects would fill the cache with one-use rasters.
+  // An entry whose effect/size changed gets its ordinary scratch draw first.
+  if (changed) return null;
+  return JSON.stringify([asset.id, frameIndex, Math.max(1, Math.ceil(drawWidth)),
+    Math.max(1, Math.ceil(drawHeight)), entry.imageRendering, entry.colorFilter,
+    entry.tintLayers, entry.colorMatrix, entry.pixelateAmount]);
+}
+
+function rememberEffectRaster(job, key, scratch) {
+  if (!key) return;
+  // Continuously changing filters/sizes rarely repeat. Their first draw uses
+  // the existing scratch only; allocate a reusable canvas after repeat demand.
+  if (!job.effectRasterDemand.has(key)) {
+    job.effectRasterDemand.set(key, true);
+    if (job.effectRasterDemand.size > 2048) job.effectRasterDemand.delete(job.effectRasterDemand.keys().next().value);
+    return;
+  }
+  const bytes = getEstimatedBitmapByteLength(scratch.canvas.width, scratch.canvas.height);
+  const limit = Math.min(32 * 1024 * 1024, Math.floor(job.memoryBudgetBytes / 16));
+  if (bytes > limit) return;
+  while (job.effectRasterBytes + bytes > limit || getAvailableDecodedBytes(job) < bytes) {
+    const oldest = job.effectRasters.values().next().value;
+    // Keep recently useful entries when a scene's working set is bigger than
+    // the cache; otherwise a scan of unique stamps would evict itself forever.
+    if (!oldest || oldest.lastUsedFrame >= job.rasterFrameNumber - 1 || !evictEffectRaster(job)) return;
+  }
+  if (getAvailableDecodedBytes(job) < bytes) return;
+  reserveDecodedBitmapBytes(job, bytes, { phase: "effect-raster" });
+  let canvas;
+  try {
+    canvas = new OffscreenCanvas(scratch.canvas.width, scratch.canvas.height);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Could not cache an effect raster.");
+    context.globalCompositeOperation = "copy";
+    context.drawImage(scratch.canvas, 0, 0);
+    job.effectRasters.set(key, { canvas, bytes, lastUsedFrame: job.rasterFrameNumber });
+    job.effectRasterBytes += bytes;
+  } catch (_) {
+    if (canvas) canvas.width = canvas.height = 1;
+    releaseDecodedBitmapBytes(job, bytes);
+    // This cache never determines whether a frame can be rendered.
+  }
+}
+
+function isEntryOutsideOutput(scene, entry, scaleX, scaleY) {
+  if (entry.opacity === 0) return true;
+  // Blur extends beyond the transformed image. Retain those draws rather than
+  // estimating a cutoff that could lose faint edge pixels.
+  if (entry.blurAmount > 0) return false;
+  const x = (entry.centerX - scene.selectionBounds.left) * scaleX;
+  const y = (entry.centerY - scene.selectionBounds.top) * scaleY;
+  const halfWidth = entry.width * scaleX / 2, halfHeight = entry.height * scaleY / 2;
+  let extentX, extentY;
+  if (entry.transformMatrix) {
+    const [a, b, c, d] = entry.transformMatrix;
+    extentX = Math.abs(a) * halfWidth + Math.abs(c * scaleX / Math.max(.000001, scaleY)) * halfHeight;
+    extentY = Math.abs(b * scaleY / Math.max(.000001, scaleX)) * halfWidth + Math.abs(d) * halfHeight;
+  } else {
+    const radians = entry.rotation * Math.PI / 180;
+    const cosine = Math.abs(Math.cos(radians)), sine = Math.abs(Math.sin(radians));
+    extentX = cosine * halfWidth + sine * halfHeight;
+    extentY = sine * halfWidth + cosine * halfHeight;
+  }
+  // One output pixel of slack includes antialiasing at transformed boundaries.
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(extentX) || !Number.isFinite(extentY)) return false;
+  return x + extentX < -1 || x - extentX > scene.outputWidth + 1 ||
+    y + extentY < -1 || y - extentY > scene.outputHeight + 1;
+}
+
 // For fixed, tinted collage entries, cache exactly the intermediate raster the
 // regular renderer already creates. Build missing tiles grouped by GIF/frame,
 // then paint them in the original z order. This avoids decoding a large GIF
@@ -1858,6 +1969,7 @@ function createTintedSource(job, source, drawWidth, drawHeight, entry) {
 async function prepareTintedTiles(job, entries, timeMs, scaleX, scaleY, progress) {
   const groups = new Map();
   for (const entry of entries) {
+    if (isEntryOutsideOutput(job.scene, entry, scaleX, scaleY)) continue;
     const asset = job.assets.get(entry.sourceId);
     if (!asset?.quality || !entry.tintLayers.length || entry.colorMatrix || entry.pixelateAmount || entry.blurAmount) continue;
     const index = job.qualityDecoder.frameIndex(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
@@ -1895,12 +2007,13 @@ async function prepareTintedTiles(job, entries, timeMs, scaleX, scaleY, progress
   }
 }
 
-function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale = 1) {
+function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale = 1, cachedRaster = null, cacheKey = null) {
   if ((!entry.colorFilter || entry.colorFilter === "none") && !entry.tintLayers.length && !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) {
     context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     return;
   }
-  const scratch = createTintedSource(job, source, drawWidth, drawHeight, entry);
+  const scratch = cachedRaster || createTintedSource(job, source, drawWidth, drawHeight, entry);
+  if (!cachedRaster) rememberEffectRaster(job, cacheKey, scratch);
   context.save();
   if (entry.blurAmount > 0) {
     if (!("filter" in context)) {
@@ -1923,21 +2036,32 @@ function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entr
 
 async function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
   if (job.skippedAssets.has(entry.sourceId)) return;
+  if (isEntryOutsideOutput(scene, entry, scaleX, scaleY)) return;
   const asset = job.assets.get(entry.sourceId);
   if (!asset) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} was not prepared.`);
   }
   const tile = job.activeTintedTiles?.get(entry);
-  const source = tile?.canvas || (asset.quality
+  const drawWidth = entry.width * scaleX;
+  const drawHeight = entry.height * scaleY;
+  const frameIndex = tile ? -1 : asset.quality
+    ? job.qualityDecoder.frameIndex(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate)
+    : resolveAssetFrameIndex(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate);
+  const cacheKey = tile ? null : getEffectRasterKey(job, asset, frameIndex, entry, drawWidth, drawHeight);
+  const cachedRaster = cacheKey ? job.effectRasters.get(cacheKey) : null;
+  if (cachedRaster) {
+    cachedRaster.lastUsedFrame = job.rasterFrameNumber;
+    job.effectRasters.delete(cacheKey);
+    job.effectRasters.set(cacheKey, cachedRaster);
+  }
+  const source = tile?.canvas || cachedRaster?.canvas || (asset.quality
     ? await resolveQualitySource(job, asset, timeMs, entry)
-    : resolveAssetFrame(asset, timeMs, entry.phaseOffsetMs, entry.playbackRate));
+    : asset.frames[frameIndex]?.bitmap);
   if (!source) {
     throw new ExportRasterError("ASSET_NOT_PREPARED", `Asset ${entry.sourceId} has no renderable frame.`);
   }
   try {
     const bounds = scene.selectionBounds;
-    const drawWidth = entry.width * scaleX;
-    const drawHeight = entry.height * scaleY;
     const centerX = (entry.centerX - bounds.left) * scaleX;
     const centerY = (entry.centerY - bounds.top) * scaleY;
     context.save();
@@ -1978,7 +2102,7 @@ async function drawStamp(job, context, scene, entry, timeMs, scaleX, scaleY) {
     const effectScale = Math.sqrt(Math.max(0, Math.abs(scaleX * scaleY)));
     if (asset.quality) context.imageSmoothingQuality = "high";
     if (tile) context.drawImage(tile.canvas, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-    else drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale);
+    else drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale, cachedRaster, cacheKey);
     context.restore();
   } finally {
     if (job.qualityDecoder) job.qualityDecoder.pinned = null;
@@ -2059,6 +2183,7 @@ function validatePreparedSources(job, entries, background) {
 
 async function rasterizeFrame(job, frame = {}, progress = null) {
   throwIfCancelled(job);
+  job.rasterFrameNumber += 1;
   const scene = job.scene;
   const entries = Array.isArray(frame.entries)
     ? frame.entries.map((entry, index) => normalizeEntry(entry, index))
@@ -2304,6 +2429,11 @@ function createJob(jobId, memoryBudgetBytes = null, memoryProfile) {
     id: jobId,
     scene: null,
     assets: new Map(),
+    effectRasters: new Map(),
+    effectRasterDemand: new Map(),
+    effectRasterStyles: new Map(),
+    effectRasterBytes: 0,
+    rasterFrameNumber: 0,
     scratch: Object.create(null),
     ownedBitmaps: new Set(),
     abortControllers: new Set(),
@@ -2338,6 +2468,9 @@ function cleanupJob(job) {
     }
   }
   job.ownedBitmaps.clear();
+  while (evictEffectRaster(job)) { /* close optional filtered-frame copies */ }
+  job.effectRasterDemand.clear();
+  job.effectRasterStyles.clear();
   job.pinnedRepeatedSource = null;
   while (evictRepeatedSource(job)) { /* release optional exact source copies */ }
   for (const tile of job.tintedTiles?.values() || []) {
