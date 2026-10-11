@@ -145,9 +145,11 @@ try {
   await page.waitForFunction(() => window.GeneratorApp.getSummary().previewFrames >= 5);
   await page.waitForFunction(() => !document.querySelector('#generatorLowFps').hidden);
   assert.equal(await page.locator('#generatorLoadingSpinner').isVisible(), false);
-  const footer = await page.locator('.generator-canvas-footer').boundingBox();
+  const header = await page.locator('.generator-canvas-header').boundingBox();
+  const seedLabel = await page.locator('#generatorCanvasSeed').boundingBox();
   const indicator = await page.locator('#generatorLowFps').boundingBox();
-  assert.ok(footer.x + footer.width - indicator.x - indicator.width < 15);
+  assert.ok(indicator.x >= seedLabel.x + seedLabel.width);
+  assert.ok(indicator.y >= header.y && indicator.y + indicator.height <= header.y + header.height);
   // Sustained control input gives priority to the sidebar without queuing frames.
   const requestsDuringInteraction = await page.evaluate(async () => {
     const start = window.__rasterRequests.length;

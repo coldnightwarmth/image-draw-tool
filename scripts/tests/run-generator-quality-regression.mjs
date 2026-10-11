@@ -40,7 +40,7 @@ try {
     await route.fulfill({ response, body: source });
   });
   await page.goto(url, {waitUntil:'load'});
-  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count === 120 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
+  await page.waitForFunction(() => window.GeneratorApp?.getSummary().count > 0 && document.querySelector('#generatorCanvas').getAttribute('aria-busy') === 'false');
   console.log('Config:', await page.evaluate(() => qualityTest.getGeneratorQualityMp4EncoderConfig(320,320)));
   await page.addScriptTag({url:'/gif.js'});
   fixture = Buffer.from(await page.evaluate(async () => {

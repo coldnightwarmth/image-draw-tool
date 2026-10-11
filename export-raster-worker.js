@@ -486,6 +486,7 @@ function normalizeEntry(raw, index) {
     opacity,
     blendMode: normalizeBlendMode(raw.blendMode),
     imageRendering: raw.imageRendering === "auto" ? "auto" : "pixelated",
+    colorFilter: typeof raw.colorFilter === "string" ? raw.colorFilter : "none",
     tintLayers: normalizeTintLayers(raw),
     colorMatrix: normalizeColorMatrix(raw.colorMatrix ?? raw.tintColorMatrix),
     pixelateAmount: clamp(Math.round(finiteNumber(raw.pixelateAmount, 0)), 0, 64),
@@ -1827,7 +1828,14 @@ function createTintedSource(job, source, drawWidth, drawHeight, entry) {
   const scratch = ensureScratch(job, "tint", scratchWidth, scratchHeight, { willReadFrequently: true });
   scratch.context.imageSmoothingEnabled = entry.imageRendering === "auto";
   if (job.qualityDecoder) scratch.context.imageSmoothingQuality = "high";
+  if (entry.colorFilter && entry.colorFilter !== "none") {
+    if (!("filter" in scratch.context)) {
+      throw new ExportRasterError("COLOR_FILTER_UNAVAILABLE", "This browser cannot apply the composition’s color filters in an export worker.", { capability: true });
+    }
+    scratch.context.filter = entry.colorFilter;
+  }
   scratch.context.drawImage(source, 0, 0, scratchWidth, scratchHeight);
+  scratch.context.filter = "none";
   for (const layer of entry.tintLayers) {
     scratch.context.globalCompositeOperation = "source-atop";
     scratch.context.globalAlpha = layer.amountPercent / 100;
@@ -1888,7 +1896,7 @@ async function prepareTintedTiles(job, entries, timeMs, scaleX, scaleY, progress
 }
 
 function drawSourceWithEffects(job, context, source, drawWidth, drawHeight, entry, effectScale = 1) {
-  if (!entry.tintLayers.length && !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) {
+  if ((!entry.colorFilter || entry.colorFilter === "none") && !entry.tintLayers.length && !entry.colorMatrix && entry.pixelateAmount <= 0 && entry.blurAmount <= 0) {
     context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     return;
   }
@@ -2112,7 +2120,21 @@ function maskGeneratorCropMargin(data, width, height, background, crop) {
     Math.max(0, Math.round(crop.margin * height / Math.max(1, crop.height)))
   );
   const [red, green, blue, alpha] = parseExportColor(background);
+  const opacity = clamp(Number(crop.opacity ?? 1), 0, 1);
+  if (opacity === 0) return;
   const fillPixel = (offset) => {
+    if (opacity < 1) {
+      const sourceAlpha = alpha / 255 * opacity;
+      const retainedAlpha = data[offset + 3] / 255 * (1 - sourceAlpha);
+      const outputAlpha = sourceAlpha + retainedAlpha;
+      if (outputAlpha > 0) {
+        data[offset] = (red * sourceAlpha + data[offset] * retainedAlpha) / outputAlpha;
+        data[offset + 1] = (green * sourceAlpha + data[offset + 1] * retainedAlpha) / outputAlpha;
+        data[offset + 2] = (blue * sourceAlpha + data[offset + 2] * retainedAlpha) / outputAlpha;
+      }
+      data[offset + 3] = outputAlpha * 255;
+      return;
+    }
     data[offset] = red;
     data[offset + 1] = green;
     data[offset + 2] = blue;

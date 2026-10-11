@@ -13,10 +13,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles.css?v=20260909-generator-v1">
-  <link rel="stylesheet" href="generator.css?v=20261011-generator-uploads-v2">
+  <link rel="stylesheet" href="generator.css?v=20261011-generator-mark-inspection-v5">
   <script defer src="../stock-brushes.js?v=20260721-all-gif-arc-export-v5"></script>
   <script defer src="../brush-metadata.js?v=20260721-all-gif-arc-export-v5"></script>
-  <script defer src="generator.js?v=20261011-generator-uploads-v2"></script>
+  <script defer src="generator.js?v=20261011-generator-mark-inspection-v5"></script>
 </head>
 <body class="generator-page">
   <a class="generator-skip-link" href="#generatorControlsMain">skip to generator controls</a>
@@ -25,7 +25,13 @@
     <section id="generatorStageArea" aria-label="Generated composition preview">
       <div id="generatorCanvasFrame">
         <header class="generator-canvas-header">
-          <span>finite canvas</span>
+          <span class="generator-canvas-identity">
+            <span id="generatorCanvasSeed">seed —</span>
+          <span class="generator-render-status" role="status" aria-live="polite">
+            <span id="generatorLoadingSpinner" role="img" aria-label="Loading GIFs" title="Loading GIFs"></span>
+            <span id="generatorLowFps" hidden title="Preview is displaying fewer than 24 frames per second">[low fps]</span>
+          </span>
+          </span>
           <span class="generator-canvas-header-actions">
             <span id="generatorDimensionBadge">1200 × 800</span>
             <button
@@ -51,10 +57,7 @@
         </div>
         <footer class="generator-canvas-footer">
           <span id="generatorCanvasMeta">preparing all gifs…</span>
-          <span class="generator-render-status" role="status" aria-live="polite">
-            <span id="generatorLoadingSpinner" role="img" aria-label="Loading GIFs" title="Loading GIFs"></span>
-            <span id="generatorLowFps" hidden title="Preview is displaying fewer than 24 frames per second">[low fps]</span>
-          </span>
+
         </footer>
       </div>
     </section>
@@ -77,11 +80,11 @@
       </header>
 
       <details id="generatorSourceDetails" class="generator-random-details generator-sidebar-details generator-source-details" open>
-        <summary>gif samples <span aria-hidden="true"></span></summary>
+        <summary>image sources <span aria-hidden="true"></span></summary>
         <div class="generator-sidebar-details-body">
       <div class="control-group generator-source-group" role="group" aria-labelledby="generatorSourceLabel">
         <div class="control-label-row">
-          <span id="generatorSourceLabel" class="control-label">gif source</span>
+          <span id="generatorSourceLabel" class="control-label">image source</span>
           <span id="generatorCatalogCount" class="value-text">3,070 gifs</span>
         </div>
         <div class="generator-source-tabs" role="tablist" aria-label="GIF source filter type">
@@ -119,13 +122,28 @@
         <p id="generatorSourceHint" class="generator-control-hint">15 categories enabled · matches any selected category</p>
       </div>
 
+        </div>
+      </details>
+      <details id="generatorSampleDetails" class="generator-random-details generator-sidebar-details" open>
+        <summary>sample controls <span aria-hidden="true"></span></summary>
+        <div class="generator-sidebar-details-body">
+      <div class="control-group generator-different-gif-group">
+        <div class="toggle-row">
+          <label for="generatorGifRandomToggle" class="control-label inline-label">different sample per stamp</label>
+          <label class="ios-switch" for="generatorGifRandomToggle">
+            <input id="generatorGifRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Use different samples within each mark">
+            <span class="ios-switch-slider" aria-hidden="true"></span>
+          </label>
+        </div>
+      </div>
+
       <div class="control-group generator-count-group">
         <div class="control-label-row">
-          <label for="generatorCountSlider" class="control-label">number of gifs</label>
+          <label for="generatorCountSlider" class="control-label">number of samples</label>
           <output id="generatorCountValue" class="value-text" for="generatorCountSlider">120</output>
-          <label class="generator-new-composition-switch" title="Randomize the number of GIFs with each new composition">
+          <label class="generator-new-composition-switch" title="Randomize the number of samples with each new composition">
             <span class="ios-switch">
-              <input id="generatorCountRandomToggle" type="checkbox" aria-label="Randomize the number of GIFs with new compositions">
+              <input id="generatorCountRandomToggle" type="checkbox" checked aria-label="Randomize the number of samples with new compositions">
               <span class="ios-switch-slider" aria-hidden="true"></span>
             </span>
           </label>
@@ -139,7 +157,7 @@
           <output id="generatorMarkCountValue" class="value-text" for="generatorMarkCountSlider">12</output>
           <label class="generator-new-composition-switch" title="Randomize the number of marks with each new composition">
             <span class="ios-switch">
-              <input id="generatorMarkCountRandomToggle" type="checkbox" aria-label="Randomize the number of marks with new compositions">
+              <input id="generatorMarkCountRandomToggle" type="checkbox" checked aria-label="Randomize the number of marks with new compositions">
               <span class="ios-switch-slider" aria-hidden="true"></span>
             </span>
           </label>
@@ -147,23 +165,13 @@
         <input id="generatorMarkCountSlider" type="range" min="1" max="64" step="1" value="12">
       </div>
 
-      <div class="control-group generator-different-gif-group">
-        <div class="toggle-row">
-          <label for="generatorGifRandomToggle" class="control-label inline-label">different gif per stamp</label>
-          <label class="ios-switch" for="generatorGifRandomToggle">
-            <input id="generatorGifRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Use different GIFs within each mark">
-            <span class="ios-switch-slider" aria-hidden="true"></span>
-          </label>
-        </div>
-      </div>
-
       <div class="control-group generator-gifs-per-mark-group">
         <div class="control-label-row">
-          <label for="generatorGifsPerMarkSlider" class="control-label">gifs per mark</label>
+          <label for="generatorGifsPerMarkSlider" class="control-label">samples per mark</label>
           <output id="generatorGifsPerMarkValue" class="value-text" for="generatorGifsPerMarkSlider">100</output>
-          <label class="generator-new-composition-switch" title="Randomize GIFs per mark with each new composition">
+          <label class="generator-new-composition-switch" title="Randomize samples per mark with each new composition">
             <span class="ios-switch">
-              <input id="generatorGifsPerMarkRandomToggle" type="checkbox" aria-label="Randomize GIFs per mark with new compositions">
+              <input id="generatorGifsPerMarkRandomToggle" type="checkbox" checked aria-label="Randomize samples per mark with new compositions">
               <span class="ios-switch-slider" aria-hidden="true"></span>
             </span>
           </label>
@@ -171,10 +179,17 @@
         <input id="generatorGifsPerMarkSlider" type="range" min="1" max="100" step="1" value="100">
       </div>
 
-      <label class="generator-preview-option">
-        <input id="generatorSmoothPreviewToggle" type="checkbox">
-        <span>smooth render preview</span>
-      </label>
+
+
+        <button
+          id="generatorCropInspectButton"
+          class="generator-crop-inspect-button"
+          type="button"
+          aria-pressed="false"
+          aria-describedby="generatorCropInspectStatus"
+        >inspect samples</button>
+        <button id="generatorMarkInspectButton" class="generator-crop-inspect-button" type="button" aria-pressed="false" aria-describedby="generatorCropInspectStatus">inspect marks</button>
+        <p id="generatorCropInspectStatus" class="generator-control-hint generator-crop-inspect-status" role="status" hidden></p>
 
       <p id="generatorStatus" class="generator-status" role="status" aria-live="polite">loading the ALL set…</p>
         </div>
@@ -213,7 +228,7 @@
           <output id="generatorMarginValue" class="value-text" for="generatorMarginSlider">0px</output>
           <label class="generator-new-composition-switch" title="Randomize canvas margin with each new composition">
             <span class="ios-switch">
-              <input id="generatorMarginRandomToggle" type="checkbox" aria-label="Randomize canvas margin with new compositions">
+              <input id="generatorMarginRandomToggle" type="checkbox" checked aria-label="Randomize canvas margin with new compositions">
               <span class="ios-switch-slider" aria-hidden="true"></span>
             </span>
           </label>
@@ -233,7 +248,7 @@
             <span aria-hidden="true">margin behavior</span>
             <label class="generator-new-composition-switch" title="Randomize margin behavior with each new composition">
               <span class="ios-switch">
-                <input id="generatorMarginModeRandomToggle" type="checkbox" aria-label="Randomize margin behavior with new compositions">
+                <input id="generatorMarginModeRandomToggle" type="checkbox" checked aria-label="Randomize margin behavior with new compositions">
                 <span class="ios-switch-slider" aria-hidden="true"></span>
               </span>
             </label>
@@ -249,16 +264,24 @@
             </label>
           </div>
         </fieldset>
+        <div id="generatorMarginOpacityGroup" class="control-group" hidden>
+          <div class="control-label-row">
+            <label for="generatorMarginOpacitySlider" class="control-label">margin opacity</label>
+            <output id="generatorMarginOpacityValue" class="value-text" for="generatorMarginOpacitySlider">100%</output>
+            <label class="generator-new-composition-switch" title="Randomize margin opacity with each new composition"><span class="ios-switch"><input id="generatorMarginOpacityRandomToggle" type="checkbox" aria-label="Randomize margin opacity with new compositions"><span class="ios-switch-slider" aria-hidden="true"></span></span></label>
+          </div>
+          <input id="generatorMarginOpacitySlider" type="range" min="0" max="100" step="1" value="100">
+        </div>
+        <div id="generatorCropExemptionGroup" class="control-group" hidden>
+          <div class="control-label-row">
+            <label for="generatorCropExemptionSlider" class="control-label">samples above crop</label>
+            <output id="generatorCropExemptionValue" class="value-text" for="generatorCropExemptionSlider">0%</output>
+            <label class="generator-new-composition-switch" title="Randomize samples above crop with each new composition"><span class="ios-switch"><input id="generatorCropExemptionRandomToggle" type="checkbox" aria-label="Randomize samples above crop with new compositions"><span class="ios-switch-slider" aria-hidden="true"></span></span></label>
+          </div>
+          <input id="generatorCropExemptionSlider" type="range" min="0" max="100" step="1" value="0">
+        </div>
         <p id="generatorMarginHint" class="generator-control-hint">keeps each gif inside the inset placement area</p>
-        <button
-          id="generatorCropInspectButton"
-          class="generator-crop-inspect-button"
-          type="button"
-          aria-pressed="false"
-          aria-describedby="generatorCropInspectStatus"
-          hidden
-        >inspect cropped gifs</button>
-        <p id="generatorCropInspectStatus" class="generator-control-hint generator-crop-inspect-status" role="status" hidden></p>
+
       </div>
         </div>
       </details>
@@ -270,208 +293,89 @@
           <legend class="control-label">placement modes</legend>
           <div class="generator-mode-grid">
             <label class="generator-mode-choice">
-              <input class="generator-mode-checkbox" type="checkbox" value="line" checked>
+              <input class="generator-mode-checkbox" type="checkbox" value="scatter" checked>
               <span class="generator-mode-card">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18 19 5M4 16v4h4M16 4h4v4"/></svg>
-                <span>line</span>
+                <svg class="draw-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path class="icon-shadow" d="M5 19.5l3.7-.8L19.6 7.8l-2.4-2.4L6.3 16.3 5 19.5z"/>
+            <path class="icon-metal" d="M16.6 4.7 19.3 7.4l0.9-0.9a1.25 1.25 0 0 0 0-1.8l-0.9-0.9a1.25 1.25 0 0 0-1.8 0l-0.9 0.9z"/>
+            <path class="icon-gold" d="M6.2 16.5L15.9 6.8l3.1 3.1-9.7 9.7-3.9 1 0.8-4.1z"/>
+            <path class="icon-light" d="M8.2 16.7l8.3-8.3"/>
+            <path class="icon-dark" d="M5.4 20.6l0.8-4.1L17 5.7m-0.4-1 2.7 2.7m-0.6 2.5-3.1-3.1"/>
+            <path class="icon-tip" d="M5.4 20.6l2.7-.7-2-2z"/>
+          </svg>
+                <span>scatter</span>
               </span>
             </label>
             <label class="generator-mode-choice">
               <input class="generator-mode-checkbox" type="checkbox" value="spray" checked>
               <span class="generator-mode-card">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="15" r="1.2"/><circle cx="11" cy="8" r="1.4"/><circle cx="16" cy="13" r="1"/><circle cx="19" cy="6" r="1.2"/><circle cx="9" cy="19" r=".9"/></svg>
+                <svg class="draw-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path class="icon-shadow" d="M6 8h8.5v12H6z"/>
+            <path class="icon-metal" d="M8 5.5h5.4l1.1 2.4H7L8 5.5z"/>
+            <path class="icon-blue" d="M6.3 8h8.4v12.1H6.3z"/>
+            <path class="icon-light" d="M8.2 10v7.8"/>
+            <path class="icon-dark" d="M6.3 8h8.4v12.1H6.3zM7.2 8l0.9-2.5h5.3l1.3 2.5"/>
+            <path class="icon-dark" d="M11.7 4h4.2v2.2h-4.2z"/>
+            <circle class="icon-dot" cx="17.4" cy="7.7" r="1.1"/>
+            <circle class="icon-dot" cx="20.5" cy="6.1" r="0.9"/>
+            <circle class="icon-dot" cx="20.1" cy="10.1" r="0.8"/>
+            <circle class="icon-dot" cx="17.6" cy="12.3" r="0.7"/>
+          </svg>
                 <span>spray</span>
+              </span>
+            </label>
+            <label class="generator-mode-choice">
+              <input class="generator-mode-checkbox" type="checkbox" value="line" checked>
+              <span class="generator-mode-card">
+                <svg class="draw-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path class="icon-shadow-stroke" d="M5 18.5L19 5"/>
+            <path class="icon-blue-stroke" d="M5 18L19 4.5"/>
+            <rect class="icon-handle" x="2.8" y="16.2" width="4.4" height="4.4"/>
+            <rect class="icon-handle" x="16.8" y="2.8" width="4.4" height="4.4"/>
+            <path class="icon-dark" d="M5 18L19 4.5"/>
+            <rect class="icon-dark-fill" x="3.2" y="16.6" width="3.6" height="3.6"/>
+            <rect class="icon-dark-fill" x="17.2" y="3.2" width="3.6" height="3.6"/>
+          </svg>
+                <span>line</span>
               </span>
             </label>
             <label class="generator-mode-choice">
               <input class="generator-mode-checkbox" type="checkbox" value="box" checked>
               <span class="generator-mode-card">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14"/><path d="M5 10h14M10 5v14"/></svg>
+                <svg class="draw-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect class="icon-shadow" x="5" y="6" width="14" height="12"/>
+            <rect class="icon-blue-soft" x="4" y="5" width="14" height="12"/>
+            <path class="icon-highlight" d="M6 7h10"/>
+            <rect class="icon-dark" x="4" y="5" width="14" height="12"/>
+            <rect class="icon-handle" x="2.7" y="3.7" width="3.4" height="3.4"/>
+            <rect class="icon-handle" x="15.9" y="3.7" width="3.4" height="3.4"/>
+            <rect class="icon-handle" x="2.7" y="14.9" width="3.4" height="3.4"/>
+            <rect class="icon-handle" x="15.9" y="14.9" width="3.4" height="3.4"/>
+          </svg>
                 <span>box</span>
               </span>
             </label>
             <label class="generator-mode-choice">
-              <input class="generator-mode-checkbox" type="checkbox" value="scatter" checked>
+              <input class="generator-mode-checkbox" type="checkbox" value="ellipse" checked>
               <span class="generator-mode-card">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="1.2"/><circle cx="17" cy="6" r="1.2"/><circle cx="11" cy="13" r="1.2"/><circle cx="19" cy="18" r="1.2"/><circle cx="5" cy="18" r="1.2"/></svg>
-                <span>scatter</span>
+                <svg class="draw-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <ellipse class="icon-shadow" cx="12.8" cy="12.8" rx="7.5" ry="6.7"/>
+            <ellipse class="icon-blue-soft" cx="12" cy="12" rx="7.5" ry="6.7"/>
+            <path class="icon-highlight" d="M8 9.2c1.1-1.1 2.5-1.7 4.1-1.7"/>
+            <ellipse class="icon-dark" cx="12" cy="12" rx="7.5" ry="6.7"/>
+            <rect class="icon-handle" x="3" y="10.3" width="3.4" height="3.4"/>
+            <rect class="icon-handle" x="17.6" y="10.3" width="3.4" height="3.4"/>
+            <rect class="icon-handle" x="10.3" y="3.7" width="3.4" height="3.4"/>
+            <rect class="icon-handle" x="10.3" y="16.9" width="3.4" height="3.4"/>
+          </svg>
+                <span>ellipse</span>
               </span>
             </label>
           </div>
         </fieldset>
 
-        <div class="generator-property-group generator-property-toggle-only">
-          <div class="generator-property-heading">
-            <span>mode order</span>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch">
-                <input id="generatorModeMixRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize placement mode order">
-                <span class="ios-switch-slider" aria-hidden="true"></span>
-              </span>
-            </label>
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorSizeSlider">size</label>
-            <output id="generatorSizeValue" for="generatorSizeSlider generatorSizeRandomMinSlider generatorSizeRandomMaxSlider">46–158px</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorSizeRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize size"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorSizeSlider" class="generator-fixed-slider" type="range" min="1" max="1000" step="1" value="92" aria-label="Fixed size">
-          <div class="generator-dual-range" data-random-range="size">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorSizeRandomMinSlider" type="range" min="1" max="1000" step="1" value="46" aria-label="Minimum randomized size">
-            <input id="generatorSizeRandomMaxSlider" type="range" min="1" max="1000" step="1" value="158" aria-label="Maximum randomized size">
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorSpacingSlider">spacing</label>
-            <output id="generatorSpacingValue" for="generatorSpacingSlider generatorSpacingRandomMinSlider generatorSpacingRandomMaxSlider">34–77px</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorSpacingRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize spacing"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorSpacingSlider" class="generator-fixed-slider" type="range" min="4" max="2000" step="1" value="54" aria-label="Fixed spacing">
-          <div class="generator-dual-range" data-random-range="spacing">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorSpacingRandomMinSlider" type="range" min="4" max="2000" step="1" value="34" aria-label="Minimum randomized spacing">
-            <input id="generatorSpacingRandomMaxSlider" type="range" min="4" max="2000" step="1" value="77" aria-label="Maximum randomized spacing">
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorRotationSlider">rotation</label>
-            <output id="generatorRotationValue" for="generatorRotationSlider generatorRotationRandomMinSlider generatorRotationRandomMaxSlider">−180°–180°</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorRotationRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize rotation"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorRotationSlider" class="generator-fixed-slider" type="range" min="-180" max="180" step="1" value="0" aria-label="Fixed rotation">
-          <div class="generator-dual-range" data-random-range="rotation">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorRotationRandomMinSlider" type="range" min="-180" max="180" step="1" value="-180" aria-label="Minimum randomized rotation">
-            <input id="generatorRotationRandomMaxSlider" type="range" min="-180" max="180" step="1" value="180" aria-label="Maximum randomized rotation">
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorOpacitySlider">opacity</label>
-            <output id="generatorOpacityValue" for="generatorOpacitySlider generatorOpacityRandomMinSlider generatorOpacityRandomMaxSlider">52–100%</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorOpacityRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize opacity"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorOpacitySlider" class="generator-fixed-slider" type="range" min="1" max="100" step="1" value="100" aria-label="Fixed opacity">
-          <div class="generator-dual-range" data-random-range="opacity">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorOpacityRandomMinSlider" type="range" min="1" max="100" step="1" value="52" aria-label="Minimum randomized opacity">
-            <input id="generatorOpacityRandomMaxSlider" type="range" min="1" max="100" step="1" value="100" aria-label="Maximum randomized opacity">
-          </div>
-        </div>
-
-        <div class="generator-property-group generator-color-property is-random">
-          <div class="generator-property-heading">
-            <label for="generatorTintAmountSlider">color shift</label>
-            <output id="generatorTintAmountValue" for="generatorTintAmountSlider generatorTintAmountRandomMinSlider generatorTintAmountRandomMaxSlider">0–66%</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorTintRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize color shift"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <div class="generator-color-control">
-            <input id="generatorTintColorInput" type="color" value="#ff4fb3" aria-label="Base color shift">
-            <label class="generator-random-switch"><span>random color</span><span class="ios-switch"><input id="generatorTintColorRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize color shift color"><span class="ios-switch-slider" aria-hidden="true"></span></span></label>
-          </div>
-          <div class="generator-range-stack">
-            <input id="generatorTintAmountSlider" class="generator-fixed-slider" type="range" min="0" max="100" step="1" value="0" aria-label="Fixed color shift">
-            <div class="generator-dual-range" data-random-range="tint">
-              <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-              <input id="generatorTintAmountRandomMinSlider" type="range" min="0" max="100" step="1" value="0" aria-label="Minimum randomized color shift">
-              <input id="generatorTintAmountRandomMaxSlider" type="range" min="0" max="100" step="1" value="66" aria-label="Maximum randomized color shift">
-            </div>
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorPitchSlider">pitch</label>
-            <output id="generatorPitchValue" for="generatorPitchSlider generatorPitchRandomMinSlider generatorPitchRandomMaxSlider">−45°–45°</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorPitchRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize mark pitch"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorPitchSlider" class="generator-fixed-slider" type="range" min="-90" max="90" step="1" value="0" aria-label="Fixed mark pitch">
-          <div class="generator-dual-range" data-random-range="pitch">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorPitchRandomMinSlider" type="range" min="-90" max="90" step="1" value="-45" aria-label="Minimum randomized mark pitch">
-            <input id="generatorPitchRandomMaxSlider" type="range" min="-90" max="90" step="1" value="45" aria-label="Maximum randomized mark pitch">
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorYawSlider">yaw</label>
-            <output id="generatorYawValue" for="generatorYawSlider generatorYawRandomMinSlider generatorYawRandomMaxSlider">−45°–45°</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorYawRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize mark yaw"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorYawSlider" class="generator-fixed-slider" type="range" min="-90" max="90" step="1" value="0" aria-label="Fixed mark yaw">
-          <div class="generator-dual-range" data-random-range="yaw">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorYawRandomMinSlider" type="range" min="-90" max="90" step="1" value="-45" aria-label="Minimum randomized mark yaw">
-            <input id="generatorYawRandomMaxSlider" type="range" min="-90" max="90" step="1" value="45" aria-label="Maximum randomized mark yaw">
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorHorizontalStretchSlider">horizontal stretch</label>
-            <output id="generatorHorizontalStretchValue" for="generatorHorizontalStretchSlider generatorHorizontalStretchRandomMinSlider generatorHorizontalStretchRandomMaxSlider">60–140%</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorHorizontalStretchRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize horizontal mark stretch"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorHorizontalStretchSlider" class="generator-fixed-slider" type="range" min="0" max="200" step="1" value="100" aria-label="Fixed horizontal mark stretch">
-          <div class="generator-dual-range" data-random-range="horizontalStretch">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorHorizontalStretchRandomMinSlider" type="range" min="0" max="200" step="1" value="60" aria-label="Minimum randomized horizontal mark stretch">
-            <input id="generatorHorizontalStretchRandomMaxSlider" type="range" min="0" max="200" step="1" value="140" aria-label="Maximum randomized horizontal mark stretch">
-          </div>
-        </div>
-
-        <div class="generator-property-group is-random">
-          <div class="generator-property-heading">
-            <label for="generatorVerticalStretchSlider">vertical stretch</label>
-            <output id="generatorVerticalStretchValue" for="generatorVerticalStretchSlider generatorVerticalStretchRandomMinSlider generatorVerticalStretchRandomMaxSlider">60–140%</output>
-            <label class="generator-random-switch">
-              <span>random</span>
-              <span class="ios-switch"><input id="generatorVerticalStretchRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize vertical mark stretch"><span class="ios-switch-slider" aria-hidden="true"></span></span>
-            </label>
-          </div>
-          <input id="generatorVerticalStretchSlider" class="generator-fixed-slider" type="range" min="0" max="200" step="1" value="100" aria-label="Fixed vertical mark stretch">
-          <div class="generator-dual-range" data-random-range="verticalStretch">
-            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
-            <input id="generatorVerticalStretchRandomMinSlider" type="range" min="0" max="200" step="1" value="60" aria-label="Minimum randomized vertical mark stretch">
-            <input id="generatorVerticalStretchRandomMaxSlider" type="range" min="0" max="200" step="1" value="140" aria-label="Maximum randomized vertical mark stretch">
-          </div>
-        </div>
-
+        <details id="generatorMarkControls" class="generator-random-details generator-mark-controls">
+          <summary>mark controls</summary>
         <div class="generator-property-group is-random">
           <div class="generator-property-heading">
             <label for="generatorSpraySpreadSlider">spray spread</label>
@@ -523,6 +427,34 @@
           </div>
         </div>
 
+        <div class="generator-property-group">
+          <div class="generator-property-heading">
+            <label for="generatorLineCurveAmountSlider">line curve amount</label>
+            <output id="generatorLineCurveAmountValue" for="generatorLineCurveAmountSlider">0</output>
+            <label class="generator-random-switch"><span>random</span><span class="ios-switch"><input id="generatorLineCurveAmountRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize line curve amount"><span class="ios-switch-slider" aria-hidden="true"></span></span></label>
+          </div>
+          <input id="generatorLineCurveAmountSlider" class="generator-fixed-slider" type="range" min="0" max="12" step="1" value="0" aria-label="Fixed line curve amount">
+          <div class="generator-dual-range" data-random-range="lineCurveAmount">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorLineCurveAmountRandomMinSlider" type="range" min="0" max="12" step="1" value="0" aria-label="Minimum randomized line curve amount">
+            <input id="generatorLineCurveAmountRandomMaxSlider" type="range" min="0" max="12" step="1" value="1" aria-label="Maximum randomized line curve amount">
+          </div>
+        </div>
+
+        <div class="generator-property-group">
+          <div class="generator-property-heading">
+            <label for="generatorLineCurveStrengthSlider">line curve strength</label>
+            <output id="generatorLineCurveStrengthValue" for="generatorLineCurveStrengthSlider">0%</output>
+            <label class="generator-random-switch"><span>random</span><span class="ios-switch"><input id="generatorLineCurveStrengthRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize line curve strength"><span class="ios-switch-slider" aria-hidden="true"></span></span></label>
+          </div>
+          <input id="generatorLineCurveStrengthSlider" class="generator-fixed-slider" type="range" min="0" max="100" step="1" value="0" aria-label="Fixed line curve strength">
+          <div class="generator-dual-range" data-random-range="lineCurveStrength">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorLineCurveStrengthRandomMinSlider" type="range" min="0" max="100" step="1" value="0" aria-label="Minimum randomized line curve strength">
+            <input id="generatorLineCurveStrengthRandomMaxSlider" type="range" min="0" max="100" step="1" value="11" aria-label="Maximum randomized line curve strength">
+          </div>
+        </div>
+
         <div class="generator-property-group is-random">
           <div class="generator-property-heading">
             <label for="generatorBoxWidthSlider">box width</label>
@@ -571,6 +503,174 @@
           </select>
         </div>
 
+        </details>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorSizeSlider">size</label>
+            <output id="generatorSizeValue" for="generatorSizeSlider generatorSizeRandomMinSlider generatorSizeRandomMaxSlider">46–158px</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorSizeRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize size"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorSizeSlider" class="generator-fixed-slider" type="range" min="1" max="1000" step="1" value="92" aria-label="Fixed size">
+          <div class="generator-dual-range" data-random-range="size">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorSizeRandomMinSlider" type="range" min="1" max="1000" step="1" value="46" aria-label="Minimum randomized size">
+            <input id="generatorSizeRandomMaxSlider" type="range" min="1" max="1000" step="1" value="158" aria-label="Maximum randomized size">
+          </div>
+        </div>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorHorizontalStretchSlider">horizontal stretch</label>
+            <output id="generatorHorizontalStretchValue" for="generatorHorizontalStretchSlider generatorHorizontalStretchRandomMinSlider generatorHorizontalStretchRandomMaxSlider">60–140%</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorHorizontalStretchRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize horizontal mark stretch"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorHorizontalStretchSlider" class="generator-fixed-slider" type="range" min="0" max="200" step="1" value="100" aria-label="Fixed horizontal mark stretch">
+          <div class="generator-dual-range" data-random-range="horizontalStretch">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorHorizontalStretchRandomMinSlider" type="range" min="0" max="200" step="1" value="60" aria-label="Minimum randomized horizontal mark stretch">
+            <input id="generatorHorizontalStretchRandomMaxSlider" type="range" min="0" max="200" step="1" value="140" aria-label="Maximum randomized horizontal mark stretch">
+          </div>
+        </div>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorVerticalStretchSlider">vertical stretch</label>
+            <output id="generatorVerticalStretchValue" for="generatorVerticalStretchSlider generatorVerticalStretchRandomMinSlider generatorVerticalStretchRandomMaxSlider">60–140%</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorVerticalStretchRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize vertical mark stretch"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorVerticalStretchSlider" class="generator-fixed-slider" type="range" min="0" max="200" step="1" value="100" aria-label="Fixed vertical mark stretch">
+          <div class="generator-dual-range" data-random-range="verticalStretch">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorVerticalStretchRandomMinSlider" type="range" min="0" max="200" step="1" value="60" aria-label="Minimum randomized vertical mark stretch">
+            <input id="generatorVerticalStretchRandomMaxSlider" type="range" min="0" max="200" step="1" value="140" aria-label="Maximum randomized vertical mark stretch">
+          </div>
+        </div>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorSpacingSlider">spacing</label>
+            <output id="generatorSpacingValue" for="generatorSpacingSlider generatorSpacingRandomMinSlider generatorSpacingRandomMaxSlider">34–77px</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorSpacingRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize spacing"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorSpacingSlider" class="generator-fixed-slider" type="range" min="4" max="2000" step="1" value="54" aria-label="Fixed spacing">
+          <div class="generator-dual-range" data-random-range="spacing">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorSpacingRandomMinSlider" type="range" min="4" max="2000" step="1" value="34" aria-label="Minimum randomized spacing">
+            <input id="generatorSpacingRandomMaxSlider" type="range" min="4" max="2000" step="1" value="77" aria-label="Maximum randomized spacing">
+          </div>
+        </div>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorRotationSlider">rotation</label>
+            <output id="generatorRotationValue" for="generatorRotationSlider generatorRotationRandomMinSlider generatorRotationRandomMaxSlider">−180°–180°</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorRotationRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize rotation"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorRotationSlider" class="generator-fixed-slider" type="range" min="-180" max="180" step="1" value="0" aria-label="Fixed rotation">
+          <div class="generator-dual-range" data-random-range="rotation">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorRotationRandomMinSlider" type="range" min="-180" max="180" step="1" value="-180" aria-label="Minimum randomized rotation">
+            <input id="generatorRotationRandomMaxSlider" type="range" min="-180" max="180" step="1" value="180" aria-label="Maximum randomized rotation">
+          </div>
+        </div>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorOpacitySlider">opacity</label>
+            <output id="generatorOpacityValue" for="generatorOpacitySlider generatorOpacityRandomMinSlider generatorOpacityRandomMaxSlider">52–100%</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorOpacityRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize opacity"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorOpacitySlider" class="generator-fixed-slider" type="range" min="1" max="100" step="1" value="100" aria-label="Fixed opacity">
+          <div class="generator-dual-range" data-random-range="opacity">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorOpacityRandomMinSlider" type="range" min="1" max="100" step="1" value="52" aria-label="Minimum randomized opacity">
+            <input id="generatorOpacityRandomMaxSlider" type="range" min="1" max="100" step="1" value="100" aria-label="Maximum randomized opacity">
+          </div>
+        </div>
+
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorPitchSlider">pitch</label>
+            <output id="generatorPitchValue" for="generatorPitchSlider generatorPitchRandomMinSlider generatorPitchRandomMaxSlider">−45°–45°</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorPitchRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize mark pitch"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorPitchSlider" class="generator-fixed-slider" type="range" min="-90" max="90" step="1" value="0" aria-label="Fixed mark pitch">
+          <div class="generator-dual-range" data-random-range="pitch">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorPitchRandomMinSlider" type="range" min="-90" max="90" step="1" value="-45" aria-label="Minimum randomized mark pitch">
+            <input id="generatorPitchRandomMaxSlider" type="range" min="-90" max="90" step="1" value="45" aria-label="Maximum randomized mark pitch">
+          </div>
+        </div>
+
+        <div class="generator-property-group is-random">
+          <div class="generator-property-heading">
+            <label for="generatorYawSlider">yaw</label>
+            <output id="generatorYawValue" for="generatorYawSlider generatorYawRandomMinSlider generatorYawRandomMaxSlider">−45°–45°</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorYawRandomToggle" class="generator-random-checkbox" type="checkbox" aria-label="Randomize mark yaw"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <input id="generatorYawSlider" class="generator-fixed-slider" type="range" min="-90" max="90" step="1" value="0" aria-label="Fixed mark yaw">
+          <div class="generator-dual-range" data-random-range="yaw">
+            <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+            <input id="generatorYawRandomMinSlider" type="range" min="-90" max="90" step="1" value="-45" aria-label="Minimum randomized mark yaw">
+            <input id="generatorYawRandomMaxSlider" type="range" min="-90" max="90" step="1" value="45" aria-label="Maximum randomized mark yaw">
+          </div>
+        </div>
+
+
+
+
+
+
+
+        <div class="generator-property-group generator-color-property is-random">
+          <div class="generator-property-heading">
+            <label for="generatorTintAmountSlider">color shift</label>
+            <output id="generatorTintAmountValue" for="generatorTintAmountSlider generatorTintAmountRandomMinSlider generatorTintAmountRandomMaxSlider">0–66%</output>
+            <label class="generator-random-switch">
+              <span>random</span>
+              <span class="ios-switch"><input id="generatorTintRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize color shift"><span class="ios-switch-slider" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <div class="generator-color-control">
+            <input id="generatorTintColorInput" type="color" value="#ff4fb3" aria-label="Base color shift">
+            <label class="generator-random-switch"><span>random color</span><span class="ios-switch"><input id="generatorTintColorRandomToggle" class="generator-random-checkbox" type="checkbox" checked aria-label="Randomize color shift color"><span class="ios-switch-slider" aria-hidden="true"></span></span></label>
+          </div>
+          <div class="generator-range-stack">
+            <input id="generatorTintAmountSlider" class="generator-fixed-slider" type="range" min="0" max="100" step="1" value="0" aria-label="Fixed color shift">
+            <div class="generator-dual-range" data-random-range="tint">
+              <span class="generator-dual-range-track" aria-hidden="true"><span></span></span>
+              <input id="generatorTintAmountRandomMinSlider" type="range" min="0" max="100" step="1" value="0" aria-label="Minimum randomized color shift">
+              <input id="generatorTintAmountRandomMaxSlider" type="range" min="0" max="100" step="1" value="66" aria-label="Maximum randomized color shift">
+            </div>
+          </div>
+        </div>
+
         <div class="generator-property-group generator-color-property">
           <div class="generator-property-heading">
             <label for="generatorBackgroundColorInput">background</label>
@@ -600,14 +700,15 @@
           <div class="generator-sequence-enable-row toggle-row">
             <label for="generatorSequenceEffectsRandomToggle" class="control-label inline-label">randomize effect toggles</label>
             <label class="ios-switch" for="generatorSequenceEffectsRandomToggle">
-              <input id="generatorSequenceEffectsRandomToggle" type="checkbox">
+              <input id="generatorSequenceEffectsRandomToggle" type="checkbox" checked>
               <span class="ios-switch-slider" aria-hidden="true"></span>
             </label>
           </div>
 
-          <fieldset class="generator-sequence-pool" aria-describedby="generatorSequenceHint">
+          <fieldset class="generator-sequence-pool">
             <legend>effects</legend>
             <div class="generator-sequence-choice-grid generator-sequence-effect-grid">
+              <label><input class="generator-sequence-effect-checkbox" type="checkbox" value="none"><span>none</span></label>
               <label><input class="generator-sequence-effect-checkbox" type="checkbox" value="show-hide" checked><span>show / hide</span></label>
               <label><input class="generator-sequence-effect-checkbox" type="checkbox" value="move" checked><span>move</span></label>
               <label><input class="generator-sequence-effect-checkbox" type="checkbox" value="rotate" checked><span>rotate</span></label>
@@ -619,7 +720,21 @@
             </div>
           </fieldset>
 
-          <fieldset class="generator-sequence-pool" aria-describedby="generatorSequenceHint">
+          <div class="generator-sequence-range">
+            <div class="generator-property-heading">
+              <label for="generatorSequenceNoneFrequencySlider">none frequency</label>
+              <output id="generatorSequenceNoneFrequencyValue" for="generatorSequenceNoneFrequencySlider">25%</output>
+              <label class="generator-new-composition-switch" title="Randomize none frequency with each new composition">
+                <span class="ios-switch">
+                  <input id="generatorSequenceNoneFrequencyRandomToggle" type="checkbox" checked aria-label="Randomize none frequency with new compositions">
+                  <span class="ios-switch-slider" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+            <input id="generatorSequenceNoneFrequencySlider" type="range" min="0" max="99" step="1" value="25" disabled>
+          </div>
+
+          <fieldset class="generator-sequence-pool">
             <legend>trigger styles</legend>
             <div class="generator-sequence-choice-grid generator-sequence-timing-grid">
               <label><input class="generator-sequence-timing-checkbox" type="checkbox" value="pulse" checked><span>pulse</span></label>
@@ -656,11 +771,15 @@
           </div>
 
           <div class="generator-sequence-footer">
-            <p id="generatorSequenceHint" class="generator-control-hint">one enabled effect and trigger style is chosen per generated layer</p>
             <button id="generatorSequencePauseButton" type="button" aria-pressed="false">pause preview</button>
           </div>
         </div>
       </details>
+
+      <label class="generator-preview-option">
+        <input id="generatorSmoothPreviewToggle" type="checkbox">
+        <span>smooth render preview</span>
+      </label>
 
     </section>
 

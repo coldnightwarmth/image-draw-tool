@@ -77,10 +77,13 @@ body.generator-page {
 }
 
 .generator-canvas-header {
+  min-width: 0;
+  overflow: hidden;
   border-bottom: 0;
 }
 
 .generator-canvas-header-actions {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -166,10 +169,11 @@ body.generator-page {
   box-sizing: border-box;
   border: 0 solid var(--generator-canvas);
   pointer-events: none;
+  opacity: var(--generator-margin-opacity, 1);
 }
 
 #generatorCanvas.crop-inspection-active #generatorMarginOverlay {
-  opacity: 0.74;
+  opacity: calc(var(--generator-margin-opacity, 1) * 0.74);
 }
 
 #generatorMarginOverlay[hidden] {
@@ -224,7 +228,7 @@ body.generator-page {
   animation-play-state: paused !important;
 }
 
-#generatorCanvas.crop-inspection-active .generator-stamp:hover,
+#generatorCanvas.crop-inspection-active .generator-stamp.is-inspection-selected,
 #generatorCanvas.crop-inspection-active .generator-stamp:focus-visible,
 #generatorCanvas.crop-inspection-active .generator-stamp.is-generator-uncropped {
   z-index: var(--generator-uncropped-z, 1501) !important;
@@ -265,6 +269,10 @@ body.generator-page {
 #controls.generator-controls {
   width: min(var(--generator-panel-width), calc(100vw - 28px));
   max-height: calc(100dvh - 78px);
+  /* Keep animated/filter-heavy stamps out of the sidebar's backdrop surface. */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: #f4f4f4;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -278,6 +286,8 @@ body.generator-page {
 .generator-controls-panel {
   min-height: 0;
   overflow-y: auto;
+  contain: paint;
+  transform: translateZ(0);
   padding: 0 2px 10px 0;
 }
 
@@ -636,6 +646,7 @@ body.generator-page {
   border-bottom: 1px solid #dedede;
 }
 
+.generator-count-group[hidden],
 .generator-gifs-per-mark-group[hidden] {
   display: none;
 }
@@ -718,6 +729,7 @@ body.generator-page {
   width: 100%;
   min-height: 28px;
   margin-top: 5px;
+  margin-bottom: 9px;
   padding: 5px 7px;
   border: 1px solid #aaa;
   border-radius: 0;
@@ -996,7 +1008,7 @@ body.generator-page {
 
 .generator-mode-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 3px;
 }
 
@@ -1014,8 +1026,9 @@ body.generator-page {
 }
 
 .generator-mode-card {
-  min-height: 52px;
-  padding: 5px 2px 4px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 4px 1px;
   border: 1px solid #c8c8c8;
   background: #fff;
   color: #777;
@@ -1030,8 +1043,8 @@ body.generator-page {
 }
 
 .generator-mode-card svg {
-  width: 23px;
-  height: 23px;
+  width: 21px;
+  height: 21px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
@@ -1452,6 +1465,7 @@ body.generator-page {
 }
 
 #generatorSequencePauseButton {
+  grid-column: 2;
   min-height: 24px;
   padding: 4px 6px;
   border: 1px solid #aaa;
@@ -1944,9 +1958,11 @@ body.generator-page {
 }
 .generator-preview-option input { margin: 0; accent-color: #111; }
 
-.generator-canvas-footer { min-width: 0; }
-#generatorCanvasMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.generator-render-status { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 13px; }
+.generator-canvas-footer { min-width: 0; overflow: hidden; }
+#generatorCanvasMeta { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.generator-canvas-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+#generatorCanvasSeed { min-width: 0; overflow: hidden; text-overflow: clip; }
+.generator-render-status { gap: 6px; flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 13px; }
 #generatorLoadingSpinner { width: 12px; height: 12px; box-sizing: border-box; border: 2px solid #ccc; border-top-color: #555; border-radius: 50%; animation: generator-loading-spin 800ms linear infinite; }
 #generatorLoadingSpinner[hidden], #generatorLowFps[hidden] { display: none; }
 @keyframes generator-loading-spin { to { transform: rotate(360deg); } }
@@ -2006,3 +2022,19 @@ body.generator-page {
 .generator-upload-drop-zone.is-dragging { border-color: #111; background: #e5e5e5; outline: 1px solid #111; }
 .generator-upload-drop-zone:focus-visible { outline: 2px solid #111; outline-offset: 2px; }
 .generator-color-control > .generator-random-switch { justify-self: end; }
+
+#generatorMarginOpacityGroup[hidden] { display: none; }
+.generator-stamp.is-generator-hidden { visibility: hidden; }
+#generatorCanvas.crop-inspection-active .generator-stamp.is-generator-hidden { visibility: visible; opacity: .15 !important; outline: 1px dashed #e44; }
+#generatorCanvas.crop-inspection-active .generator-stamp.is-inspection-selected { z-index: 3000 !important; }
+#generatorCanvas.inspection-solo .generator-stamp:not(.is-inspection-selected) { opacity: 0 !important; }
+#generatorCanvas.inspection-solo .generator-stamp.is-inspection-selected { opacity: var(--generator-base-opacity, 1) !important; }
+#generatorCanvas.inspection-solo #generatorMarginOverlay { visibility: hidden; }
+
+#generatorCropExemptionGroup[hidden] { display: none; }
+#generatorMarginOpacityGroup, #generatorCropExemptionGroup { margin-top: 10px; }
+
+.generator-mark-controls {
+  border-width: 1px 0 0;
+  background: transparent;
+}

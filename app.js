@@ -4441,10 +4441,10 @@ function getDrawModeButtonLabel(mode, isOutlineVariant = false) {
     return "Line tool";
   }
   if (mode === "box") {
-    return isOutlineVariant ? "Box outline tool" : "Box tool";
+    return isOutlineVariant ? "Box outline tool (Shift: square)" : "Box tool (Shift: square)";
   }
   if (mode === "circle") {
-    return isOutlineVariant ? "Circle outline tool" : "Circle tool";
+    return isOutlineVariant ? "Ellipse outline tool (Shift: circle)" : "Ellipse tool (Shift: circle)";
   }
   return "Draw tool";
 }
@@ -16666,14 +16666,27 @@ function getRectBoundsFromPoints(startX, startY, endX, endY) {
   };
 }
 
+// Keep the legacy circle mode key so saved drawings retain their tool metadata.
 function getCircleBoundsFromPoints(startX, startY, endX, endY) {
-  const size = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
-  return {
-    left: endX >= startX ? startX : startX - size,
-    top: endY >= startY ? startY : startY - size,
-    right: endX >= startX ? startX + size : startX,
-    bottom: endY >= startY ? startY + size : startY
-  };
+  return getRectBoundsFromPoints(startX, startY, endX, endY);
+}
+
+function updateConstrainedShapePoint(draft, point, shiftKey) {
+  draft.rawX = point.x;
+  draft.rawY = point.y;
+  const constrained = shiftKey && ["box", "circle"].includes(getBaseDrawMode(draft.mode));
+  const dx = point.x - draft.anchorX;
+  const dy = point.y - draft.anchorY;
+  const size = Math.max(Math.abs(dx), Math.abs(dy));
+  draft.currentX = constrained ? draft.anchorX + (dx < 0 ? -size : size) : point.x;
+  draft.currentY = constrained ? draft.anchorY + (dy < 0 ? -size : size) : point.y;
+}
+
+function refreshShapeConstraint(shiftKey) {
+  const draft = state.shapeDraft;
+  if (!draft) return;
+  updateConstrainedShapePoint(draft, { x: draft.rawX ?? draft.currentX, y: draft.rawY ?? draft.currentY }, shiftKey);
+  updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, draft.currentX, draft.currentY);
 }
 
 function getGridAxisPositions(min, max, spacing) {
@@ -16759,8 +16772,8 @@ async function placeCircleBrushes(stroke, startX, startY, endX, endY, task = nul
   const yPositions = getGridAxisPositions(bounds.top, bounds.bottom, spacing);
   const centerX = (bounds.left + bounds.right) / 2;
   const centerY = (bounds.top + bounds.bottom) / 2;
-  const radius = Math.max(0, (bounds.right - bounds.left) / 2);
-  const radiusSq = radius * radius;
+  const radiusX = Math.max(0.0001, (bounds.right - bounds.left) / 2);
+  const radiusY = Math.max(0.0001, (bounds.bottom - bounds.top) / 2);
   const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
   let placedAny = false;
   if (capacity <= 0) {
@@ -16773,7 +16786,7 @@ async function placeCircleBrushes(stroke, startX, startY, endX, endY, task = nul
       throwIfTaskCancelled(task);
       const dx = x - centerX;
       const dy = y - centerY;
-      if (dx * dx + dy * dy > radiusSq) {
+      if ((dx / radiusX) ** 2 + (dy / radiusY) ** 2 > 1) {
         continue;
       }
       if (stroke.elements.length >= capacity) {
@@ -16801,10 +16814,10 @@ async function placeCircleOutlineBrushes(stroke, startX, startY, endX, endY, tas
   const yPositions = getGridAxisPositions(bounds.top, bounds.bottom, spacing);
   const centerX = (bounds.left + bounds.right) / 2;
   const centerY = (bounds.top + bounds.bottom) / 2;
-  const radius = Math.max(0, (bounds.right - bounds.left) / 2);
-  const radiusSq = radius * radius;
-  const innerRadius = Math.max(0, radius - spacing);
-  const innerRadiusSq = innerRadius * innerRadius;
+  const radiusX = Math.max(0.0001, (bounds.right - bounds.left) / 2);
+  const radiusY = Math.max(0.0001, (bounds.bottom - bounds.top) / 2);
+  const innerX = Math.max(0, radiusX - spacing);
+  const innerY = Math.max(0, radiusY - spacing);
   const capacity = MAX_VISIBLE_STAMPS - getVisibleStampCount();
   let placedAny = false;
   if (capacity <= 0) {
@@ -16817,8 +16830,9 @@ async function placeCircleOutlineBrushes(stroke, startX, startY, endX, endY, tas
       throwIfTaskCancelled(task);
       const dx = x - centerX;
       const dy = y - centerY;
-      const distanceSq = dx * dx + dy * dy;
-      if (distanceSq > radiusSq || distanceSq < innerRadiusSq) {
+      const outside = (dx / radiusX) ** 2 + (dy / radiusY) ** 2 > 1;
+      const inside = innerX > 0 && innerY > 0 && (dx / innerX) ** 2 + (dy / innerY) ** 2 < 1;
+      if (outside || inside) {
         continue;
       }
       if (stroke.elements.length >= capacity) {
@@ -21242,13 +21256,14 @@ function startShapeDrawing(event) {
     };
   }
 
+  updateConstrainedShapePoint(state.shapeDraft, point, event.shiftKey);
   syncViewportPointerCursorClasses();
   updateShapePreview(
     state.shapeDraft.mode,
     state.shapeDraft.anchorX,
     state.shapeDraft.anchorY,
-    point.x,
-    point.y
+    state.shapeDraft.currentX,
+    state.shapeDraft.currentY
   );
   viewport.setPointerCapture(event.pointerId);
 }
@@ -21265,14 +21280,14 @@ function updateShapeDrawing(event) {
     if (dragDistance >= SHAPE_DRAG_THRESHOLD_PX) {
       draft.dragging = true;
     }
-    draft.currentX = point.x;
-    draft.currentY = point.y;
-    updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, point.x, point.y);
+    updateConstrainedShapePoint(draft, point, event.shiftKey);
+    updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, draft.currentX, draft.currentY);
     return;
   }
 
   if (draft.pointerId === null) {
-    updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, point.x, point.y);
+    updateConstrainedShapePoint(draft, point, event.shiftKey);
+    updateShapePreview(draft.mode, draft.anchorX, draft.anchorY, draft.currentX, draft.currentY);
   }
 }
 
@@ -21489,6 +21504,7 @@ function onPointerUp(event) {
   stopPanning(event.pointerId);
   stopEditLayerMove(event.pointerId);
   stopErasing(event.pointerId);
+  if (state.shapeDraft?.pointerId === event.pointerId) updateShapeDrawing(event);
   stopShapeDrawing(event.pointerId);
   stopDrawing(event.pointerId);
   updateEraseCursorVisibility();
@@ -23298,3 +23314,10 @@ async function initializeApp() {
 }
 
 void initializeApp();
+
+// Update constraints immediately when Shift changes, even without pointer movement.
+for (const type of ["keydown", "keyup"]) {
+  document.addEventListener(type, event => {
+    if (event.key === "Shift") refreshShapeConstraint(type === "keydown");
+  });
+}

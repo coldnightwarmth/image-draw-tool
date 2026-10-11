@@ -457,6 +457,8 @@ try {
   assert.deepEqual(records[0].controls.generationRandomize, {
     margin: true,
     marginMode: true,
+    marginOpacity: false,
+    cropExemption: false,
     count: true,
     markCount: true,
     gifsPerMark: true,

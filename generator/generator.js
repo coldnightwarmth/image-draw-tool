@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20261011-generator-uploads-v2";
+  const GENERATOR_ASSET_REVISION = "20261011-generator-mark-inspection-v5";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
@@ -15,7 +15,7 @@
   const MAX_GENERATED_COUNT = 300;
   const DEFAULT_MARGIN = 0;
   const MAX_MARGIN_FRACTION = 0.45;
-  const MODE_ORDER = ["line", "spray", "box", "scatter"];
+  const MODE_ORDER = ["line", "spray", "box", "scatter", "ellipse"];
   const SEQUENCE_EFFECTS = [
     "show-hide",
     "move",
@@ -24,7 +24,8 @@
     "color-cycle",
     "image-cycle",
     "pixelate",
-    "blur"
+    "blur",
+    "none"
   ];
   const SEQUENCE_TIMINGS = ["pulse", "wave", "step", "random", "all", "grouped"];
   const SEQUENCE_GROUPED_EXCLUSIONS = new Set(["show-hide", "color-cycle", "image-cycle"]);
@@ -32,6 +33,8 @@
     "sampledSpacing",
     "sampledLineLength",
     "sampledLineAngle",
+    "sampledLineCurveAmount",
+    "sampledLineCurveStrength",
     "sampledSpraySpread",
     "sampledBoxWidth",
     "sampledBoxHeight"
@@ -91,6 +94,7 @@
     dimensionBadge: byId("generatorDimensionBadge"),
     canvasInfoDismiss: byId("generatorCanvasInfoDismissButton"),
     canvasMeta: byId("generatorCanvasMeta"),
+    canvasSeed: byId("generatorCanvasSeed"),
     loadingSpinner: byId("generatorLoadingSpinner"),
     lowFps: byId("generatorLowFps"),
     status: byId("generatorStatus"),
@@ -109,11 +113,14 @@
     width: byId("generatorCanvasWidthInput"),
     height: byId("generatorCanvasHeightInput"),
     margin: byId("generatorMarginSlider"),
+    marginOpacity: byId("generatorMarginOpacitySlider"),
+    cropExemption: byId("generatorCropExemptionSlider"),
     marginValue: byId("generatorMarginValue"),
     marginRandom: byId("generatorMarginRandomToggle"),
     marginModeRandom: byId("generatorMarginModeRandomToggle"),
     marginHint: byId("generatorMarginHint"),
     cropInspect: byId("generatorCropInspectButton"),
+    markInspect: byId("generatorMarkInspectButton"),
     cropInspectStatus: byId("generatorCropInspectStatus"),
     smoothRenderPreview: byId("generatorSmoothPreviewToggle"),
     captureFinish: byId("generatorLiveCaptureFinish"),
@@ -135,7 +142,7 @@
     sequenceEffectsRandom: byId("generatorSequenceEffectsRandomToggle"),
     sequenceStateLabel: byId("generatorSequenceStateLabel"),
     sequenceBody: document.querySelector(".generator-sequence-body"),
-    sequenceHint: byId("generatorSequenceHint"),
+    sequenceNoneFrequency: byId("generatorSequenceNoneFrequencySlider"),
     sequencePause: byId("generatorSequencePauseButton"),
     bookmark: byId("generatorBookmarkButton"),
     download: byId("generatorDownloadButton"),
@@ -200,6 +207,8 @@
     ["spraySpread", "generatorSpraySpreadSlider", "generatorSpraySpreadRandomMinSlider", "generatorSpraySpreadRandomMaxSlider", "generatorSpraySpreadValue", "px"],
     ["lineAngle", "generatorLineAngleSlider", "generatorLineAngleRandomMinSlider", "generatorLineAngleRandomMaxSlider", "generatorLineAngleValue", "°"],
     ["lineLength", "generatorLineLengthSlider", "generatorLineLengthRandomMinSlider", "generatorLineLengthRandomMaxSlider", "generatorLineLengthValue", "px"],
+    ["lineCurveAmount", "generatorLineCurveAmountSlider", "generatorLineCurveAmountRandomMinSlider", "generatorLineCurveAmountRandomMaxSlider", "generatorLineCurveAmountValue", ""],
+    ["lineCurveStrength", "generatorLineCurveStrengthSlider", "generatorLineCurveStrengthRandomMinSlider", "generatorLineCurveStrengthRandomMaxSlider", "generatorLineCurveStrengthValue", "%"],
     ["boxWidth", "generatorBoxWidthSlider", "generatorBoxWidthRandomMinSlider", "generatorBoxWidthRandomMaxSlider", "generatorBoxWidthValue", "px"],
     ["boxHeight", "generatorBoxHeightSlider", "generatorBoxHeightRandomMinSlider", "generatorBoxHeightRandomMaxSlider", "generatorBoxHeightValue", "px"]
   ].map(([key, fixedId, minimumId, maximumId, outputId, suffix]) => ({
@@ -233,7 +242,6 @@
 
   const RANDOM_TOGGLE_IDS = {
     gif: "generatorGifRandomToggle",
-    modeMix: "generatorModeMixRandomToggle",
     size: "generatorSizeRandomToggle",
     spacing: "generatorSpacingRandomToggle",
     rotation: "generatorRotationRandomToggle",
@@ -247,6 +255,8 @@
     spraySpread: "generatorSpraySpreadRandomToggle",
     lineAngle: "generatorLineAngleRandomToggle",
     lineLength: "generatorLineLengthRandomToggle",
+    lineCurveAmount: "generatorLineCurveAmountRandomToggle",
+    lineCurveStrength: "generatorLineCurveStrengthRandomToggle",
     boxWidth: "generatorBoxWidthRandomToggle",
     boxHeight: "generatorBoxHeightRandomToggle",
     boxStyle: "generatorBoxStyleRandomToggle",
@@ -260,10 +270,13 @@
   const GENERATION_RANDOM_TOGGLES = {
     margin: elements.marginRandom,
     marginMode: elements.marginModeRandom,
+    marginOpacity: byId("generatorMarginOpacityRandomToggle"),
+    cropExemption: byId("generatorCropExemptionRandomToggle"),
     count: elements.countRandom,
     markCount: elements.markCountRandom,
     gifsPerMark: elements.gifsPerMarkRandom,
-    sequenceEffects: elements.sequenceEffectsRandom
+    sequenceEffects: elements.sequenceEffectsRandom,
+    noneFrequency: byId("generatorSequenceNoneFrequencyRandomToggle")
   };
 
   const RANGE_RANDOM_TOGGLES = {};
@@ -280,6 +293,10 @@
     currentHeight: DEFAULT_HEIGHT,
     currentMargin: DEFAULT_MARGIN,
     currentMarginMode: "placement",
+    currentMarginOpacity: 1,
+    inspectionHover: null,
+    inspectionMode: "sample",
+    inspectionShift: false,
     currentCount: 0,
     currentSeed: 0,
     currentSignature: "",
@@ -305,6 +322,7 @@
     activeSessionWritePromise: Promise.resolve(),
     restoringActiveSession: false,
     history: [],
+    redoHistory: [],
     currentControlState: null,
     dynamicUpdateTimer: null,
     dynamicUpdateBase: null,
@@ -493,7 +511,7 @@
     const preview = { task, frames: 0, timer: null, wake: null, inFlight: false };
     preview.ready = new Promise((resolve) => { preview.resolveReady = resolve; });
     stablePreview = preview;
-    const specs = state.currentSpecs.map((spec) => ({ ...spec, sequence: spec.sequence ? { ...spec.sequence } : null }));
+    const specs = state.currentSpecs.filter(spec => !spec.hidden).map((spec) => ({ ...spec, sequence: spec.sequence ? { ...spec.sequence } : null }));
     const background = state.currentBackground;
     const logicalWidth = state.currentWidth;
     const logicalHeight = state.currentHeight;
@@ -549,7 +567,7 @@
               background: { include: !uncropped.length, color: frameBackground, matteColor: uncropped.length ? "" : frameBackground },
               generatorComposite: {
                 background: frameBackground,
-                crop: margin > 0 ? { margin, width: logicalWidth, height: logicalHeight } : null,
+                crop: margin > 0 ? { margin, opacity: state.currentMarginOpacity, width: logicalWidth, height: logicalHeight } : null,
                 overlayEntries
               }
             });
@@ -974,6 +992,7 @@
   function getCompatibleSequencePairs(effects, timings) {
     const pairs = [];
     for (const effect of effects) {
+      if (effect === "none") continue;
       for (const timing of timings) {
         if (timing === "grouped" && SEQUENCE_GROUPED_EXCLUSIONS.has(effect)) {
           continue;
@@ -1001,21 +1020,10 @@
   function updateSequenceControlUI() {
     const enabled = Boolean(elements.sequenceEnabled.checked);
     const effects = getSelectedSequenceEffects();
-    const timings = getSelectedSequenceTimings();
-    const pairs = getCompatibleSequencePairs(effects, timings);
     elements.sequenceStateLabel.textContent = enabled ? "on" : "off";
     elements.sequenceBody.classList.toggle("is-disabled", !enabled);
-    if (!enabled) {
-      elements.sequenceHint.textContent = "new compositions will have no added sequence animation";
-    } else if (!effects.length) {
-      elements.sequenceHint.textContent = "enable at least one sequence effect";
-    } else if (!timings.length) {
-      elements.sequenceHint.textContent = "enable at least one trigger style";
-    } else if (!pairs.length) {
-      elements.sequenceHint.textContent = "grouped is unavailable for the selected effects";
-    } else {
-      elements.sequenceHint.textContent = "one enabled effect and trigger style is chosen per generated layer";
-    }
+    elements.sequenceNoneFrequency.disabled = !enabled || !effects.includes("none");
+    byId("generatorSequenceNoneFrequencyValue").textContent = `${elements.sequenceNoneFrequency.value}%`;
     elements.sequencePause.disabled = !enabled;
     updateGenerateAvailability();
   }
@@ -1115,52 +1123,88 @@
   }
 
   function updateCropInspectionUi() {
-    const cropModeSelected = getMarginMode() === "crop";
-    const renderedCrop = Boolean(
-      state.currentCount &&
-      state.currentMarginMode === "crop" &&
-      state.currentMargin > 0 &&
-      cropModeSelected
-    );
-    if (!renderedCrop && state.cropInspectionActive) {
-      setCropInspectionActive(false);
-      return;
-    }
-    const uncroppedCount = state.currentSpecs.filter((spec) => spec.uncropped).length;
-    elements.cropInspect.hidden = !cropModeSelected;
-    elements.cropInspect.disabled = !renderedCrop || state.generating || Boolean(state.exportTask);
-    elements.cropInspect.setAttribute("aria-pressed", String(state.cropInspectionActive));
-    if (!renderedCrop) {
-      const configuredMargin = readNumber(elements.margin, 0);
-      elements.cropInspect.textContent = configuredMargin > 0
-        ? "generate crop to inspect"
-        : "set a margin to inspect";
-      elements.cropInspectStatus.hidden = false;
-      elements.cropInspectStatus.textContent = configuredMargin > 0
-        ? "make a new composition to apply this crop"
-        : "increase the canvas margin, then make a new composition";
-    } else {
-      elements.cropInspect.textContent = state.cropInspectionActive
-        ? "finish crop inspection"
-        : (uncroppedCount ? `edit uncropped gifs (${uncroppedCount})` : "inspect cropped gifs");
-      elements.cropInspectStatus.hidden = !state.cropInspectionActive && !uncroppedCount;
-      elements.cropInspectStatus.textContent = state.cropInspectionActive
-        ? `preview paused · hover to reveal · click to toggle · ${uncroppedCount} uncropped`
-        : `${uncroppedCount} ${uncroppedCount === 1 ? "gif remains" : "gifs remain"} uncropped`;
-    }
+    const uncroppedCount = state.currentSpecs.filter(spec => spec.uncropped).length;
+    const hiddenCount = state.currentSpecs.filter(spec => spec.hidden).length;
+    elements.cropInspect.hidden = false;
+    elements.cropInspect.disabled = !state.currentCount || state.generating || Boolean(state.exportTask) || Boolean(state.batchExport);
+    elements.cropInspect.setAttribute("aria-pressed", String(state.cropInspectionActive && state.inspectionMode === "sample"));
+    elements.cropInspect.textContent = "inspect samples";
+    elements.markInspect.disabled = elements.cropInspect.disabled;
+    elements.markInspect.setAttribute("aria-pressed", String(state.cropInspectionActive && state.inspectionMode === "mark"));
+    elements.cropInspectStatus.hidden = !state.cropInspectionActive && !hiddenCount;
+    elements.cropInspectStatus.textContent = state.cropInspectionActive
+      ? `preview paused · ${state.inspectionMode === "mark" ? "marks" : "samples"} · wheel: cycle layers · hold shift: solo · ctrl/cmd-click: hide/show${state.currentMarginMode === "crop" ? " · click: toggle crop" : ""} · ${hiddenCount} hidden`
+      : `${hiddenCount} hidden · inspect to show again`;
     elements.canvas.dataset.generatorUncroppedCount = String(uncroppedCount);
   }
 
-  function setCropInspectionActive(active) {
-    const nextActive = Boolean(active) &&
-      state.currentMarginMode === "crop" &&
-      state.currentMargin > 0;
-    if (state.cropInspectionActive === nextActive) {
+  function inspectionImages(image) {
+    if (!image) return [];
+    if (state.inspectionMode !== "mark") return [image];
+    const motif = getCurrentSpecForImage(image)?.motifId;
+    return motif == null ? [] : getSortedLiveStamps().filter(candidate => getCurrentSpecForImage(candidate)?.motifId === motif);
+  }
+
+  function selectInspectionStamp(image) {
+    elements.composition.querySelectorAll(".is-inspection-selected").forEach(element => element.classList.remove("is-inspection-selected"));
+    state.inspectionHover = image;
+    for (const selected of inspectionImages(image)) selected.classList.add("is-inspection-selected");
+    elements.canvas.classList.toggle("inspection-solo", state.inspectionShift && Boolean(image));
+  }
+
+  function inspectionStackAt(x, y) {
+    const seen = new Set();
+    return document.elementsFromPoint(x, y)
+      .filter(element => element.matches?.("img.generator-stamp") && elements.composition.contains(element))
+      .sort((a, b) => {
+        const sa = getCurrentSpecForImage(a), sb = getCurrentSpecForImage(b);
+        return Number(Boolean(sb?.uncropped)) - Number(Boolean(sa?.uncropped)) ||
+          Number(b.style.zIndex) - Number(a.style.zIndex);
+      }).filter(image => {
+        if (state.inspectionMode !== "mark") return true;
+        const motif = getCurrentSpecForImage(image)?.motifId;
+        if (seen.has(motif)) return false;
+        seen.add(motif); return true;
+      });
+  }
+
+  function toggleInspectedStamp(image, hide = false) {
+    if (!state.cropInspectionActive || !image) return;
+    if (!hide && state.currentMarginMode !== "crop") return;
+    const images = inspectionImages(image);
+    const field = hide ? "hidden" : "uncropped";
+    const specs = images.map(getCurrentSpecForImage).filter(Boolean);
+    if (!specs.length) return;
+    const snapshot = captureGeneratorSnapshot();
+    const value = !specs.every(spec => spec[field]);
+    const paintOrder = getSortedLiveStamps();
+    for (const target of images) {
+      const spec = getCurrentSpecForImage(target);
+      spec[field] = value;
+      if (hide) target.classList.toggle("is-generator-hidden", value);
+      else applyUncroppedStateToImage(target, spec, paintOrder.indexOf(target));
+    }
+    state.currentBookmarkId = "";
+    pushHistorySnapshot(snapshot);
+    updateCropInspectionUi();
+    renderBookmarkGallery();
+    syncCurrentBookmarkUI();
+    scheduleActiveSessionSave();
+  }
+
+  function setCropInspectionActive(active, mode = state.inspectionMode) {
+    const nextActive = Boolean(active) && state.currentCount > 0;
+    const nextMode = mode === "mark" ? "mark" : "sample";
+    if (state.cropInspectionActive === nextActive && state.inspectionMode === nextMode) {
       updateCropInspectionUi();
       return;
     }
     if (nextActive) stopStablePreview(false);
     state.cropInspectionActive = nextActive;
+    state.inspectionMode = nextMode;
+    state.inspectionShift = false;
+    state.inspectionHidePointer = false;
+    selectInspectionStamp(null);
     elements.canvas.classList.toggle("crop-inspection-active", nextActive);
     for (const image of getSortedLiveStamps()) {
       const spec = getCurrentSpecForImage(image);
@@ -1170,7 +1214,7 @@
         image.setAttribute("role", "button");
         image.setAttribute(
           "aria-label",
-          `${spec?.uncropped ? "Crop" : "Show"} this GIF beyond the canvas margin`
+          `Inspect ${nextMode}. Control or Command click to hide or show; click to toggle crop in crop edges mode.`
         );
         image.setAttribute("aria-pressed", String(Boolean(spec?.uncropped)));
         pauseStampForCropInspection(image);
@@ -1320,6 +1364,10 @@
       input.id = `generator${key[0].toUpperCase()}${key.slice(1)}RangeRandomToggle`;
       input.className = "generator-range-random-checkbox";
       input.type = "checkbox";
+      input.defaultChecked = control.alwaysRandom
+        ? elements.sequenceEnabled.defaultChecked
+        : Boolean(RANDOM_TOGGLES[control.key]?.defaultChecked);
+      input.checked = input.defaultChecked;
       input.setAttribute("aria-label", `Randomize the ${name} range with new compositions`);
       const slider = document.createElement("span");
       slider.className = "ios-switch-slider";
@@ -1380,15 +1428,22 @@
     return Math.min(upper, Math.floor(Math.pow(random(), 1.75) * (upper + 1)));
   }
 
-  function randomizeGenerationControls(seed) {
-    if (GENERATION_RANDOM_TOGGLES.margin?.checked) {
+  function randomizeGenerationControls(seed, { preserveMarginDefaults = false } = {}) {
+    if (GENERATION_RANDOM_TOGGLES.cropExemption.checked) {
+      elements.cropExemption.value = String(randomInteger(deriveGenerationControlRandom(seed, "crop-exemption-percent"), 0, 100));
+    }
+    if (GENERATION_RANDOM_TOGGLES.marginOpacity.checked) {
+      elements.marginOpacity.value = String(randomInteger(deriveGenerationControlRandom(seed, "margin-opacity"), 0, 100));
+    }
+    updateMarginOpacityUi();
+    if (!preserveMarginDefaults && GENERATION_RANDOM_TOGGLES.margin?.checked) {
       const maximum = Math.max(0, Number(elements.margin.max) || 0);
       elements.margin.value = String(randomizeGeneratedMargin(
         deriveGenerationControlRandom(seed, "margin"),
         maximum
       ));
     }
-    if (GENERATION_RANDOM_TOGGLES.marginMode?.checked) {
+    if (!preserveMarginDefaults && GENERATION_RANDOM_TOGGLES.marginMode?.checked) {
       const random = deriveGenerationControlRandom(seed, "margin-mode");
       const mode = random() < 0.5 ? "placement" : "crop";
       const input = document.querySelector(`input[name="generatorMarginMode"][value="${mode}"]`);
@@ -1419,6 +1474,11 @@
         deriveGenerationControlRandom(seed, "gifs-per-mark"),
         1,
         MAX_GIFS_PER_MARK
+      ));
+    }
+    if (GENERATION_RANDOM_TOGGLES.noneFrequency.checked) {
+      elements.sequenceNoneFrequency.value = String(randomInteger(
+        deriveGenerationControlRandom(seed, "none-frequency"), 0, 99
       ));
     }
     if (GENERATION_RANDOM_TOGGLES.sequenceEffects?.checked) {
@@ -1633,6 +1693,7 @@
   function updateGifsPerMarkVisibility() {
     const visible = Boolean(RANDOM_TOGGLES.gif?.checked);
     elements.gifsPerMarkGroup.hidden = !visible;
+    elements.count.closest(".generator-count-group").hidden = !visible;
   }
 
   function randomizationPresetMatches(preset) {
@@ -1663,6 +1724,15 @@
         : preset === "off"
           ? false
           : toggle.defaultChecked;
+    }
+    if (preset === "default") {
+      document.querySelector('.generator-mode-checkbox[value="ellipse"]').checked = true;
+      byId("generatorLineCurveAmountSlider").value = "0";
+      byId("generatorLineCurveStrengthSlider").value = "0";
+      elements.margin.value = "0";
+      document.querySelector('input[name="generatorMarginMode"][value="placement"]').checked = true;
+      updateRangeOutputs();
+      updateMarginModeUI();
     }
     RANDOM_RANGE_CONTROLS.forEach((control) => updateRandomRangeControl(control));
     updateSequenceControlUI();
@@ -1720,7 +1790,54 @@
     return margin;
   }
 
+  function assignRandomCropExemptions(specs, settings, seed) {
+    if (settings.marginMode !== "crop") return;
+    const margin = Number(settings.margin) || 0;
+    const candidates = specs.filter(spec => {
+      if (spec.hidden || margin <= 0) return false;
+      const [a, b, c, d] = composeStampTransform(spec.markTransform, spec.rotation);
+      const halfWidth = (Math.abs(a) * spec.width + Math.abs(c) * spec.height) / 2;
+      const halfHeight = (Math.abs(b) * spec.width + Math.abs(d) * spec.height) / 2;
+      const left = spec.x - halfWidth, right = spec.x + halfWidth;
+      const top = spec.y - halfHeight, bottom = spec.y + halfHeight;
+      return right > 0 && bottom > 0 && left < settings.width && top < settings.height &&
+        (left < margin || top < margin || right > settings.width - margin || bottom > settings.height - margin);
+    }).sort((a, b) => a.index - b.index);
+    const shuffled = shuffle(candidates, deriveGenerationControlRandom(seed, "crop-exemptions"));
+    const count = Math.round(candidates.length * clamp(Number(settings.cropExemptionPercent) || 0, 0, 100) / 100);
+    const selected = new Set(shuffled.slice(0, count));
+    specs.forEach(spec => spec.uncropped = selected.has(spec));
+  }
+
+  async function updateCropExemptionPercent() {
+    updateMarginOpacityUi();
+    if (!state.currentCount || state.generating || state.exportTask || state.batchExport) return;
+    if (state.dynamicUpdateBase) await applyPendingDynamicUpdate();
+    if (state.generating || state.exportTask || state.batchExport) return;
+    const snapshot = captureGeneratorSnapshot();
+    const settings = { ...state.currentSettingsUsed, cropExemptionPercent: Number(elements.cropExemption.value) };
+    assignRandomCropExemptions(state.currentSpecs, settings, state.currentSeed);
+    getSortedLiveStamps().forEach((image, index) => applyUncroppedStateToImage(image, getCurrentSpecForImage(image), index));
+    state.currentSettingsUsed = settings;
+    state.currentControlState = captureControlState();
+    state.currentBookmarkId = "";
+    pushHistorySnapshot(snapshot);
+    updateCropInspectionUi();
+    scheduleStablePreview();
+    renderBookmarkGallery();
+    syncCurrentBookmarkUI();
+    scheduleActiveSessionSave();
+  }
+
+  function updateMarginOpacityUi() {
+    byId("generatorMarginOpacityValue").textContent = `${elements.marginOpacity.value}%`;
+    byId("generatorMarginOpacityGroup").hidden = getMarginMode() !== "crop";
+    byId("generatorCropExemptionGroup").hidden = getMarginMode() !== "crop";
+    byId("generatorCropExemptionValue").textContent = `${elements.cropExemption.value}%`;
+  }
+
   function updateMarginModeUI() {
+    updateMarginOpacityUi();
     elements.marginHint.textContent = getMarginMode() === "crop"
       ? "covers the canvas edge above the gif layers"
       : "keeps each gif inside the inset placement area";
@@ -1780,6 +1897,8 @@
       height: dimensions.height,
       margin: singles.generatorMarginSlider,
       marginMode: getMarginMode(),
+      marginOpacity: Number(elements.marginOpacity.value) / 100,
+      cropExemptionPercent: Number(elements.cropExemption.value),
       count,
       markCount,
       gifsPerMark: normalizeInteger(
@@ -1796,6 +1915,7 @@
       sequence: {
         enabled: Boolean(elements.sequenceEnabled.checked),
         effects: getSelectedSequenceEffects(),
+        noneFrequency: Number(elements.sequenceNoneFrequency.value),
         timings: getSelectedSequenceTimings(),
         speed: sequenceRanges.speed.maximum,
         intensity: sequenceRanges.intensity.maximum,
@@ -1814,6 +1934,8 @@
       spraySpread: fixedValues.spraySpread,
       lineAngle: fixedValues.lineAngle,
       lineLength: fixedValues.lineLength,
+      lineCurveAmount: fixedValues.lineCurveAmount,
+      lineCurveStrength: fixedValues.lineCurveStrength,
       boxWidth: fixedValues.boxWidth,
       boxHeight: fixedValues.boxHeight,
       boxStyle: elements.boxStyle.value === "filled" ? "filled" : "outline",
@@ -1839,7 +1961,11 @@
     const sample = randomized && state.currentSpecs.reduce(
       (first, spec) => !first || spec.index < first.index ? spec : first, null
     );
-    if (sample) elements.tintColor.value = hslToHex(sample.tintHue, 84, 54);
+    if (sample) {
+      const difference = Math.abs(hexToHue(elements.tintColor.value) - sample.tintHue) % 360;
+      // Keep the exact manually chosen swatch when it already represents this hue.
+      if (Math.min(difference, 360 - difference) > 0.75) elements.tintColor.value = hslToHex(sample.tintHue, 84, 54);
+    }
     elements.tintColor.title = randomized
       ? "Random color sample — each image can have a different color"
       : "Color shift color";
@@ -1911,22 +2037,61 @@
     const extentY = Math.abs(sin * length / 2);
     const centerX = clamp(anchor.x, Math.min(settings.width / 2, extentX + margin), Math.max(settings.width / 2, settings.width - extentX - margin));
     const centerY = clamp(anchor.y, Math.min(settings.height / 2, extentY + margin), Math.max(settings.height / 2, settings.height - extentY - margin));
-    const bend = randomBetween(random, -0.11, 0.11) * Math.min(length, settings.height);
+    const curveAmount = clamp(Math.round(settings.randomize.lineCurveAmount
+      ? sampleConfiguredRange(settings, "lineCurveAmount", random) : (settings.lineCurveAmount ?? 0)), 0, 12);
+    const curveStrength = clamp(settings.randomize.lineCurveStrength
+      ? sampleConfiguredRange(settings, "lineCurveStrength", random) : (settings.lineCurveStrength ?? 0), 0, 100);
+    // Each bend has its own span, peak position, direction and amplitude.
+    const widths = Array.from({ length: curveAmount }, () => randomBetween(random, 0.6, 1.4));
+    const total = widths.reduce((sum, width) => sum + width, 0);
+    let cursor = 0;
+    let direction = random() < 0.5 ? -1 : 1;
+    const bends = widths.map(width => {
+      const start = cursor;
+      cursor += width / total;
+      const bend = { start, end: cursor, peak: randomBetween(random, 0.3, 0.7),
+        amplitude: direction * length * curveStrength / 100 * randomBetween(random, 0.55, 1.25) };
+      direction *= -1;
+      return bend;
+    });
+    const path = [];
+    let curveScale = 1;
+    const steps = Math.max(64, curveAmount * 64);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const bend = bends.find(b => t <= b.end) || bends[bends.length - 1];
+      let curve = 0;
+      if (bend && i > 0 && i < steps) {
+        const u = (t - bend.start) / (bend.end - bend.start);
+        const phase = u < bend.peak ? u / bend.peak : (1 - u) / (1 - bend.peak);
+        curve = Math.sin(clamp(phase, 0, 1) * Math.PI / 2) ** 2 * bend.amplitude;
+      }
+      const x = centerX + cos * (t - 0.5) * length;
+      const y = centerY + sin * (t - 0.5) * length;
+      const dx = -sin * curve, dy = cos * curve;
+      if (dx) curveScale = Math.min(curveScale, (dx > 0 ? settings.width - x : x) / Math.abs(dx));
+      if (dy) curveScale = Math.min(curveScale, (dy > 0 ? settings.height - y : y) / Math.abs(dy));
+      path.push({ x, y, dx, dy, distance: 0 });
+    }
+    curveScale = clamp(curveScale, 0, 1);
+    for (let i = 0; i < path.length; i++) {
+      path[i].x += path[i].dx * curveScale;
+      path[i].y += path[i].dy * curveScale;
+      if (i) path[i].distance = path[i - 1].distance + Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    }
     const points = [];
-
-    for (let index = 0; index < count; index += 1) {
-      const normalized = count === 1 ? 0.5 : index / (count - 1);
-      const offset = (normalized - 0.5) * length;
-      const curve = Math.sin(normalized * Math.PI) * bend;
-      const jitter = count > 3 ? randomBetween(random, -spacing * 0.07, spacing * 0.07) : 0;
+    let segment = 1;
+    for (let index = 0; index < count; index++) {
+      const distance = (count === 1 ? 0.5 : index / (count - 1)) * path[path.length - 1].distance;
+      while (segment < path.length - 1 && path[segment].distance < distance) segment++;
+      const left = path[segment - 1], right = path[segment];
+      const mix = (distance - left.distance) / Math.max(0.000001, right.distance - left.distance);
       points.push({
-        x: clamp(centerX + cos * offset - sin * (curve + jitter), 0, settings.width),
-        y: clamp(centerY + sin * offset + cos * (curve + jitter), 0, settings.height),
-        mode: "line",
-        motifId,
-        sampledSpacing: spacing,
-        sampledLineLength: lineLimit,
+        x: left.x + (right.x - left.x) * mix,
+        y: left.y + (right.y - left.y) * mix,
+        mode: "line", motifId, sampledSpacing: spacing, sampledLineLength: lineLimit,
         sampledLineAngle: angle * 180 / Math.PI,
+        sampledLineCurveAmount: curveAmount, sampledLineCurveStrength: curveStrength,
         localScale: randomBetween(random, 0.9, 1.08)
       });
     }
@@ -2043,6 +2208,39 @@
     return points;
   }
 
+  function buildEllipsePoints(count, settings, random, anchor, motifId) {
+    const requestedWidth = settings.randomize.boxWidth ? sampleConfiguredRange(settings, "boxWidth", random) : settings.boxWidth;
+    const requestedHeight = settings.randomize.boxHeight ? sampleConfiguredRange(settings, "boxHeight", random) : settings.boxHeight;
+    const rx = clamp(requestedWidth, 1, settings.width) / 2;
+    const ry = clamp(requestedHeight, 1, settings.height) / 2;
+    const cx = clamp(anchor.x, rx, settings.width - rx);
+    const cy = clamp(anchor.y, ry, settings.height - ry);
+    const style = settings.randomize.boxStyle ? (random() < 0.58 ? "outline" : "filled") : settings.boxStyle;
+    // Arc-length lookup keeps outline stamps evenly spaced on narrow ellipses.
+    const segments = 256;
+    const lengths = [0];
+    for (let i = 1; i <= segments; i++) {
+      const a = (i - 1) / segments * Math.PI * 2, b = i / segments * Math.PI * 2;
+      lengths.push(lengths[i - 1] + Math.hypot(rx * (Math.cos(b) - Math.cos(a)), ry * (Math.sin(b) - Math.sin(a))));
+    }
+    let segment = 1;
+    return Array.from({ length: count }, (_, i) => {
+      let angle, radius;
+      if (style === "filled") {
+        angle = random() * Math.PI * 2;
+        radius = Math.sqrt(random());
+      } else {
+        const distance = i / count * lengths[segments];
+        while (segment < segments && lengths[segment] < distance) segment++;
+        angle = (segment - 1 + (distance - lengths[segment - 1]) / (lengths[segment] - lengths[segment - 1])) / segments * Math.PI * 2;
+        radius = 1;
+      }
+      return { x: cx + Math.cos(angle) * rx * radius, y: cy + Math.sin(angle) * ry * radius,
+        mode: "ellipse", motifId, localScale: 1, sampledBoxWidth: requestedWidth,
+        sampledBoxHeight: requestedHeight, sampledBoxStyle: style };
+    });
+  }
+
   function chooseBestScatterPoint(existingPoints, settings, random) {
     let best = null;
     let bestScore = -Infinity;
@@ -2085,7 +2283,7 @@
       target = getRepresentativeSetting(settings, "lineLength") / spacing + 1;
     } else if (mode === "spray") {
       target = Math.pow(getRepresentativeSetting(settings, "spraySpread") / spacing, 2) * 1.1;
-    } else if (mode === "box") {
+    } else if (mode === "box" || mode === "ellipse") {
       target = 2 * (
         getRepresentativeSetting(settings, "boxWidth") +
         getRepresentativeSetting(settings, "boxHeight")
@@ -2125,9 +2323,7 @@
 
     for (let motifId = 0; motifId < targetMarkCount; motifId += 1) {
       if (!queue.length) {
-        queue = settings.randomize.modeMix
-          ? shuffle(settings.modes, random)
-          : MODE_ORDER.filter((mode) => settings.modes.includes(mode));
+        queue = shuffle(settings.modes, random);
       }
       const mode = queue.shift();
       const marksRemaining = targetMarkCount - motifId;
@@ -2155,6 +2351,8 @@
         motifPoints = buildSprayPoints(chunkSize, geometrySettings, random, anchor, motifId);
       } else if (mode === "box") {
         motifPoints = buildBoxPoints(chunkSize, geometrySettings, random, anchor, motifId);
+      } else if (mode === "ellipse") {
+        motifPoints = buildEllipsePoints(chunkSize, geometrySettings, random, anchor, motifId);
       } else {
         motifPoints = buildScatterPoints(chunkSize, geometrySettings, random, motifId, points);
       }
@@ -2386,7 +2584,7 @@
       const palette = motifBrushes.get(point.motifId) || [];
       const motifOffset = motifOffsets.get(point.motifId) || 0;
       const brush = settings.randomize.gif
-        ? palette[motifOffset % Math.max(1, palette.length)]
+        ? (palette.find(brush => brush.source === preferredBrushes[index]?.source) || palette[motifOffset % Math.max(1, palette.length)])
         : fixedBrush;
       motifOffsets.set(point.motifId, motifOffset + 1);
       if (!brush) {
@@ -2742,25 +2940,28 @@
       });
     }
 
-    return {
-      enabled: true,
-      layerCount: motifs.length,
-      effectCounts,
-      timingCounts
-    };
+    return toggleAssignedSequenceEffects(settings, specs, seed, false);
   }
 
-  function toggleAssignedSequenceEffects(settings) {
-    if (settings.sequence.enabled && !state.currentSpecs.some(spec => spec.sequence || spec.suspendedSequence)) {
-      return buildSequenceAssignments(state.currentSpecs, settings, state.currentSeed);
+  function toggleAssignedSequenceEffects(settings, specs = state.currentSpecs, seed = state.currentSeed, allowBuild = true) {
+    if (allowBuild && settings.sequence.enabled && !specs.some(spec => spec.sequence || spec.suspendedSequence)) {
+      return buildSequenceAssignments(specs, settings, seed);
     }
     // Keep exact assignments (including phase and alternate image) while disabled.
     // Existing saved specs are never redistributed by an effect checkbox.
     const motifs = new Map();
-    for (const spec of state.currentSpecs) {
+    const noneMotifs = new Set();
+    const frequency = settings.sequence.effects.includes("none")
+      ? clamp(Number(settings.sequence.noneFrequency) || 0, 0, 99) / 100 : 0;
+    for (const spec of specs) {
       const assigned = spec.sequence || spec.suspendedSequence;
       if (!assigned) continue;
-      const active = settings.sequence.enabled && settings.sequence.effects.includes(assigned.effect);
+      // Stable per-mark ranks let frequency changes mute/restore only affected
+      // marks, retaining their original effect, phase, and alternate source.
+      spec.noneAssigned = settings.sequence.enabled && frequency > 0 &&
+        createRandom((seed ^ Math.imul(spec.motifId + 1, 0x45d9f3b) ^ 0x6e6f6e65) >>> 0)() < frequency;
+      if (spec.noneAssigned) noneMotifs.add(spec.motifId);
+      const active = settings.sequence.enabled && !spec.noneAssigned && settings.sequence.effects.includes(assigned.effect);
       spec.sequence = active ? assigned : null;
       spec.suspendedSequence = active ? null : assigned;
       if (active) motifs.set(spec.motifId, assigned);
@@ -2770,6 +2971,7 @@
       effectCounts[sequence.effect] = (effectCounts[sequence.effect] || 0) + 1;
       timingCounts[sequence.timing] = (timingCounts[sequence.timing] || 0) + 1;
     }
+    if (noneMotifs.size) effectCounts.none = noneMotifs.size;
     return { enabled: settings.sequence.enabled && motifs.size > 0, layerCount: motifs.size, effectCounts, timingCounts };
   }
 
@@ -2849,6 +3051,11 @@
 
   function updateGeneratorPixelatePreview(image, presentation) {
     const spec = getCurrentSpecForImage(image);
+    if (spec?.hidden) {
+      const proxy = generatorPixelateProxyMap.get(image);
+      if (proxy) proxy.hidden = true;
+      return false;
+    }
     const sequence = spec?.sequence;
     if (
       sequence?.effect !== "pixelate" ||
@@ -3083,6 +3290,7 @@
   function createStampElement(spec, index) {
     const image = document.createElement("img");
     image.className = "generator-stamp";
+    image.classList.toggle("is-generator-hidden", Boolean(spec.hidden));
     image.alt = "";
     image.setAttribute("aria-hidden", "true");
     image.draggable = false;
@@ -3262,6 +3470,8 @@
       filter: spec.filter,
       longestSide: spec.longestSide,
       markTransform: spec.markTransform ? { ...spec.markTransform } : null,
+      noneAssigned: Boolean(spec.noneAssigned),
+      hidden: Boolean(spec.hidden),
       uncropped: Boolean(spec.uncropped),
       sequence: spec.sequence ? { ...spec.sequence } : null,
       suspendedSequence: spec.suspendedSequence ? { ...spec.suspendedSequence } : null
@@ -3325,6 +3535,8 @@
               centerY: Number(raw.markTransform.centerY) || 0
             }
           : { a: 1, b: 0, c: 0, d: 1, pitch: 0, yaw: 0, horizontalStretch: 100, verticalStretch: 100 },
+        noneAssigned: Boolean(raw.noneAssigned),
+        hidden: Boolean(raw.hidden),
         uncropped: Boolean(raw.uncropped),
         sequence: raw.sequence && typeof raw.sequence === "object" ? { ...raw.sequence } : null,
         suspendedSequence: raw.suspendedSequence && typeof raw.suspendedSequence === "object" ? { ...raw.suspendedSequence } : null
@@ -3352,6 +3564,8 @@
       aspectLocked: state.aspectLocked,
       lockedAspectRatio: state.lockedAspectRatio,
       marginMode: getMarginMode(),
+      marginOpacity: Number(elements.marginOpacity.value) / 100,
+      cropExemptionPercent: Number(elements.cropExemption.value),
       modes: getSelectedModes(),
       ranges: Object.fromEntries(
         ALL_RANGE_INPUTS.map((input) => [input.id, input.value])
@@ -3370,6 +3584,7 @@
       backgroundColor: elements.backgroundColor.value,
       sequenceEnabled: elements.sequenceEnabled.checked,
       sequenceEffects: getSelectedSequenceEffects(),
+      sequenceNoneFrequency: Number(elements.sequenceNoneFrequency.value),
       sequenceTimings: getSelectedSequenceTimings(),
       sequencePaused: state.sequencePaused,
       smoothRenderPreview: elements.smoothRenderPreview.checked
@@ -3472,16 +3687,23 @@
     for (const input of ALL_RANGE_INPUTS) {
       if (controls.ranges && Object.prototype.hasOwnProperty.call(controls.ranges, input.id)) {
         input.value = String(controls.ranges[input.id]);
+      } else if (input.id.startsWith("generatorLineCurve")) {
+        input.value = input.defaultValue;
       } else if (input === elements.markCount) {
         input.value = String(DEFAULT_MARK_COUNT);
       } else if (input === elements.gifsPerMark) {
         input.value = String(DEFAULT_GIFS_PER_MARK);
       }
     }
+    elements.marginOpacity.value = String((controls.marginOpacity ?? 1) * 100);
+    elements.cropExemption.value = String(controls.cropExemptionPercent ?? 0);
+    updateMarginOpacityUi();
     restoreLegacyRangeEndpoints(controls);
     for (const [key, toggle] of Object.entries(RANDOM_TOGGLES)) {
       if (toggle && controls.randomize && Object.prototype.hasOwnProperty.call(controls.randomize, key)) {
         toggle.checked = Boolean(controls.randomize[key]);
+      } else if (key === "lineCurveAmount" || key === "lineCurveStrength") {
+        toggle.checked = false;
       }
     }
     for (const [key, toggle] of Object.entries(GENERATION_RANDOM_TOGGLES)) {
@@ -3500,6 +3722,7 @@
     elements.boxStyle.value = controls.boxStyle === "filled" ? "filled" : "outline";
     elements.backgroundColor.value = String(controls.backgroundColor || "#ffffff");
     elements.sequenceEnabled.checked = controls.sequenceEnabled !== false;
+    elements.sequenceNoneFrequency.value = String(controls.sequenceNoneFrequency ?? 25);
     restoreCheckedValues(".generator-sequence-effect-checkbox", controls.sequenceEffects);
     restoreCheckedValues(".generator-sequence-timing-checkbox", controls.sequenceTimings);
     normalizeDimensionInputs();
@@ -3519,6 +3742,8 @@
       height: settings.height,
       margin: settings.margin,
       marginMode: settings.marginMode,
+      marginOpacity: settings.marginOpacity ?? 1,
+      cropExemptionPercent: settings.cropExemptionPercent ?? 0,
       count: settings.count,
       markCount: settings.markCount,
       gifsPerMark: settings.gifsPerMark,
@@ -3531,6 +3756,7 @@
       ),
       sequence: {
         enabled: Boolean(settings.sequence?.enabled),
+        noneFrequency: settings.sequence?.noneFrequency ?? 25,
         effects: Array.isArray(settings.sequence?.effects) ? settings.sequence.effects.slice() : [],
         timings: Array.isArray(settings.sequence?.timings) ? settings.sequence.timings.slice() : [],
         ranges: Object.fromEntries(
@@ -3581,19 +3807,19 @@
 
   function updateHistoryUi() {
     const count = state.history.length;
-    elements.undo.hidden = count === 0;
-    elements.undo.disabled = count === 0 || state.generating || Boolean(state.exportTask) || Boolean(state.batchExport);
-    const label = count
-      ? `Undo last generator action. ${count} ${count === 1 ? "action" : "actions"} available.`
-      : "No generator actions to undo";
+    const redoCount = state.redoHistory.length;
+    elements.undo.hidden = count === 0 && redoCount === 0;
+    elements.undo.disabled = (!count && !redoCount) || state.applyingHistory || state.generating || Boolean(state.exportTask) || Boolean(state.batchExport);
+    const label = `Undo (${count}). Right-click or Control-click to redo (${redoCount}).`;
     elements.undo.setAttribute("aria-label", label);
-    elements.undo.title = count ? `Undo (${count})` : "Nothing to undo";
+    elements.undo.title = label;
   }
 
   function pushHistorySnapshot(snapshot) {
     if (!snapshot?.composition?.specs?.length) {
       return;
     }
+    state.redoHistory.length = 0;
     state.history.push(snapshot);
     if (state.history.length > MAX_HISTORY_ACTIONS) {
       state.history.splice(0, state.history.length - MAX_HISTORY_ACTIONS);
@@ -3633,38 +3859,41 @@
     return true;
   }
 
-  async function undoLastGeneratorAction() {
-    if (state.batchExport || state.generating || state.exportTask) {
-      return false;
-    }
-    const pending = takePendingDynamicUpdate();
-    const snapshot = pending.snapshot || state.history.pop();
-    if (!snapshot) {
-      updateHistoryUi();
-      return false;
-    }
+  async function navigateGeneratorHistory(redo = false) {
+    if (state.batchExport || state.generating || state.exportTask || state.applyingHistory) return false;
     state.applyingHistory = true;
+    updateHistoryUi();
+    let snapshot;
+    const source = redo ? state.redoHistory : state.history;
+    const destination = redo ? state.history : state.redoHistory;
     try {
+      // Materialize a queued edit before saving its redo state. New edits also
+      // invalidate the old redo branch through pushHistorySnapshot.
+      if (state.dynamicUpdateBase) await applyPendingDynamicUpdate();
+      snapshot = source.pop();
+      if (!snapshot) return false;
+      const current = captureGeneratorSnapshot();
       const savedBookmarkId = state.bookmarks.some(
-        (bookmark) => bookmark.id === snapshot.currentBookmarkId
+        bookmark => bookmark.id === snapshot.currentBookmarkId
       ) ? snapshot.currentBookmarkId : "";
       await restoreCompositionRecord(snapshot, { currentBookmarkId: savedBookmarkId });
-      state.applyingHistory = false;
-      updateHistoryUi();
-      await flushActiveSessionSave();
-      setActionStatus("generator action undone");
+      destination.push(current);
+      if (destination.length > MAX_HISTORY_ACTIONS) destination.shift();
+      setActionStatus(redo ? "generator action redone" : "generator action undone");
       return true;
     } catch (error) {
-      if (!pending.snapshot) {
-        state.history.push(snapshot);
-      }
-      updateHistoryUi();
-      setActionStatus("could not undo that generator action", true);
+      if (snapshot) source.push(snapshot);
+      setActionStatus(`could not ${redo ? "redo" : "undo"} that generator action`, true);
       return false;
     } finally {
       state.applyingHistory = false;
+      updateHistoryUi();
+      await flushActiveSessionSave();
     }
   }
+
+  function undoLastGeneratorAction() { return navigateGeneratorHistory(false); }
+  function redoLastGeneratorAction() { return navigateGeneratorHistory(true); }
 
   function takePendingDynamicUpdate() {
     if (state.dynamicUpdateTimer !== null) {
@@ -3710,7 +3939,7 @@
   async function applySequenceOnlyUpdate(settings, pending) {
     setCropInspectionActive(false);
     const previous = new Map(state.currentSpecs.map(spec => [spec.index, JSON.stringify(spec.sequence)]));
-    const effectToggleOnly = pending.sequenceChanges.every(change => change === "effects" || change === "enabled");
+    const effectToggleOnly = pending.sequenceChanges.every(change => change === "effects" || change === "enabled" || change === "noneFrequency");
     if (!effectToggleOnly) {
       // Speed/timing edits must not reassign marks whose effect is switched off.
       buildSequenceAssignments(
@@ -3758,6 +3987,132 @@
     return true;
   }
 
+  function getScopedPropertyChanges(previous, current) {
+    const changes = new Set();
+    for (const key of new Set([...Object.keys(previous || {}), ...Object.keys(current)])) {
+      if (JSON.stringify(previous?.[key]) === JSON.stringify(current[key])) continue;
+      if (key === "ranges") {
+        for (const id of Object.keys(current.ranges)) {
+          if (previous?.ranges?.[id] === current.ranges[id]) continue;
+          const control = RANDOM_RANGE_CONTROLS.find(c => [c.fixed.id, c.minimum.id, c.maximum.id].includes(id));
+          if (!control) return null;
+          changes.add(control.key);
+        }
+      } else if (key === "randomize") {
+        for (const property of Object.keys(current.randomize)) {
+          if (previous?.randomize?.[property] === current.randomize[property]) continue;
+          if (!RANDOM_RANGE_CONTROLS.some(c => c.key === property) && !["tintColor", "boxStyle"].includes(property)) return null;
+          changes.add(property);
+        }
+      } else if (["tintColor", "boxStyle"].includes(key)) changes.add(key);
+      else return null;
+    }
+    return changes.size ? changes : null;
+  }
+
+  async function applyScopedPropertyUpdate(settings, pending, changes) {
+    setCropInspectionActive(false);
+    const manualTintColor = changes.has("tintColor") && pending.snapshot?.controls?.tintColor !== settings.tintColor;
+    const sample = (key, id) => settings.randomize[key]
+      ? sampleConfiguredRange(settings, key, deriveGenerationControlRandom(state.currentSeed, `edit-${key}-${id}`), { logarithmic: key === "size" })
+      : key === "tint" ? settings.tintAmount : settings[key];
+    const transformKeys = ["pitch", "yaw", "horizontalStretch", "verticalStretch"];
+    const motifs = new Map();
+    for (const spec of state.currentSpecs) {
+      if (!motifs.has(spec.motifId)) motifs.set(spec.motifId, []);
+      motifs.get(spec.motifId).push(spec);
+      if (changes.has("opacity")) spec.opacity = clamp(sample("opacity", spec.index) / 100, 0, 1);
+      if (changes.has("rotation")) spec.rotation = sample("rotation", spec.index);
+      if (changes.has("size")) {
+        const size = Math.max(.1, sample("size", spec.index));
+        const ratio = spec.brush.width / Math.max(1, spec.brush.height);
+        spec.width = ratio >= 1 ? size : size * ratio;
+        spec.height = ratio >= 1 ? size / ratio : size;
+        spec.longestSide = size;
+      }
+      if (changes.has("tint")) spec.tintAmount = clamp(sample("tint", spec.index) / 100, 0, 1);
+      if (changes.has("tintColor")) spec.tintHue = settings.randomize.tintColor && !manualTintColor
+        ? deriveGenerationControlRandom(state.currentSeed, `edit-tint-color-${spec.index}`)() * 360 : hexToHue(settings.tintColor);
+      if (changes.has("tint") || changes.has("tintColor")) {
+        const oldFilter = spec.filter;
+        spec.filter = spec.tintAmount <= .005 ? "" : `sepia(${(spec.tintAmount * .72).toFixed(3)}) saturate(${(1 + spec.tintAmount * 3.6).toFixed(3)}) hue-rotate(${(spec.tintHue - 45).toFixed(1)}deg)`;
+        for (const sequence of [spec.sequence, spec.suspendedSequence]) {
+          if (!sequence) continue;
+          const active = sequence.filterActive === "none" ? "" : sequence.filterActive || "";
+          const suffix = oldFilter && active.startsWith(oldFilter) ? active.slice(oldFilter.length).trim() : active;
+          sequence.filterRest = spec.filter || "none";
+          sequence.filterActive = combineSequenceFilter(spec.filter, suffix) || "none";
+        }
+      }
+    }
+    for (const [motifId, specs] of motifs) {
+      specs.sort((a, b) => a.index - b.index);
+      const mode = specs[0].mode;
+      const geometryKeys = mode === "line" ? ["spacing", "lineAngle", "lineLength", "lineCurveAmount", "lineCurveStrength"]
+        : mode === "spray" ? ["spraySpread"] : ["box", "ellipse"].includes(mode) ? ["boxWidth", "boxHeight", "boxStyle"] : [];
+      const geometryChanged = geometryKeys.some(key => changes.has(key));
+      const transformChanged = transformKeys.some(key => changes.has(key));
+      if (!geometryChanged && !transformChanged) continue;
+      const old = specs[0].markTransform || { a: 1, b: 0, c: 0, d: 1 };
+      const center = { x: old.centerX ?? specs.reduce((sum,s)=>sum+s.x,0)/specs.length, y: old.centerY ?? specs.reduce((sum,s)=>sum+s.y,0)/specs.length };
+      if (geometryChanged) {
+        const fixed = { ...settings, randomize: { ...settings.randomize } };
+        const sampled = { spacing: "sampledSpacing", lineAngle: "sampledLineAngle", lineLength: "sampledLineLength", lineCurveAmount: "sampledLineCurveAmount", lineCurveStrength: "sampledLineCurveStrength", spraySpread: "sampledSpraySpread", boxWidth: "sampledBoxWidth", boxHeight: "sampledBoxHeight", boxStyle: "sampledBoxStyle" };
+        for (const [key, field] of Object.entries(sampled)) if (!changes.has(key) && specs[0][field] !== undefined) { fixed[key] = specs[0][field]; fixed.randomize[key] = false; }
+        const build = { line: buildLinePoints, spray: buildSprayPoints, box: buildBoxPoints, ellipse: buildEllipsePoints }[mode];
+        const points = build(specs.length, fixed, deriveGenerationControlRandom(state.currentSeed, `edit-geometry-${motifId}`), center, motifId);
+        specs.forEach((spec,i) => { spec.x = points[i].x; spec.y = points[i].y; for (const field of [...SAMPLED_GEOMETRY_KEYS,"sampledBoxStyle"]) if (points[i][field] !== undefined) spec[field] = points[i][field]; });
+      } else {
+        // Recover untransformed coordinates before applying just the changed axes.
+        const determinant = old.a * old.d - old.b * old.c;
+        for (const spec of specs) {
+          const x = spec.x - center.x, y = spec.y - center.y;
+          spec.x = center.x + (Math.abs(determinant) > .000001 ? (old.d*x-old.c*y)/determinant : x);
+          spec.y = center.y + (Math.abs(determinant) > .000001 ? (-old.b*x+old.a*y)/determinant : y);
+        }
+      }
+      const transformed = { ...settings, randomize: { ...settings.randomize } };
+      for (const key of transformKeys) { transformed[key] = changes.has(key) ? sample(key, motifId) : old[key] ?? (key.includes("Stretch") ? 100 : 0); transformed.randomize[key] = false; }
+      applyMarkTransforms(specs, transformed, deriveGenerationControlRandom(state.currentSeed, `edit-transform-${motifId}`));
+    }
+    for (const image of elements.composition.querySelectorAll("img.generator-stamp")) {
+      const spec = getCurrentSpecForImage(image);
+      if (!spec) continue;
+      image.style.left = `${spec.x-spec.width/2}px`; image.style.top = `${spec.y-spec.height/2}px`;
+      image.style.width = `${spec.width}px`; image.style.height = `${spec.height}px`;
+      image.style.opacity = String(spec.opacity); image.style.filter = spec.filter;
+      const matrix = formatCssMatrix(composeStampTransform(spec.markTransform, spec.rotation));
+      image.style.transform = matrix;
+      image.style.setProperty("--generator-base-transform", matrix);
+      image.style.setProperty("--generator-base-opacity", String(spec.opacity));
+      image.style.setProperty("--generator-base-rotation", `${spec.rotation}deg`);
+      if (spec.sequence) {
+        image.style.setProperty("--generator-sequence-filter-rest", spec.sequence.filterRest);
+        image.style.setProperty("--generator-sequence-filter-active", spec.sequence.filterActive);
+      }
+      image.dataset.generatorX = String(spec.x); image.dataset.generatorY = String(spec.y);
+      image.dataset.generatorSize = String(spec.longestSide); image.dataset.generatorRotation = String(spec.rotation);
+      image.dataset.generatorOpacity = String(spec.opacity); image.dataset.generatorTintAmount = String(spec.tintAmount);
+      for (const key of SAMPLED_GEOMETRY_KEYS) if (Number.isFinite(spec[key])) image.dataset[key] = String(spec[key]);
+      if (spec.sampledBoxStyle) image.dataset.sampledBoxStyle = spec.sampledBoxStyle;
+      image.dataset.generatorMarkPitch = String(spec.markTransform?.pitch || 0);
+      image.dataset.generatorMarkYaw = String(spec.markTransform?.yaw || 0);
+      image.dataset.generatorMarkHorizontalStretch = String(spec.markTransform?.horizontalStretch ?? 100);
+      image.dataset.generatorMarkVerticalStretch = String(spec.markTransform?.verticalStretch ?? 100);
+    }
+    syncTintColorPicker();
+    state.currentSignature = buildSignature(state.currentSpecs);
+    state.currentSettingsUsed = createStoredSettings(settings);
+    state.currentControlState = captureControlState();
+    state.currentBookmarkId = "";
+    pushHistorySnapshot(pending.snapshot);
+    scheduleGeneratorPixelatePreview(); scheduleStablePreview();
+    renderBookmarkGallery(); syncCurrentBookmarkUI();
+    await flushActiveSessionSave();
+    setStatus("composition updated");
+    return true;
+  }
+
   async function applyPendingDynamicUpdate() {
     if (!state.dynamicUpdateBase) {
       return false;
@@ -3777,7 +4132,9 @@
         settings.sequence.timings
       ).length > 0);
     const pending = takePendingDynamicUpdate();
-    if (pending.sequenceOnly && pending.sequenceChanges.every(change => change === "effects" || change === "enabled")) return applySequenceOnlyUpdate(settings, pending);
+    const propertyChanges = getScopedPropertyChanges(pending.snapshot?.controls, captureControlState());
+    if (!pending.sequenceOnly && propertyChanges) return applyScopedPropertyUpdate(settings, pending, propertyChanges);
+    if (pending.sequenceOnly && pending.sequenceChanges.every(change => change === "effects" || change === "enabled" || change === "noneFrequency")) return applySequenceOnlyUpdate(settings, pending);
     if (!hasValidSettings) {
       if (!settings.pool.length) {
         setStatus(settings.sourceMode === "upload" ? "choose images or a folder" : `select at least one ${settings.sourceMode === "tag" ? "tag" : "category"}`, true);
@@ -3809,6 +4166,7 @@
       seed: state.currentSeed,
       preferredSources,
       uncroppedIndices,
+      hiddenIndices: state.currentSpecs.filter(spec => spec.hidden).map(spec => spec.index),
       preserveBackground: !pending.affectsBackground,
       historySnapshot: pending.snapshot,
       dynamic: true
@@ -3827,7 +4185,8 @@
       composition: captureCurrentComposition(),
       // IDBObjectStore.put synchronously structured-clones this record. Avoid
       // cloning the entire 30-action history a second time on the UI thread.
-      history: state.history.slice(-MAX_HISTORY_ACTIONS)
+      history: state.history.slice(-MAX_HISTORY_ACTIONS),
+      redoHistory: state.redoHistory.slice(-MAX_HISTORY_ACTIONS)
     };
   }
 
@@ -4276,6 +4635,7 @@
     state.currentWidth = Number(settings.width);
     state.currentHeight = Number(settings.height);
     state.currentMargin = Number(settings.margin) || 0;
+    state.currentMarginOpacity = settings.marginOpacity ?? 1;
     state.currentMarginMode = settings.marginMode === "crop" ? "crop" : "placement";
     state.currentCount = specs.length;
     state.currentSeed = Number(record.composition.seed) >>> 0;
@@ -4391,6 +4751,14 @@
           snapshot.composition.specs.length <= 500
         )
         .slice(-MAX_HISTORY_ACTIONS);
+      state.redoHistory = (Array.isArray(record.redoHistory) ? record.redoHistory : [])
+        .filter((snapshot) =>
+          snapshot?.schemaVersion === BOOKMARK_SCHEMA_VERSION &&
+          Array.isArray(snapshot?.composition?.specs) &&
+          snapshot.composition.specs.length > 0 &&
+          snapshot.composition.specs.length <= 500
+        )
+        .slice(-MAX_HISTORY_ACTIONS);
       updateHistoryUi();
       return true;
     } catch (error) {
@@ -4439,6 +4807,7 @@
     if (!(width > 0 && height > 0)) {
       return false;
     }
+    if (getCurrentSpecForImage(image)?.hidden) return false;
     const computed = getComputedStyle(image);
     const transform = computed.transform && computed.transform !== "none"
       ? new DOMMatrix(computed.transform)
@@ -4470,6 +4839,7 @@
     const marginY = Math.min(outputHeight / 2, state.currentMargin * scaleY);
     context.save();
     context.fillStyle = state.currentBackground;
+    context.globalAlpha = state.currentMarginOpacity;
     context.fillRect(0, 0, outputWidth, marginY);
     context.fillRect(0, outputHeight - marginY, outputWidth, marginY);
     context.fillRect(0, marginY, marginX, outputHeight - marginY * 2);
@@ -5128,13 +5498,7 @@
     let source = spec.brush.source;
     let pixelateAmount = 0;
     let blurAmount = 0;
-    const tintLayers = [];
-    if (spec.tintAmount > 0.005) {
-      tintLayers.push({
-        color: hslToHex(spec.tintHue, 84, 54),
-        amountPercent: clamp(spec.tintAmount * 58, 0, 72)
-      });
-    }
+    let colorFilter = spec.filter || "none";
 
     if (sequence) {
       const duration = Math.max(100, Number(sequence.duration) || 2000);
@@ -5156,10 +5520,8 @@
         width *= scale;
         height *= scale;
       } else if (sequence.effect === "color-cycle") {
-        tintLayers.push({
-          color: hslToHex(sequence.colorHue, 88, 55),
-          amountPercent: clamp((Number(sequence.colorAmount) || 54) * level, 0, 72)
-        });
+        colorFilter = combineSequenceFilter(colorFilter === "none" ? "" : colorFilter,
+          `hue-rotate(${Number(sequence.hueAmount || 0) * level}deg) saturate(${1 + (Number(sequence.activeSaturation ?? 1) - 1) * level})`);
       } else if (sequence.effect === "image-cycle" && sequence.alternateSource) {
         const initialIteration = Math.floor((-(Number(sequence.delay) || 0)) / duration);
         const currentIteration = Math.floor(position);
@@ -5172,6 +5534,8 @@
       } else if (sequence.effect === "pixelate") {
         const pixelate = getGeneratorPixelateState(sequence, progress);
         pixelateAmount = pixelate.blockSize;
+        colorFilter = combineSequenceFilter(colorFilter === "none" ? "" : colorFilter,
+          `contrast(${1 + (Number(sequence.contrastAmount ?? 1) - 1) * level}) saturate(${1 + (Number(sequence.pixelSaturation ?? 1) - 1) * level})`);
         width *= pixelate.scale;
         height *= pixelate.scale;
       } else if (sequence.effect === "blur") {
@@ -5191,7 +5555,7 @@
       opacity: clamp(opacity, 0, 1),
       blendMode: "normal",
       imageRendering: sequence?.effect === "pixelate" ? "pixelated" : "auto",
-      tintLayers,
+      colorFilter,
       pixelateAmount,
       blurAmount,
       phaseOffsetMs: spec.index * 137 + spec.motifId * 59,
@@ -5420,7 +5784,7 @@
         generatorComposite: {
           background,
           crop: state.currentMarginMode === "crop" ? {
-            margin: state.currentMargin, width: state.currentWidth, height: state.currentHeight
+            margin: state.currentMargin, opacity: state.currentMarginOpacity, width: state.currentWidth, height: state.currentHeight
           } : null,
           overlayEntries
         }
@@ -5548,12 +5912,13 @@
     );
   }
 
-  async function getGeneratorMp4EncoderConfig(width, height) {
+  async function getGeneratorMp4EncoderConfig(width, height, software = false) {
     if (typeof VideoEncoder !== "function" || typeof VideoFrame !== "function") {
       throw new Error("MP4 export needs a browser with WebCodecs support");
     }
     const config = {
       codec: EXPORT_MP4_CODEC,
+      hardwareAcceleration: software ? "prefer-software" : "no-preference",
       width,
       height,
       bitrate: getGeneratorMp4Bitrate(width, height),
@@ -5569,12 +5934,13 @@
       support = null;
     }
     if (!support?.supported) {
+      if (software) return getGeneratorMp4EncoderConfig(width, height, false);
       throw new Error("This browser cannot encode H.264 MP4 at the current canvas size");
     }
     return { ...config, ...support.config, avc: { format: "avc" } };
   }
 
-  async function getGeneratorQualityMp4EncoderConfig(width, height) {
+  async function getGeneratorQualityMp4EncoderConfig(width, height, software = false) {
     if (typeof VideoEncoder !== "function" || typeof VideoFrame !== "function") {
       throw new Error("Quality MP4 needs a browser with WebCodecs support. Choose WebP for lossless output.");
     }
@@ -5589,7 +5955,7 @@
           Math.min(requestedBitrate, 240_000_000)
         ])];
         for (const bitrate of bitrates) {
-          for (const hardwareAcceleration of ["prefer-software", "no-preference"]) {
+          for (const hardwareAcceleration of (software ? ["prefer-software"] : ["prefer-software", "no-preference"])) {
             const config = { ...common, codec, hardwareAcceleration, bitrateMode,
               ...(bitrateMode === "variable" ? { bitrate } : {}) };
             try {
@@ -5602,18 +5968,35 @@
         }
       }
     }
+    if (software) return getGeneratorQualityMp4EncoderConfig(width, height, false);
     throw new Error("Quality MP4 encoding is unavailable at this canvas size. Try quality WebP.");
   }
 
   async function renderGeneratorMp4(task, specs, background) {
+    // A codec can pass capability probing and still fail asynchronously at runtime.
+    // Restart with a fresh muxer and software preference; never keep encoding into
+    // a closed codec or return a partially packaged file.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await renderGeneratorMp4Attempt(task, specs, background, attempt > 0);
+      } catch (error) {
+        throwIfExportCancelled(task);
+        if (!error.generatorEncoderFailure || attempt > 0) throw error;
+        updateGeneratorExportProgress(task, 0, "Restarting MP4 encoder");
+        await new Promise(resolve => window.setTimeout(resolve, 0));
+      }
+    }
+  }
+
+  async function renderGeneratorMp4Attempt(task, specs, background, software = false) {
     const { Muxer, ArrayBufferTarget, StreamTarget } = await loadGeneratorMp4Muxer();
     throwIfExportCancelled(task);
     const dimensions = getGeneratorExportDimensions();
     const encodedWidth = dimensions.width + (dimensions.width % 2);
     const encodedHeight = dimensions.height + (dimensions.height % 2);
     const encoderConfig = task.quality
-      ? await getGeneratorQualityMp4EncoderConfig(encodedWidth, encodedHeight)
-      : await getGeneratorMp4EncoderConfig(encodedWidth, encodedHeight);
+      ? await getGeneratorQualityMp4EncoderConfig(encodedWidth, encodedHeight, software)
+      : await getGeneratorMp4EncoderConfig(encodedWidth, encodedHeight, software);
     const frameRate = encoderConfig.framerate;
     const metadataPlan = createGeneratorLoopPlan(specs, null, task.durationMs);
     const session = createGeneratorRasterSession(task, (message) => {
@@ -5690,12 +6073,13 @@
           wakeQueueWaiter();
         }
       });
-      encoder.configure(encoderConfig);
+      // Configure only after the first raster frame is ready. Decoding/filtering
+      // a large composition must not leave a configured codec idle.
       encoder.addEventListener("dequeue", wakeQueueWaiter);
       task.videoEncoder = encoder;
 
       const frameCanvas = new OffscreenCanvas(encodedWidth, encodedHeight);
-      const frameContext = frameCanvas.getContext("2d", { alpha: false });
+      const frameContext = frameCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
       if (!frameContext) {
         throw new Error("This browser cannot prepare MP4 video frames");
       }
@@ -5705,6 +6089,7 @@
       for (let index = 0; index < frameCount; index += 1) {
         throwIfExportCancelled(task);
         if (encoderError) {
+          encoderError.generatorEncoderFailure = true;
           throw encoderError;
         }
         const timeMs = index * 1000 / frameRate;
@@ -5718,24 +6103,47 @@
           background,
           "rgba"
         );
-        frameContext.fillStyle = background;
-        frameContext.fillRect(0, 0, encodedWidth, encodedHeight);
-        frameContext.putImageData(
-          new ImageData(pixels, dimensions.width, dimensions.height),
-          0,
-          0
-        );
+        throwIfExportCancelled(task);
+        if (encoderError) {
+          encoderError.generatorEncoderFailure = true;
+          throw encoderError;
+        }
+        if (encoder.state === "closed") {
+          const error = new Error("The browser closed the MP4 encoder while rendering a frame.");
+          error.generatorEncoderFailure = true;
+          throw error;
+        }
+        if (encoder.state === "unconfigured") {
+          try { encoder.configure(encoderConfig); }
+          catch (error) { error.generatorEncoderFailure = true; throw error; }
+        }
+        if (encodedWidth !== dimensions.width || encodedHeight !== dimensions.height) {
+          frameContext.fillStyle = background;
+          frameContext.fillRect(0, 0, encodedWidth, encodedHeight);
+          frameContext.putImageData(
+            new ImageData(pixels, dimensions.width, dimensions.height),
+            0,
+            0
+          );
+        }
         const timestamp = Math.round(index * 1_000_000 / frameRate);
         const nextTimestamp = Math.round((index + 1) * 1_000_000 / frameRate);
-        const frame = new VideoFrame(frameCanvas, {
-          timestamp,
-          duration: nextTimestamp - timestamp
+        const framePixels = encodedWidth === dimensions.width && encodedHeight === dimensions.height
+          ? pixels : frameContext.getImageData(0, 0, encodedWidth, encodedHeight).data;
+        const frame = new VideoFrame(framePixels, {
+          format: "RGBA", codedWidth: encodedWidth, codedHeight: encodedHeight,
+          timestamp, duration: nextTimestamp - timestamp,
+          colorSpace: { primaries: "bt709", transfer: "iec61966-2-1", matrix: "rgb", fullRange: true }
         });
         try {
           encoder.encode(frame, {
             keyFrame: index % (frameRate * (task.quality ? 1 : 2)) === 0,
             ...(encoderConfig.bitrateMode === "quantizer" ? { avc: { quantizer: 0 } } : {})
           });
+        } catch (error) {
+          const failure = encoderError || error;
+          failure.generatorEncoderFailure = true;
+          throw failure;
         } finally {
           frame.close();
         }
@@ -5762,9 +6170,14 @@
       if (task.rasterSession === session) {
         task.rasterSession = null;
       }
-      await encoder.flush();
-      if (encoderError) {
-        throw encoderError;
+      try {
+        if (encoderError) throw encoderError;
+        await encoder.flush();
+        if (encoderError) throw encoderError;
+      } catch (error) {
+        const failure = encoderError || error;
+        failure.generatorEncoderFailure = true;
+        throw failure;
       }
       muxer.finalize();
       const blob = qualityTarget ? qualityTarget.finish() : new Blob([target.buffer], { type: "video/mp4" });
@@ -6420,7 +6833,7 @@
     state.exportTask = task;
     state.lastExport = null;
     setGeneratorExportUi(true, task);
-    const specs = state.currentSpecs.map((spec) => ({
+    const specs = state.currentSpecs.filter(spec => !spec.hidden).map((spec) => ({
       ...spec,
       brush: spec.brush,
       sequence: spec.sequence ? { ...spec.sequence } : null,
@@ -6525,6 +6938,7 @@
     );
     const displayWidth = Math.max(1, Math.floor(state.currentWidth * scale));
     const displayHeight = Math.max(1, Math.floor(state.currentHeight * scale));
+    elements.canvasFrame.style.width = `${displayWidth}px`;
     elements.canvas.style.width = `${displayWidth}px`;
     elements.canvas.style.height = `${displayHeight}px`;
     elements.composition.style.width = `${state.currentWidth}px`;
@@ -6569,6 +6983,7 @@
   function applyMarginPresentation(settings) {
     const cropEnabled = settings.marginMode === "crop" && settings.margin > 0;
     elements.marginOverlay.hidden = !cropEnabled;
+    elements.marginOverlay.style.setProperty("--generator-margin-opacity", String(settings.marginOpacity ?? state.currentMarginOpacity));
     elements.marginOverlay.style.borderWidth = cropEnabled ? `${settings.margin}px` : "0px";
     elements.canvas.classList.toggle("has-crop-margin", cropEnabled);
     elements.canvas.dataset.generatorMargin = String(settings.margin);
@@ -6602,11 +7017,12 @@
       ? `${sequenceSummary.layerCount} generated layers have randomized sequence effects.`
       : "No added sequence effects.";
     elements.dimensionBadge.textContent = `${formatInteger(settings.width)} × ${formatInteger(settings.height)}`;
-    elements.canvasMeta.textContent = `seed ${formatSeed(seed)} · ${formatInteger(settings.count)} gifs · ${formatInteger(markCount)} marks · ${sourceLabel}${marginSummary}${sequenceText}`;
+    elements.canvasSeed.textContent = `seed ${formatSeed(seed)}`;
+    elements.canvasMeta.textContent = `${formatInteger(settings.count)} gifs · ${formatInteger(markCount)} marks · ${sourceLabel}${marginSummary}${sequenceText}`;
     elements.canvas.dataset.baseAriaLabel = `Random composition with ${settings.count} GIFs across ${markCount} marks on a ${settings.width} by ${settings.height} pixel canvas. ${accessibleMargin} ${accessibleSequence} ${modeSummary}.`;
     updateCanvasInfoPresentation();
     setStatus(
-      `${formatInteger(settings.count)} placements · ${formatInteger(markCount)} marks · ${formatInteger(uniqueSourceCount)} distinct gifs · ${modeSummary}${marginSummary}${sequenceText}`
+      `${formatInteger(settings.count)} placements · ${formatInteger(markCount)} marks · ${formatInteger(uniqueSourceCount)} distinct samples · ${modeSummary}${marginSummary}${sequenceText}`
     );
   }
 
@@ -6620,7 +7036,7 @@
     }
     const baseSettings = readSettings();
     if (!baseSettings.pool.length) {
-      setStatus("no gifs are available in this source", true);
+      setStatus("no samples are available in this source", true);
       return false;
     }
     if (!baseSettings.modes.length) {
@@ -6653,7 +7069,7 @@
     const requestedSeed = parseSeed(options.seed);
     const seed = requestedSeed ?? randomSeed();
     if (!options.dynamic) {
-      randomizeGenerationControls(seed);
+      randomizeGenerationControls(seed, { preserveMarginDefaults: Boolean(options.initialDefaults) });
     }
     const settings = options.dynamic ? baseSettings : readSettings();
     settings.visualSeed = seed;
@@ -6684,13 +7100,73 @@
         random,
         Array.isArray(options.preferredSources) ? options.preferredSources : []
       );
-      if (Array.isArray(options.uncroppedIndices) && options.uncroppedIndices.length) {
+      if (Array.isArray(options.hiddenIndices)) {
+        const hidden = new Set(options.hiddenIndices);
+        specs.forEach(spec => spec.hidden = hidden.has(spec.index));
+      }
+      if (Array.isArray(options.uncroppedIndices)) {
         const uncroppedIndices = new Set(options.uncroppedIndices.map(Number));
         for (const spec of specs) {
           spec.uncropped = uncroppedIndices.has(Number(spec.index));
         }
       }
-      const sequenceSummary = buildSequenceAssignments(specs, settings, seed);
+      if (!Array.isArray(options.uncroppedIndices)) assignRandomCropExemptions(specs, settings, seed);
+      let sequenceSummary = buildSequenceAssignments(specs, settings, seed);
+      if (options.dynamic && historySnapshot?.controls) {
+        const before = historySnapshot.controls;
+        const after = captureControlState();
+        const unchanged = key => {
+          const control = RANDOM_RANGE_CONTROLS.find(c => c.key === key);
+          return before.randomize?.[key] === after.randomize?.[key] && (!control ||
+            [control.fixed, control.minimum, control.maximum].every(input => before.ranges?.[input.id] === after.ranges?.[input.id]));
+        };
+        const oldByIndex = new Map(state.currentSpecs.map(spec => [spec.index, spec]));
+        const oldByMotif = new Map(state.currentSpecs.map(spec => [spec.motifId, spec]));
+        const sameSequence = ["sequenceEnabled", "sequenceEffects", "sequenceNoneFrequency", "sequenceTimings"].every(key => JSON.stringify(before[key]) === JSON.stringify(after[key])) &&
+          SEQUENCE_RANGE_CONTROLS.every(c => [c.minimum,c.maximum].every(input => before.ranges?.[input.id] === after.ranges?.[input.id]));
+        for (const spec of specs) {
+          const generatedFilter = spec.filter;
+          const old = oldByIndex.get(spec.index);
+          if (old) {
+            if (unchanged("opacity")) spec.opacity = old.opacity;
+            if (unchanged("rotation")) spec.rotation = old.rotation;
+            if (unchanged("size") && before.width === after.width && before.height === after.height &&
+                before.marginMode === after.marginMode && before.ranges?.[elements.margin.id] === after.ranges?.[elements.margin.id]) {
+              spec.longestSide = old.longestSide;
+              const ratio = spec.brush.width / Math.max(1, spec.brush.height);
+              spec.width = ratio >= 1 ? old.longestSide : old.longestSide * ratio;
+              spec.height = ratio >= 1 ? old.longestSide / ratio : old.longestSide;
+            }
+            if (unchanged("tint") && unchanged("tintColor") && before.tintColor === after.tintColor) {
+              spec.tintAmount = old.tintAmount; spec.tintHue = old.tintHue; spec.filter = old.filter;
+            }
+          }
+          if (generatedFilter !== spec.filter) {
+            for (const sequence of [spec.sequence, spec.suspendedSequence]) {
+              if (!sequence) continue;
+              const active = sequence.filterActive === "none" ? "" : sequence.filterActive || "";
+              const suffix = generatedFilter && active.startsWith(generatedFilter) ? active.slice(generatedFilter.length).trim() : active;
+              sequence.filterRest = spec.filter || "none";
+              sequence.filterActive = combineSequenceFilter(spec.filter, suffix) || "none";
+            }
+          }
+          const assigned = old?.motifId === spec.motifId ? old : oldByMotif.get(spec.motifId);
+          if (sameSequence && assigned) {
+            spec.sequence = assigned.sequence ? { ...assigned.sequence } : null;
+            spec.suspendedSequence = assigned.suspendedSequence ? { ...assigned.suspendedSequence } : null;
+            for (const sequence of [spec.sequence,spec.suspendedSequence]) {
+              if (!sequence) continue;
+              const base = assigned.filter || "";
+              const active = sequence.filterActive === "none" ? "" : sequence.filterActive || "";
+              const suffix = base && active.startsWith(base) ? active.slice(base.length).trim() : active;
+              sequence.filterRest = spec.filter || "none";
+              sequence.filterActive = combineSequenceFilter(spec.filter, suffix) || "none";
+              if (sequence.alternateSource && !settings.pool.some(brush => brush.source === sequence.alternateSource)) sequence.alternateSource = "";
+            }
+          }
+        }
+        sequenceSummary = toggleAssignedSequenceEffects(settings, specs, seed, false);
+      }
       if (token !== state.generationToken) {
         return false;
       }
@@ -6716,6 +7192,7 @@
       state.currentWidth = settings.width;
       state.currentHeight = settings.height;
       state.currentMargin = settings.margin;
+      state.currentMarginOpacity = settings.marginOpacity;
       state.currentMarginMode = settings.marginMode;
       elements.composition.style.width = `${settings.width}px`;
       elements.composition.style.height = `${settings.height}px`;
@@ -6798,6 +7275,8 @@
       sequenceEffectCounts: { ...state.currentSequenceEffectCounts },
       sequenceTimingCounts: { ...state.currentSequenceTimingCounts },
       cropInspectionActive: state.cropInspectionActive,
+      hiddenCount: state.currentSpecs.filter(spec => spec.hidden).length,
+      marginOpacity: state.currentMarginOpacity,
       canvasInfoHidden: state.canvasInfoHidden,
       uncroppedCount: state.currentSpecs.filter((spec) => spec.uncropped).length,
       randomRanges: Object.fromEntries(
@@ -6816,6 +7295,7 @@
       bookmarkLimit: MAX_BOOKMARKS,
       bookmarkStoragePersisted: state.bookmarkStoragePersisted,
       historyDepth: state.history.length,
+      redoDepth: state.redoHistory.length,
       historyLimit: MAX_HISTORY_ACTIONS,
       exporting: Boolean(state.exportTask),
       batchExporting: Boolean(state.batchExport),
@@ -6998,6 +7478,11 @@
       input.addEventListener("change", markSettingsPending);
     });
 
+    elements.sequenceNoneFrequency.addEventListener("input", () => {
+      updateSequenceControlUI();
+      markSettingsPending({ sequenceChange: "noneFrequency" });
+    });
+
     elements.sequenceEnabled.addEventListener("change", () => {
       updateSequenceControlUI();
       syncRandomizationPresetButtons();
@@ -7029,7 +7514,10 @@
     });
 
     elements.cropInspect.addEventListener("click", () => {
-      setCropInspectionActive(!state.cropInspectionActive);
+      setCropInspectionActive(!(state.cropInspectionActive && state.inspectionMode === "sample"), "sample");
+    });
+    elements.markInspect.addEventListener("click", () => {
+      setCropInspectionActive(!(state.cropInspectionActive && state.inspectionMode === "mark"), "mark");
     });
 
     elements.canvasInfoDismiss.addEventListener("click", () => {
@@ -7057,23 +7545,58 @@
       setCanvasInfoHidden(false);
     }, true);
 
-    elements.composition.addEventListener("click", (event) => {
-      const image = event.target.closest?.(".generator-stamp");
-      if (image) {
-        toggleStampUncropped(image);
+    elements.composition.addEventListener("pointermove", event => {
+      if (!state.cropInspectionActive) return;
+      state.inspectionShift = event.shiftKey;
+      selectInspectionStamp(inspectionStackAt(event.clientX, event.clientY)[0] || null);
+    });
+    elements.composition.addEventListener("pointerleave", () => selectInspectionStamp(null));
+    elements.composition.addEventListener("wheel", event => {
+      if (!state.cropInspectionActive) return;
+      const stack = inspectionStackAt(event.clientX, event.clientY);
+      if (!stack.length || !event.deltaY) return;
+      event.preventDefault();
+      const index = state.inspectionMode === "mark"
+        ? stack.findIndex(image => getCurrentSpecForImage(image)?.motifId === getCurrentSpecForImage(state.inspectionHover)?.motifId)
+        : stack.indexOf(state.inspectionHover);
+      selectInspectionStamp(stack[(index + (event.deltaY > 0 ? 1 : -1) + stack.length) % stack.length]);
+    }, { passive: false });
+    elements.composition.addEventListener("pointerdown", event => {
+      state.inspectionHidePointer = state.cropInspectionActive && (event.ctrlKey || event.metaKey);
+      if (state.inspectionHidePointer) {
+        event.preventDefault();
+        toggleInspectedStamp(state.inspectionHover || event.target.closest?.(".generator-stamp"), true);
       }
     });
-
-    elements.composition.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
+    elements.composition.addEventListener("click", event => {
+      if (state.inspectionHidePointer) { state.inspectionHidePointer = false; return; }
+      const image = state.inspectionHover || event.target.closest?.(".generator-stamp");
+      toggleInspectedStamp(image, event.ctrlKey || event.metaKey);
+    });
+    elements.composition.addEventListener("contextmenu", event => {
+      if (state.cropInspectionActive && event.ctrlKey) {
+        event.preventDefault();
       }
-      const image = event.target.closest?.(".generator-stamp");
-      if (!image || !state.cropInspectionActive) {
-        return;
-      }
+    });
+    elements.composition.addEventListener("focusin", event => {
+      if (state.cropInspectionActive && event.target.matches(".generator-stamp")) selectInspectionStamp(event.target);
+    });
+    elements.composition.addEventListener("keydown", event => {
+      if (!state.cropInspectionActive || !["Enter", " "].includes(event.key)) return;
       event.preventDefault();
-      toggleStampUncropped(image);
+      toggleInspectedStamp(event.target.closest?.(".generator-stamp"), event.ctrlKey || event.metaKey);
+    });
+    const setInspectionShift = active => {
+      state.inspectionShift = state.cropInspectionActive && active;
+      elements.canvas.classList.toggle("inspection-solo", state.inspectionShift && Boolean(state.inspectionHover));
+    };
+    document.addEventListener("keydown", event => { if (event.key === "Shift") setInspectionShift(true); });
+    document.addEventListener("keyup", event => { if (event.key === "Shift") setInspectionShift(false); });
+    window.addEventListener("blur", () => setInspectionShift(false));
+    elements.cropExemption.addEventListener("input", () => void updateCropExemptionPercent());
+    elements.marginOpacity.addEventListener("input", () => {
+      updateMarginOpacityUi();
+      markSettingsPending();
     });
 
     elements.bookmark.addEventListener("click", () => {
@@ -7211,8 +7734,24 @@
       void randomizeActiveBackground();
     });
 
-    elements.undo.addEventListener("click", () => {
-      void undoLastGeneratorAction();
+    let undoControlPointer = false;
+    elements.undo.addEventListener("pointerdown", event => {
+      undoControlPointer = event.ctrlKey && event.button === 0;
+      if (undoControlPointer) {
+        event.preventDefault();
+        void redoLastGeneratorAction();
+      }
+    });
+    elements.undo.addEventListener("click", event => {
+      if (event.ctrlKey) {
+        if (!undoControlPointer) void redoLastGeneratorAction();
+      } else {
+        void undoLastGeneratorAction();
+      }
+    });
+    elements.undo.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      if (!undoControlPointer) void redoLastGeneratorAction();
     });
 
     elements.bookmarkGalleryMode.addEventListener("click", () => {
@@ -7306,7 +7845,7 @@
   async function initialize() {
     const folders = buildCatalog();
     if (!state.catalog.length) {
-      setStatus("the stock gif catalog could not be loaded", true);
+      setStatus("the stock sample catalog could not be loaded", true);
       elements.generate.disabled = true;
       return;
     }
@@ -7331,7 +7870,7 @@
     scheduleCanvasFit();
     const querySeed = parseSeed(new URLSearchParams(location.search).get("seed"));
     if (!(await restoreActiveSession())) {
-      await generateComposition({ seed: querySeed });
+      await generateComposition({ seed: querySeed, initialDefaults: true });
     }
   }
 
@@ -7340,6 +7879,7 @@
       return generateComposition({ seed, recordHistory: true });
     },
     undo: undoLastGeneratorAction,
+    redo: redoLastGeneratorAction,
     randomizeBackground: randomizeActiveBackground,
     getSummary,
     exportWebp(options = {}) {

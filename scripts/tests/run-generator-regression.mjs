@@ -481,7 +481,7 @@ try {
   assert.equal(await page.locator("#generatorGifsPerMarkSlider").getAttribute("max"), "100");
   assert.equal(await page.locator("#generatorGifsPerMarkSlider").inputValue(), "100");
   const sidebarGroupStructure = await page.evaluate(() => {
-    const sourceDetails = document.getElementById("generatorSourceDetails");
+    const sourceDetails = document.getElementById("generatorSampleDetails");
     const canvasDetails = document.getElementById("generatorCanvasDetails");
     const randomDetails = document.getElementById("generatorRandomDetails");
     const count = document.getElementById("generatorCountSlider");
@@ -586,10 +586,10 @@ try {
   await page.waitForFunction(() => (
     document.getElementById("generatorCanvas")?.getAttribute("aria-busy") === "false"
   ));
-  await page.locator("#generatorSourceDetails > summary").click();
-  assert.equal(await page.locator("#generatorSourceDetails").getAttribute("open"), null);
+  await page.locator("#generatorSampleDetails > summary").click();
+  assert.equal(await page.locator("#generatorSampleDetails").getAttribute("open"), null);
   assert.equal(await page.locator("#generatorCountSlider").isVisible(), false);
-  await page.locator("#generatorSourceDetails > summary").click();
+  await page.locator("#generatorSampleDetails > summary").click();
   assert.equal(await page.locator("#generatorCountSlider").isVisible(), true);
   await page.locator("#generatorCanvasDetails > summary").click();
   assert.equal(await page.locator("#generatorCanvasWidthInput").isVisible(), false);
@@ -858,6 +858,8 @@ try {
   assert.deepEqual(randomizedGeneration.summary.generationRandomize, {
     margin: true,
     marginMode: true,
+    marginOpacity: false,
+    cropExemption: false,
     count: true,
     markCount: true,
     gifsPerMark: true,
@@ -954,7 +956,7 @@ try {
   );
   await page.locator(".generator-sequence-effect-checkbox").evaluateAll((inputs) => {
     for (const input of inputs) {
-      input.checked = true;
+      input.checked = input.value !== "none";
     }
     inputs[0]?.dispatchEvent(new Event("change", { bubbles: true }));
   });
@@ -1045,7 +1047,7 @@ try {
 
   await page.locator(".generator-sequence-effect-checkbox").evaluateAll((inputs) => {
     for (const input of inputs) {
-      input.checked = true;
+      input.checked = input.value !== "none";
     }
     inputs[0]?.dispatchEvent(new Event("change", { bubbles: true }));
   });
@@ -1414,10 +1416,10 @@ try {
   await page.locator('.generator-margin-mode-choice:has(input[value="crop"]) span').click();
   const inspectButton = page.locator("#generatorCropInspectButton");
   assert.equal(await inspectButton.isVisible(), true);
-  assert.equal(await inspectButton.isDisabled(), true);
-  assert.equal(await inspectButton.textContent(), "set a margin to inspect");
+  assert.equal(await inspectButton.isDisabled(), false);
+  assert.equal(await inspectButton.textContent(), "inspect samples");
   await setRange(page, "#generatorMarginSlider", 96);
-  assert.match(await inspectButton.textContent(), /^(generate crop to inspect|inspect cropped gifs)$/);
+  assert.match(await inspectButton.textContent(), /^inspect samples$/);
   await setRange(page, "#generatorMarginSlider", 0);
   await page.waitForTimeout(250);
   await generateWithSeed(page, 0x00c0ffee, 60);
@@ -1425,7 +1427,7 @@ try {
   assert.equal(uncropped.overlay.hidden, true);
 
   await setRange(page, "#generatorMarginSlider", 96);
-  assert.match(await inspectButton.textContent(), /^(generate crop to inspect|inspect cropped gifs)$/);
+  assert.match(await inspectButton.textContent(), /^inspect samples$/);
   await generateWithSeed(page, 0x00c0ffee, 60);
   const filtered = await getCompositionSnapshot(page);
   assert.equal(filtered.count, 60);
@@ -1499,8 +1501,8 @@ try {
   assert.equal(await page.locator("#generatorCanvas").evaluate(
     (canvas) => canvas.classList.contains("crop-inspection-active")
   ), false);
-  assert.equal(await inspectButton.textContent(), "edit uncropped gifs (1)");
-  assert.match(await page.locator("#generatorCropInspectStatus").textContent(), /1 gif remains uncropped/i);
+  assert.equal(await inspectButton.textContent(), "inspect samples");
+  assert.equal(await page.locator("#generatorCropInspectStatus").isHidden(), true);
 
   const primaryActionGeometry = await page.evaluate(() => {
     const sidebar = document.getElementById("controls");

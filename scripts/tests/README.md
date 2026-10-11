@@ -25,6 +25,9 @@ node scripts/tests/run-generator-regression.mjs
 node scripts/tests/run-generator-bookmark-regression.mjs
 node scripts/tests/run-generator-export-regression.mjs
 node scripts/tests/run-generator-upload-controls-regression.mjs
+node scripts/tests/run-generator-inspection-regression.mjs
+node scripts/tests/run-generator-redo-regression.mjs
+node scripts/tests/run-generator-none-regression.mjs
 ```
 
 The upload/control suite checks mixed still-image and animated-GIF imports, nested
@@ -223,3 +226,17 @@ WebP frame reuse, mobile choices and cancellation through both worker yield path
 The benchmark reports timings, sizes and raster hashes for small/busy, large/many-source,
 and still compositions. The batch suite also covers quality mode.
 See [quality export details](../../docs/generator-quality-export.md).
+
+The inspection suite checks inspection in placement mode, wheel selection through
+stacked stamps, Shift isolation, Control-click hiding/restoring, persisted hidden
+state, legacy opaque margins, seeded margin opacity, mobile layout, and actual
+exported pixels for translucent margins and fully hidden compositions.
+
+The redo suite covers normal undo, right-click and Control-click redo, retaining
+the button with an empty undo stack, reload persistence, new-edit branching, and
+undo/redo of queued slider changes.
+
+The none-sequence suite checks per-mark frequency, reproducible random draws,
+restoring muted effects without reassigning other marks, and saved compositions.
+
+`node scripts/tests/run-generator-mark-inspection-regression.mjs` verifies sample/mark inspection switching, whole-mark selection, solo, hiding, and crop exemption.

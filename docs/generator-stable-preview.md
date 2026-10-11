@@ -15,7 +15,7 @@ transferred ImageBitmap is closed after display. Preview frames are capped at
 than partial compositions. Native rendering has no application frame cap. Actual
 speed and rendering artifacts depend on the browser and GPU.
 
-The DOM remains available for paused crop inspection. Previews resume after
+The DOM remains available for paused individual-image inspection in both margin modes. Previews resume after
 inspection, visibility changes, context restoration, and back/forward navigation.
 Starting a normal export or replacing a composition retires the previous preview
 worker. Realtime recording leaves the selected preview renderer running. Preview
@@ -139,3 +139,45 @@ Run `node scripts/tests/run-generator-batch-export-regression.mjs` for queue,
 ordering, duplicate detection, fresh-renderer retry, folder saving, cancellation,
 sidebar accessibility and restoration checks. Folder writes use an isolated
 origin filesystem, and realtime capture uses a fixture stream with real encoding.
+
+## Individual image inspection
+
+Image sources and sample controls are separate sidebar sections. The persistent
+“inspect samples” button at the bottom of sample controls pauses the DOM
+preview. Hover selects a stamp; the wheel cycles through overlapping stamps at
+the pointer. Holding Shift temporarily isolates the selected stamp. Control-click
+(or Command-click) hides or restores it. Hidden stamps remain faintly visible in
+inspection so they can be recovered, and are excluded from normal previews,
+thumbnails, and exports. Click still toggles crop exemption in crop edges mode.
+Hidden state persists in bookmarks, backups, active sessions, and undo history.
+
+The “inspect marks” button underneath applies these same interactions to whole
+marks. Hover and Shift select/isolate every sample in the mark; wheel cycling
+visits each overlapping mark once. Hide/show and crop changes apply to the whole
+mark in one undoable action. Switching modes preserves the paused preview.
+
+Crop edges mode offers 0–100% margin opacity with optional seeded randomization
+on each new composition. The DOM, smooth preview, and export compositor use the
+same opacity. Records without this field retain the previous fully opaque mask.
+
+The crop-only “samples above crop” slider selects a seeded percentage of visible
+samples whose transformed bounds touch the margin. It defaults to 0%. Adjusting
+it updates crop exemptions without changing placement or sequence effects; the
+selected count is rounded to the nearest whole sample. New compositions choose a
+new seeded subset, while saved compositions retain their exact exemptions. Its
+randomization switch also picks a new percentage for each new composition; with
+the switch off, the chosen percentage stays fixed.
+
+The undo button supports right-click or Control-click to redo. Undo and redo
+stacks persist with the active session; making a new edit clears the redo branch.
+
+The canvas header displays the seed followed by loading/low-FPS indicators.
+The footer clips overflowing metadata to the canvas width without enlarging its frame.
+
+The optional “none” sequence choice leaves selected marks without an added
+sequence effect (source GIF animation continues). Its frequency slider ranges
+from 0–99%, applies per mark, and uses stable seeded draws. Stamps in a mark share
+the choice. It starts unchecked to preserve existing defaults; when enabled its
+initial frequency is 25%. Lowering frequency or unchecking none restores the
+marks’ original effect assignments and timing. At least one actual effect must
+remain enabled for new compositions. Saved bookmarks retain their exact state.

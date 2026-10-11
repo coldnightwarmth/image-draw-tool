@@ -1,0 +1,124 @@
+import assert from 'node:assert/strict';
+import {chromium} from 'playwright';
+import {createServer} from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {resolve,extname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('../../',import.meta.url));
+const server=createServer(async(req,res)=>{try{let path=decodeURIComponent(new URL(req.url,'http://localhost').pathname);if(path.endsWith('/'))path+='index.html';path=resolve(root,'.'+path);if(!path.startsWith(root))throw Error();const data=await readFile(path);res.writeHead(200,{'Content-Type':({'.js':'text/javascript','.mjs':'text/javascript','.html':'text/html','.css':'text/css','.gif':'image/gif','.wasm':'application/wasm'})[extname(path)]||'application/octet-stream'});res.end(data);}catch{res.writeHead(404);res.end();}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}:{})});
+const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.route('**/generator.js?*',async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replace('  window.GeneratorApp = {','  window.testGenerator = {state, captureControlState, captureCurrentComposition, restoreCompositionRecord, applyPendingDynamicUpdate};\n  window.GeneratorApp = {')});});
+const settle=async()=>{await page.waitForTimeout(200);await page.evaluate(()=>testGenerator.applyPendingDynamicUpdate());await page.waitForFunction(()=>!testGenerator.state.generating&&!testGenerator.state.dynamicUpdateBase);};
+try {
+ await page.goto(`http://127.0.0.1:${server.address().port}/generator/`);
+ await page.waitForFunction(()=>window.testGenerator?.state.currentSpecs.length>0&&!testGenerator.state.generating);
+ assert.equal(await page.locator('#generatorSourceDetails summary').innerText(),'image sources');
+ assert.equal(await page.locator('#generatorSampleDetails summary').innerText(),'sample controls');
+ assert(await page.locator('#generatorSampleDetails #generatorCropInspectButton').isVisible());
+ assert(await page.locator('#generatorMarginOpacityGroup').isHidden());
+ const record=await page.evaluate(()=>{
+   const controls=testGenerator.captureControlState(), composition=testGenerator.captureCurrentComposition();
+   const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
+   const ctx=canvas.getContext('2d');ctx.fillStyle='#ff0000';ctx.fillRect(0,0,64,64);
+   const source='upload:'+'a'.repeat(64);
+   const asset={source,dataUrl:canvas.toDataURL(),width:64,height:64,name:'red.png',folderId:'upload',folderName:'uploads',tags:[]};
+   controls.sourceMode='upload';controls.uploadedSources=[source];controls.sequenceEnabled=false;
+   controls.width='600';controls.height='600';controls.marginMode='placement';controls.marginOpacity=1;
+   controls.ranges.generatorMarginSlider='100';controls.ranges.generatorCountSlider='3';
+   composition.settings={...composition.settings,width:600,height:600,margin:100,marginMode:'placement',marginOpacity:1,count:3,markCount:3};
+   composition.background='#ffffff';composition.uploadedAssets=[asset];composition.sequenceSummary={enabled:false,layerCount:0,effectCounts:{},timingCounts:{}};
+   composition.specs=composition.specs.slice(0,3).map((spec,index)=>({...spec,source,index,motifId:index,x:100,y:100,width:180,height:180,longestSide:180,rotation:0,opacity:1,tintAmount:0,filter:'',sequence:null,suspendedSequence:null,hidden:false,uncropped:false,markTransform:{a:1,b:0,c:0,d:1,pitch:0,yaw:0,horizontalStretch:100,verticalStretch:100}}));
+   return {controls,composition};
+ });
+ await page.evaluate(record=>testGenerator.restoreCompositionRecord(record),record);
+ await page.locator('#generatorCropInspectButton').click();
+ assert(await page.evaluate(()=>GeneratorApp.getSummary().cropInspectionActive));
+ const image=page.locator('.generator-stamp').last();
+ await image.scrollIntoViewIfNeeded();const box=await image.boundingBox();const x=box.x+box.width/2,y=box.y+box.height/2;
+ await page.mouse.move(x,y);
+ const selected=()=>page.locator('.is-inspection-selected').getAttribute('data-generator-index');
+ const first=await selected();await page.mouse.wheel(0,80);await page.waitForTimeout(60);const second=await selected();assert.notEqual(first,second);
+ await page.mouse.wheel(0,80);await page.waitForTimeout(60);const third=await selected();assert.notEqual(third,second);assert.notEqual(third,first);
+ await page.keyboard.down('Shift');
+ assert(await page.evaluate(()=>Array.from(document.querySelectorAll('.generator-stamp:not(.is-inspection-selected)')).every(e=>getComputedStyle(e).opacity==='0')));
+ await page.keyboard.up('Shift');assert(!(await page.locator('#generatorCanvas').evaluate(e=>e.classList.contains('inspection-solo'))));
+ await page.keyboard.down('Control');await page.mouse.click(x,y);await page.keyboard.up('Control');
+ assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().hiddenCount),1);
+ await page.locator('#generatorCropInspectButton').click();
+ assert.equal(await page.locator('.is-generator-hidden').evaluate(e=>getComputedStyle(e).visibility),'hidden');
+ const saved=await page.evaluate(()=>({controls:testGenerator.captureControlState(),composition:testGenerator.captureCurrentComposition()}));
+ await page.evaluate(record=>testGenerator.restoreCompositionRecord(record),saved);assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().hiddenCount),1);
+ await page.locator('#generatorCropInspectButton').click();
+ await page.locator('.is-generator-hidden').evaluate(e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})));
+ assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().hiddenCount),0);
+ await page.locator('#generatorCropInspectButton').click();
+ // Opacity is restored exactly; old compositions retain fully opaque margins.
+ record.controls.marginMode='crop';record.composition.settings.marginMode='crop';record.controls.marginOpacity=.5;record.composition.settings.marginOpacity=.5;
+ await page.evaluate(record=>testGenerator.restoreCompositionRecord(record),record);
+ assert(await page.locator('#generatorMarginOpacityGroup').isVisible());
+ assert.equal(await page.locator('#generatorMarginOverlay').evaluate(e=>getComputedStyle(e).opacity),'0.5');
+ // Percentage applies only to samples touching the crop and does not reroll the composition.
+ await page.evaluate(async record=>{
+   const interior={...record.composition.specs[0],index:3,motifId:3,x:300,y:300};
+   record.composition.specs.push(interior);record.composition.settings.count=4;
+   record.controls.ranges.generatorCountSlider='4';
+   await testGenerator.restoreCompositionRecord(record);
+ },record);
+ const geometryBefore=await page.evaluate(()=>testGenerator.state.currentSpecs.map(s=>[s.index,s.x,s.y,s.width,s.height,s.filter]));
+ const setPercent=async value=>{
+   await page.locator('#generatorCropExemptionSlider').evaluate((e,v)=>{e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));},String(value));
+   await page.waitForTimeout(100);
+ };
+ await setPercent(33);assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().uncroppedCount),1);
+ const subset=await page.evaluate(()=>testGenerator.state.currentSpecs.filter(s=>s.uncropped).map(s=>s.index));
+ await setPercent(100);assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().uncroppedCount),3);
+ assert.equal(await page.evaluate(()=>testGenerator.state.currentSpecs.find(s=>s.index===3).uncropped),false);
+ assert.deepEqual(await page.evaluate(()=>testGenerator.state.currentSpecs.map(s=>[s.index,s.x,s.y,s.width,s.height,s.filter])),geometryBefore);
+ const percentRecord=await page.evaluate(()=>({controls:testGenerator.captureControlState(),composition:testGenerator.captureCurrentComposition()}));
+ await page.evaluate(record=>testGenerator.restoreCompositionRecord(record),percentRecord);
+ assert.equal(await page.locator('#generatorCropExemptionSlider').inputValue(),'100');
+ assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().uncroppedCount),3);
+ await setPercent(33);assert.deepEqual(await page.evaluate(()=>testGenerator.state.currentSpecs.filter(s=>s.uncropped).map(s=>s.index)),subset);
+ await setPercent(0);assert.equal(await page.evaluate(()=>GeneratorApp.getSummary().uncroppedCount),0);
+ await page.locator('#generatorMarginOpacityGroup').scrollIntoViewIfNeeded();
+ await page.locator('.generator-margin-group').screenshot({path:'/tmp/generator-crop-controls.png'});
+
+ const pixels=await page.evaluate(async()=>{
+   const result=await GeneratorApp.exportWebp({durationSeconds:1,download:false,returnBlob:true});
+   if(!result)throw Error(document.querySelector('#generatorExportStatus').textContent);
+   const bitmap=await createImageBitmap(result.blob), canvas=document.createElement('canvas');canvas.width=600;canvas.height=600;
+   const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);bitmap.close();return Array.from(ctx.getImageData(50,50,1,1).data);
+ });
+ assert(pixels[0]>245 && pixels[1]>115 && pixels[1]<140 && pixels[2]>115 && pixels[2]<140,JSON.stringify(pixels));
+
+ record.composition.specs.forEach(spec=>spec.hidden=true);
+ await page.evaluate(record=>testGenerator.restoreCompositionRecord(record),record);
+ const hiddenPixels=await page.evaluate(async()=>{
+   const result=await GeneratorApp.exportWebp({durationSeconds:1,download:false,returnBlob:true});
+   if(!result)throw Error(document.querySelector('#generatorExportStatus').textContent);
+   const bitmap=await createImageBitmap(result.blob), canvas=document.createElement('canvas');canvas.width=600;canvas.height=600;
+   const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);bitmap.close();return Array.from(ctx.getImageData(50,50,1,1).data);
+ });assert.deepEqual(hiddenPixels,[255,255,255,255]);
+ record.composition.specs.forEach(spec=>spec.hidden=false);
+ delete record.controls.marginOpacity;delete record.composition.settings.marginOpacity;
+ await page.evaluate(record=>testGenerator.restoreCompositionRecord(record),record);
+ assert.equal(await page.locator('#generatorMarginOverlay').evaluate(e=>getComputedStyle(e).opacity),'1');
+ await page.locator('#generatorMarginOpacityRandomToggle').check({force:true});await settle();
+ await page.evaluate(()=>GeneratorApp.generate(12));const opacity=await page.locator('#generatorMarginOpacitySlider').inputValue();
+ await page.evaluate(()=>GeneratorApp.generate(13));assert.notEqual(await page.locator('#generatorMarginOpacitySlider').inputValue(),opacity);
+ await page.setViewportSize({width:390,height:844});
+ await page.locator('#generatorSampleDetails').scrollIntoViewIfNeeded();
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await page.screenshot({path:'/tmp/generator-inspection-mobile.png'});
+ await page.locator('#generatorCropExemptionRandomToggle').check({force:true});await settle();
+ await page.evaluate(()=>GeneratorApp.generate(101));const randomizedPercent=await page.locator('#generatorCropExemptionSlider').inputValue();
+ await page.evaluate(()=>GeneratorApp.generate(102));assert.notEqual(await page.locator('#generatorCropExemptionSlider').inputValue(),randomizedPercent);
+ await page.evaluate(()=>GeneratorApp.generate(101));assert.equal(await page.locator('#generatorCropExemptionSlider').inputValue(),randomizedPercent);
+ await page.locator('#generatorCropExemptionRandomToggle').uncheck({force:true});await settle();
+ await page.evaluate(()=>GeneratorApp.generate(103));assert.equal(await page.locator('#generatorCropExemptionSlider').inputValue(),randomizedPercent);
+ assert.equal(await page.locator('#generatorCropExemptionHint').count(),0);
+ assert.deepEqual(errors,[]);
+ console.log('Inspection regression passed: stacked selection, solo, hiding/restoring, saved state, margin opacity and exported pixels');
+} finally {await browser.close();server.close();}
