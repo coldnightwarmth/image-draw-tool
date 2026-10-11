@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GENERATOR_ASSET_REVISION = "20261005-quality-speed-v1";
+  const GENERATOR_ASSET_REVISION = "20261011-generator-uploads-v2";
   const CANVAS_MIN_SIZE = 320;
   const CANVAS_MAX_SIZE = 2400;
   const DEFAULT_WIDTH = 1200;
@@ -98,6 +98,8 @@
     sourceHint: byId("generatorSourceHint"),
     categoryTab: byId("generatorCategoryTab"),
     tagTab: byId("generatorTagTab"),
+    uploadTab: byId("generatorUploadTab"),
+    uploadPanel: byId("generatorUploadPanel"),
     categoryPanel: byId("generatorCategoryPanel"),
     tagPanel: byId("generatorTagPanel"),
     categoryList: byId("generatorCategoryList"),
@@ -237,6 +239,7 @@
     rotation: "generatorRotationRandomToggle",
     opacity: "generatorOpacityRandomToggle",
     tint: "generatorTintRandomToggle",
+    tintColor: "generatorTintColorRandomToggle",
     pitch: "generatorPitchRandomToggle",
     yaw: "generatorYawRandomToggle",
     horizontalStretch: "generatorHorizontalStretchRandomToggle",
@@ -271,6 +274,8 @@
     catalogByTag: new Map(),
     catalogBySource: new Map(),
     sourceMode: "category",
+    uploadedSources: [],
+    uploadingSources: false,
     currentWidth: DEFAULT_WIDTH,
     currentHeight: DEFAULT_HEIGHT,
     currentMargin: DEFAULT_MARGIN,
@@ -684,6 +689,7 @@
   }
 
   function getBrushUrl(source) {
+    if (state.catalogBySource.get(source)?.dataUrl) return state.catalogBySource.get(source).dataUrl;
     if (brushUrlCache.has(source)) return brushUrlCache.get(source);
     const url = new URL(`../${encodeBrushPath(source)}`, document.baseURI);
     url.searchParams.set("generatorv", GENERATOR_ASSET_REVISION);
@@ -767,7 +773,8 @@
     const input = document.createElement("input");
     input.type = "checkbox";
     input.className = "generator-source-checkbox";
-    input.checked = true;
+    input.defaultChecked = !(kind === "category" && value.toLowerCase() === "squares");
+    input.checked = input.defaultChecked;
     input.dataset.sourceKind = kind;
     input.value = value;
     const name = document.createElement("span");
@@ -811,6 +818,7 @@
   }
 
   function getActiveCatalog() {
+    if (state.sourceMode === "upload") return state.uploadedSources.map(source => state.catalogBySource.get(source)).filter(Boolean);
     const kind = state.sourceMode === "tag" ? "tag" : "category";
     const sourceMap = kind === "tag" ? state.catalogByTag : state.catalogByFolder;
     const selectedValues = getSelectedSourceValues(kind);
@@ -829,6 +837,7 @@
   }
 
   function getActiveSourceLabel() {
+    if (state.sourceMode === "upload") return "uploads";
     const kind = state.sourceMode === "tag" ? "tag" : "category";
     const selected = getSelectedSourceValues(kind);
     const total = document.querySelectorAll(
@@ -848,18 +857,99 @@
   }
 
   function setSourceMode(mode, options = {}) {
-    const nextMode = mode === "tag" ? "tag" : "category";
+    const nextMode = ["category", "tag", "upload"].includes(mode) ? mode : "category";
     state.sourceMode = nextMode;
-    const categoryActive = nextMode === "category";
-    elements.categoryTab.setAttribute("aria-selected", String(categoryActive));
-    elements.categoryTab.tabIndex = categoryActive ? 0 : -1;
-    elements.tagTab.setAttribute("aria-selected", String(!categoryActive));
-    elements.tagTab.tabIndex = categoryActive ? -1 : 0;
-    elements.categoryPanel.hidden = !categoryActive;
-    elements.tagPanel.hidden = categoryActive;
+    for (const kind of ["category", "tag", "upload"]) {
+      const active = kind === nextMode;
+      elements[kind + "Tab"].setAttribute("aria-selected", String(active));
+      elements[kind + "Tab"].tabIndex = active ? 0 : -1;
+      elements[kind + "Panel"].hidden = !active;
+    }
     updateSourceSummary();
-    if (options.focus === true) {
-      (categoryActive ? elements.categoryTab : elements.tagTab).focus();
+    if (options.focus) elements[nextMode + "Tab"].focus();
+  }
+
+  function registerUploadedAssets(assets) {
+    for (const asset of Array.isArray(assets) ? assets : []) {
+      if (!/^upload:[a-f0-9]{64}$/.test(asset?.source || "") ||
+          !/^data:image\/(gif|png|jpeg|webp);base64,/.test(asset?.dataUrl || "") ||
+          asset.dataUrl.length > 90 * 1024 * 1024 || !(asset.width > 0 && asset.height > 0) || asset.width * asset.height > 32e6) {
+        throw new Error("Invalid uploaded image in saved composition");
+      }
+      state.catalogBySource.set(asset.source, { ...asset });
+    }
+  }
+
+  function readDroppedImages(dataTransfer) {
+    // Capture entries during the drop event, before the browser protects its data store.
+    const items = Array.from(dataTransfer.items || []).filter(item => item.kind === "file");
+    const roots = items.map(item => ({ entry: item.webkitGetAsEntry?.(), file: item.getAsFile() }));
+    const fallback = Array.from(dataTransfer.files || []);
+    return (async () => {
+      const files = [];
+      async function visit(entry) {
+        if (entry.isFile) {
+          const file = await new Promise(resolve => entry.file(resolve, () => resolve(null)));
+          if (file) files.push(file);
+        } else if (entry.isDirectory) {
+          const reader = entry.createReader();
+          // Directory readers may return only a batch (commonly 100 entries) per call.
+          while (true) {
+            const entries = await new Promise(resolve => reader.readEntries(resolve, () => resolve([])));
+            if (!entries.length) break;
+            for (const child of entries) await visit(child);
+          }
+        }
+      }
+      for (const root of roots) {
+        if (root.entry) await visit(root.entry);
+        else if (root.file) files.push(root.file);
+      }
+      return roots.length ? files : fallback;
+    })();
+  }
+
+  async function importGeneratorImages(files) {
+    if (state.uploadingSources || state.generating || state.exportTask || state.batchExport) return;
+    state.uploadingSources = true;
+    const status = byId("generatorUploadStatus");
+    const buttons = [byId("generatorUploadImages"), byId("generatorUploadFolder"), byId("generatorUploadDropZone")];
+    buttons.forEach(button => button.disabled = true);
+    status.textContent = "reading files…";
+    const assets = []; let skipped = 0, totalBytes = 0;
+    try {
+      const input = Array.from(await files).filter(file => /\.(gif|png|jpe?g|webp)$/i.test(file.name));
+      if (!input.length) {
+        status.textContent = "no supported images found · use GIF, PNG, JPEG, or WebP";
+        return;
+      }
+      for (const [index, file] of input.entries()) {
+        status.textContent = `loading ${index + 1}/${input.length}`;
+        let bitmap;
+        try {
+          if (file.size > 64 * 1024 * 1024 || totalBytes + file.size > 150 * 1024 * 1024) throw Error("Upload limit reached");
+          bitmap = await createImageBitmap(file);
+          if (bitmap.width * bitmap.height > 32e6) throw Error("Image too large");
+          const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer())), byte => byte.toString(16).padStart(2, "0")).join("");
+          const type = /\.gif$/i.test(file.name) ? "image/gif" : /\.png$/i.test(file.name) ? "image/png" : /\.webp$/i.test(file.name) ? "image/webp" : "image/jpeg";
+          const dataUrl = await readBlobAsDataUrl(new Blob([file], { type }));
+          assets.push({ source: `upload:${hash}`, dataUrl, name: file.name, folderId: "upload", folderName: "uploads", tags: [], width: bitmap.width, height: bitmap.height });
+          totalBytes += file.size;
+        } catch { skipped++; } finally { bitmap?.close(); }
+        await yieldForPaint();
+      }
+      if (assets.length) {
+        registerUploadedAssets(assets);
+        state.uploadedSources = [...new Set(assets.map(asset => asset.source))];
+        setSourceMode("upload");
+        markSettingsPending();
+      }
+      status.textContent = `${assets.length} images ready${skipped ? ` · ${skipped} unreadable or oversized files skipped` : ""}`;
+    } catch {
+      status.textContent = "could not read these files · try choose images or choose folder";
+    } finally {
+      state.uploadingSources = false;
+      buttons.forEach(button => button.disabled = false);
     }
   }
 
@@ -1386,7 +1476,8 @@
     let activePointerId = null;
     control.wrapper.addEventListener("pointerdown", (event) => {
       if (activePointerId !== null || event.isPrimary === false ||
-          (event.button !== undefined && event.button !== 0)) {
+          (event.button !== undefined && event.button !== 0) ||
+          control.minimum.disabled || control.maximum.disabled) {
         return;
       }
       const rect = control.wrapper.getBoundingClientRect();
@@ -1395,20 +1486,40 @@
       const targetValue = bounds.domainMinimum + clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1) * domainSize;
       const minimumDistance = Math.abs(targetValue - bounds.minimum);
       const maximumDistance = Math.abs(targetValue - bounds.maximum);
+      const handleHitRadius = 9 * domainSize / Math.max(1, rect.width);
+      const dragRange = targetValue > bounds.minimum + handleHitRadius &&
+        targetValue < bounds.maximum - handleHitRadius;
+      const startX = event.clientX;
+      const step = Math.max(0.0001, Number(control.minimum.step) || 1);
       const handle = minimumDistance === maximumDistance
         ? (targetValue <= (bounds.minimum + bounds.maximum) / 2 ? control.minimum : control.maximum)
         : (minimumDistance < maximumDistance ? control.minimum : control.maximum);
       event.preventDefault();
       handle.focus({ preventScroll: true });
       activePointerId = event.pointerId;
+      control.wrapper.classList.toggle("is-dragging-range", dragRange);
       control.wrapper.setPointerCapture?.(event.pointerId);
       const move = (moveEvent) => {
         if (moveEvent.pointerId !== activePointerId) return;
-        setRangeHandleFromPointer(control, handle, moveEvent.clientX);
+        if (dragRange) {
+          const delta = clamp(
+            Math.round((moveEvent.clientX - startX) / Math.max(1, rect.width) * domainSize / step) * step,
+            bounds.domainMinimum - bounds.minimum,
+            bounds.domainMaximum - bounds.maximum
+          );
+          // Assign both ends before emitting input so normalization never shrinks
+          // the range when the new minimum crosses the old maximum.
+          control.minimum.value = String(bounds.minimum + delta);
+          control.maximum.value = String(bounds.maximum + delta);
+          control.minimum.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          setRangeHandleFromPointer(control, handle, moveEvent.clientX);
+        }
       };
       const finish = (finishEvent) => {
         if (finishEvent.pointerId !== activePointerId) return;
         activePointerId = null;
+        control.wrapper.classList.remove("is-dragging-range");
         if (control.wrapper.hasPointerCapture?.(finishEvent.pointerId)) {
           control.wrapper.releasePointerCapture(finishEvent.pointerId);
         }
@@ -1421,7 +1532,7 @@
       control.wrapper.addEventListener("pointerup", finish);
       control.wrapper.addEventListener("pointercancel", finish);
       control.wrapper.addEventListener("lostpointercapture", finish);
-      move(event);
+      if (!dragRange) move(event);
     }, { capture: true });
   }
 
@@ -1439,7 +1550,7 @@
 
   function updateSourceSummary() {
     const pool = getActiveCatalog();
-    elements.catalogCount.textContent = `${formatInteger(pool.length)} gifs`;
+    elements.catalogCount.textContent = `${formatInteger(pool.length)} ${state.sourceMode === "upload" ? "images" : "gifs"}`;
     const categorySelected = getSelectedSourceValues("category").length;
     const tagSelected = getSelectedSourceValues("tag").length;
     elements.categorySelectionCount.textContent = `${categorySelected} selected`;
@@ -1450,7 +1561,7 @@
       : 0;
     const minimumCount = 1;
     elements.count.min = String(minimumCount);
-    elements.count.max = String(Math.max(1, maximumCount));
+    if (maximumCount) elements.count.max = String(maximumCount);
     const currentCount = readNumber(elements.count, DEFAULT_COUNT);
     if (maximumCount > 0 && currentCount > maximumCount) {
       elements.count.value = String(maximumCount);
@@ -1464,9 +1575,11 @@
     elements.sourceHint.textContent = selectedCount
       ? `${selectedCount} ${kind === "tag" ? "tags" : "categories"} enabled · matches any selected ${kind}`
       : `select at least one ${kind}`;
+    if (state.sourceMode === "upload") elements.sourceHint.textContent = pool.length
+      ? `${pool.length} uploaded images · stored with bookmarks` : "choose images or a folder";
     updateGenerateAvailability();
     if (!pool.length && state.currentCount) {
-      setStatus(`select at least one ${kind}`, true);
+      setStatus(state.sourceMode === "upload" ? "choose images or a folder" : `select at least one ${kind}`, true);
     }
   }
 
@@ -1717,6 +1830,19 @@
       return settings.backgroundColor;
     }
     return `#${randomInteger(random, 0, 0xffffff).toString(16).padStart(6, "0")}`;
+  }
+
+  function syncTintColorPicker() {
+    const randomized = RANDOM_TOGGLES.tintColor.checked;
+    // One swatch cannot show every stamp's hue; use the first placement's actual
+    // sampled hue, independent of the size-based paint order.
+    const sample = randomized && state.currentSpecs.reduce(
+      (first, spec) => !first || spec.index < first.index ? spec : first, null
+    );
+    if (sample) elements.tintColor.value = hslToHex(sample.tintHue, 84, 54);
+    elements.tintColor.title = randomized
+      ? "Random color sample — each image can have a different color"
+      : "Color shift color";
   }
 
   function chooseBestAnchor(existingAnchors, width, height, random, marginFactor = 0.08) {
@@ -2319,8 +2445,10 @@
       const tintAmount = settings.randomize.tint
         ? randomBetween(random, tintRange.minimum, tintRange.maximum) / 100
         : clamp(settings.tintAmount / 100, 0, 1);
-      const hue = settings.randomize.tint
-        ? randomBetween(random, 0, 360)
+      // Consume the legacy hue sample even with a fixed color to preserve placement RNG.
+      const legacyHue = settings.randomize.tint ? randomBetween(random, 0, 360) : hexToHue(settings.tintColor);
+      const hue = settings.randomize.tintColor
+        ? (settings.randomize.tint ? legacyHue : createRandom(((settings.visualSeed || 0) ^ Math.imul(index + 1, 0x45d9f3b)) >>> 0)() * 360)
         : hexToHue(settings.tintColor);
       const filter = tintAmount <= 0.005
         ? ""
@@ -2622,6 +2750,29 @@
     };
   }
 
+  function toggleAssignedSequenceEffects(settings) {
+    if (settings.sequence.enabled && !state.currentSpecs.some(spec => spec.sequence || spec.suspendedSequence)) {
+      return buildSequenceAssignments(state.currentSpecs, settings, state.currentSeed);
+    }
+    // Keep exact assignments (including phase and alternate image) while disabled.
+    // Existing saved specs are never redistributed by an effect checkbox.
+    const motifs = new Map();
+    for (const spec of state.currentSpecs) {
+      const assigned = spec.sequence || spec.suspendedSequence;
+      if (!assigned) continue;
+      const active = settings.sequence.enabled && settings.sequence.effects.includes(assigned.effect);
+      spec.sequence = active ? assigned : null;
+      spec.suspendedSequence = active ? null : assigned;
+      if (active) motifs.set(spec.motifId, assigned);
+    }
+    const effectCounts = {}, timingCounts = {};
+    for (const sequence of motifs.values()) {
+      effectCounts[sequence.effect] = (effectCounts[sequence.effect] || 0) + 1;
+      timingCounts[sequence.timing] = (timingCounts[sequence.timing] || 0) + 1;
+    }
+    return { enabled: settings.sequence.enabled && motifs.size > 0, layerCount: motifs.size, effectCounts, timingCounts };
+  }
+
   function buildSignature(specs) {
     return specs.slice(0, 16).map((spec) => [
       spec.brush.source,
@@ -2659,6 +2810,7 @@
   }
 
   function getSequenceCycleUrl(source, image, cycle) {
+    if (state.catalogBySource.get(source)?.dataUrl) return getBrushUrl(source);
     const url = new URL(getBrushUrl(source));
     url.hash = `sequence-${image.dataset.generatorMotif || "0"}-${image.dataset.generatorIndex || "0"}-${cycle}`;
     return url.href;
@@ -3111,7 +3263,8 @@
       longestSide: spec.longestSide,
       markTransform: spec.markTransform ? { ...spec.markTransform } : null,
       uncropped: Boolean(spec.uncropped),
-      sequence: spec.sequence ? { ...spec.sequence } : null
+      sequence: spec.sequence ? { ...spec.sequence } : null,
+      suspendedSequence: spec.suspendedSequence ? { ...spec.suspendedSequence } : null
     };
     for (const key of SAMPLED_GEOMETRY_KEYS) {
       if (Number.isFinite(Number(spec[key]))) {
@@ -3173,7 +3326,8 @@
             }
           : { a: 1, b: 0, c: 0, d: 1, pitch: 0, yaw: 0, horizontalStretch: 100, verticalStretch: 100 },
         uncropped: Boolean(raw.uncropped),
-        sequence: raw.sequence && typeof raw.sequence === "object" ? { ...raw.sequence } : null
+        sequence: raw.sequence && typeof raw.sequence === "object" ? { ...raw.sequence } : null,
+        suspendedSequence: raw.suspendedSequence && typeof raw.suspendedSequence === "object" ? { ...raw.suspendedSequence } : null
       };
       for (const key of SAMPLED_GEOMETRY_KEYS) {
         if (Number.isFinite(Number(raw[key]))) {
@@ -3190,6 +3344,7 @@
   function captureControlState() {
     return {
       sourceMode: state.sourceMode,
+      uploadedSources: state.uploadedSources.slice(),
       selectedCategories: getSelectedSourceValues("category"),
       selectedTags: getSelectedSourceValues("tag"),
       width: elements.width.value,
@@ -3339,6 +3494,8 @@
         toggle.checked = Boolean(controls.rangeRandomize?.[key]);
       }
     }
+    RANDOM_TOGGLES.tintColor.checked = controls.randomize?.tintColor ?? Boolean(controls.randomize?.tint);
+    state.uploadedSources = Array.isArray(controls.uploadedSources) ? controls.uploadedSources.filter(source => state.catalogBySource.has(source)) : [];
     elements.tintColor.value = String(controls.tintColor || "#ff4fb3");
     elements.boxStyle.value = controls.boxStyle === "filled" ? "filled" : "outline";
     elements.backgroundColor.value = String(controls.backgroundColor || "#ffffff");
@@ -3395,6 +3552,10 @@
         effectCounts: { ...state.currentSequenceEffectCounts },
         timingCounts: { ...state.currentSequenceTimingCounts }
       },
+      uploadedAssets: Array.from(new Set([
+        ...state.uploadedSources,
+        ...state.currentSpecs.flatMap(spec => [spec.brush.source, spec.sequence?.alternateSource, spec.suspendedSequence?.alternateSource])
+      ])).map(source => state.catalogBySource.get(source)).filter(asset => asset?.dataUrl).map(asset => ({ ...asset })),
       specs: state.currentSpecs.map(serializeSpec)
     };
   }
@@ -3440,32 +3601,35 @@
     updateHistoryUi();
   }
 
-  async function randomizeActiveBackground() {
+  async function randomizeActiveBackground(manualColor = null) {
     if (state.batchExport || !state.currentCount || state.generating || state.exportTask) {
       return false;
     }
-    if (state.dynamicUpdateBase) {
+    if (state.dynamicUpdateBase && !manualColor) {
       await applyPendingDynamicUpdate();
       if (state.generating || state.exportTask) {
         return false;
       }
     }
+    if (manualColor) state.dynamicUpdateAffectsBackground = false;
     const historySnapshot = captureGeneratorSnapshot();
-    let background = state.currentBackground;
-    for (let attempt = 0; attempt < 4 && background === state.currentBackground; attempt += 1) {
+    let background = manualColor || state.currentBackground;
+    for (let attempt = 0; !manualColor && attempt < 4 && background === state.currentBackground; attempt += 1) {
       background = `#${(randomSeed() & 0xffffff).toString(16).padStart(6, "0")}`;
     }
     state.currentBackground = background;
+    elements.backgroundColor.value = background;
     if (stablePreview) stablePreview.wake?.();
     else scheduleStablePreview();
     state.currentBookmarkId = "";
     elements.canvas.style.backgroundColor = background;
     elements.canvas.style.setProperty("--generator-canvas", background);
+    state.currentControlState = captureControlState();
     pushHistorySnapshot(historySnapshot);
     renderBookmarkGallery();
     syncCurrentBookmarkUI();
     await flushActiveSessionSave();
-    setActionStatus("background randomized");
+    setActionStatus(manualColor ? "background updated" : "background randomized");
     return true;
   }
 
@@ -3545,22 +3709,28 @@
 
   async function applySequenceOnlyUpdate(settings, pending) {
     setCropInspectionActive(false);
-    const sequenceSummary = buildSequenceAssignments(
-      state.currentSpecs,
-      settings,
-      state.currentSeed,
-      {
-        preserveExisting: true,
-        changedFields: pending.sequenceChanges
-      }
-    );
+    const previous = new Map(state.currentSpecs.map(spec => [spec.index, JSON.stringify(spec.sequence)]));
+    const effectToggleOnly = pending.sequenceChanges.every(change => change === "effects" || change === "enabled");
+    if (!effectToggleOnly) {
+      // Speed/timing edits must not reassign marks whose effect is switched off.
+      buildSequenceAssignments(
+        state.currentSpecs.filter(spec => !spec.suspendedSequence),
+        settings,
+        state.currentSeed,
+        {
+          preserveExisting: true,
+          changedFields: pending.sequenceChanges
+        }
+      );
+    }
+    const sequenceSummary = toggleAssignedSequenceEffects(settings);
     const imagesByIndex = new Map(
       Array.from(elements.composition.querySelectorAll("img.generator-stamp"))
         .map((image) => [Number(image.dataset.generatorIndex), image])
     );
     for (const spec of state.currentSpecs) {
       const image = imagesByIndex.get(Number(spec.index));
-      if (image) {
+      if (image && previous.get(spec.index) !== JSON.stringify(spec.sequence)) {
         applySequenceSpecToImage(image, spec);
       }
     }
@@ -3607,9 +3777,10 @@
         settings.sequence.timings
       ).length > 0);
     const pending = takePendingDynamicUpdate();
+    if (pending.sequenceOnly && pending.sequenceChanges.every(change => change === "effects" || change === "enabled")) return applySequenceOnlyUpdate(settings, pending);
     if (!hasValidSettings) {
       if (!settings.pool.length) {
-        setStatus(`select at least one ${settings.sourceMode === "tag" ? "tag" : "category"}`, true);
+        setStatus(settings.sourceMode === "upload" ? "choose images or a folder" : `select at least one ${settings.sourceMode === "tag" ? "tag" : "category"}`, true);
       } else if (!settings.modes.length) {
         elements.emptyState.hidden = false;
         setStatus("enable at least one placement mode", true);
@@ -3794,6 +3965,7 @@
     ) {
       throw new Error("This backup contains an invalid bookmark");
     }
+    registerUploadedAssets(rawRecord.composition.uploadedAssets);
     deserializeSpecs(rawRecord.composition.specs);
     const settings = rawRecord.composition.settings;
     if (!settings || !Number.isFinite(Number(settings.width)) || !Number.isFinite(Number(settings.height))) {
@@ -4088,6 +4260,7 @@
   async function restoreCompositionRecord(record, options = {}) {
     stopStablePreview(true);
     setCropInspectionActive(false);
+    registerUploadedAssets(record?.composition?.uploadedAssets);
     const specs = deserializeSpecs(record?.composition?.specs);
     const settings = record?.composition?.settings;
     if (!settings || !Number.isFinite(Number(settings.width)) || !Number.isFinite(Number(settings.height))) {
@@ -4107,6 +4280,7 @@
     state.currentCount = specs.length;
     state.currentSeed = Number(record.composition.seed) >>> 0;
     state.currentSpecs = specs;
+    syncTintColorPicker();
     const restoredMarkCount = Number.isFinite(Number(settings.markCount))
       ? normalizeInteger(
           settings.markCount,
@@ -4134,6 +4308,7 @@
       elements.markCountValue.textContent = elements.markCount.value;
     }
     state.currentBackground = background;
+    elements.backgroundColor.value = background;
     state.currentModeCounts = { ...(record.composition.modeCounts || {}) };
     state.currentUniqueSourceCount = new Set(specs.map((spec) => spec.brush.source)).size;
     const sequenceSummary = record.composition.sequenceSummary || {};
@@ -5050,8 +5225,8 @@
     const assets = Array.from(assetUsage, ([source, usage]) => ({
       id: source,
       url: getBrushUrl(source),
-      kind: "gif",
-      mimeType: "image/gif",
+      kind: state.catalogBySource.get(source)?.dataUrl ? "auto" : "gif",
+      mimeType: state.catalogBySource.get(source)?.dataUrl?.match(/^data:([^;]+)/)?.[1] || "image/gif",
       targetWidth: usage.width,
       targetHeight: usage.height,
       frameIntervalMs: EXPORT_SOURCE_FRAME_INTERVAL_MS,
@@ -6248,7 +6423,8 @@
     const specs = state.currentSpecs.map((spec) => ({
       ...spec,
       brush: spec.brush,
-      sequence: spec.sequence ? { ...spec.sequence } : null
+      sequence: spec.sequence ? { ...spec.sequence } : null,
+      suspendedSequence: spec.suspendedSequence ? { ...spec.suspendedSequence } : null
     }));
     const background = state.currentBackground;
     try {
@@ -6480,6 +6656,7 @@
       randomizeGenerationControls(seed);
     }
     const settings = options.dynamic ? baseSettings : readSettings();
+    settings.visualSeed = seed;
     if (
       settings.sequence.enabled &&
       !getCompatibleSequencePairs(settings.sequence.effects, settings.sequence.timings).length
@@ -6555,8 +6732,10 @@
       state.currentSequenceEffectCounts = sequenceSummary.effectCounts;
       state.currentSequenceTimingCounts = sequenceSummary.timingCounts;
       state.currentSpecs = specs;
+      syncTintColorPicker();
       state.currentSettingsUsed = createStoredSettings(settings);
       state.currentBackground = background;
+      elements.backgroundColor.value = background;
       state.currentSequenceSummary = sequenceSummary;
       state.currentBookmarkId = "";
       elements.width.value = String(settings.width);
@@ -6609,6 +6788,7 @@
       modeCounts: { ...state.currentModeCounts },
       uniqueSourceCount: state.currentUniqueSourceCount,
       sourceMode: state.sourceMode,
+      uploadedSources: state.uploadedSources.slice(),
       selectedCategories: getSelectedSourceValues("category"),
       selectedTags: getSelectedSourceValues("tag"),
       activePoolSize: getActiveCatalog().length,
@@ -6708,6 +6888,33 @@
       });
     }
 
+    byId("generatorUploadImages").onclick = () => byId("generatorUploadImagesInput").click();
+    byId("generatorUploadFolder").onclick = () => byId("generatorUploadFolderInput").click();
+    const uploadDropZone = byId("generatorUploadDropZone");
+    uploadDropZone.onclick = () => byId("generatorUploadImagesInput").click();
+    let uploadDragDepth = 0;
+    uploadDropZone.addEventListener("dragenter", event => {
+      event.preventDefault();
+      uploadDragDepth++;
+      if (!uploadDropZone.disabled) uploadDropZone.classList.add("is-dragging");
+    });
+    uploadDropZone.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = uploadDropZone.disabled ? "none" : "copy";
+    });
+    uploadDropZone.addEventListener("dragleave", () => {
+      uploadDragDepth = Math.max(0, uploadDragDepth - 1);
+      if (!uploadDragDepth) uploadDropZone.classList.remove("is-dragging");
+    });
+    uploadDropZone.addEventListener("drop", event => {
+      event.preventDefault();
+      uploadDragDepth = 0;
+      uploadDropZone.classList.remove("is-dragging");
+      if (!uploadDropZone.disabled) void importGeneratorImages(readDroppedImages(event.dataTransfer));
+    });
+    for (const id of ["generatorUploadImagesInput", "generatorUploadFolderInput"]) byId(id).onchange = event => {
+      void importGeneratorImages(Array.from(event.target.files)); event.target.value = "";
+    };
     const handleSourceChange = () => {
       updateSourceSummary();
       if (getActiveCatalog().length) {
@@ -6744,15 +6951,17 @@
     };
     elements.categoryTab.addEventListener("click", () => activateSourceTab("category"));
     elements.tagTab.addEventListener("click", () => activateSourceTab("tag"));
-    [elements.categoryTab, elements.tagTab].forEach((tab) => {
+    elements.uploadTab.addEventListener("click", () => activateSourceTab("upload"));
+    [elements.categoryTab, elements.tagTab, elements.uploadTab].forEach((tab) => {
       tab.addEventListener("keydown", (event) => {
         let nextMode = null;
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          nextMode = state.sourceMode === "category" ? "tag" : "category";
+          const modes = ["category", "tag", "upload"];
+          nextMode = modes[(modes.indexOf(state.sourceMode) + (event.key === "ArrowRight" ? 1 : 2)) % 3];
         } else if (event.key === "Home") {
           nextMode = "category";
         } else if (event.key === "End") {
-          nextMode = "tag";
+          nextMode = "upload";
         }
         if (!nextMode) {
           return;
@@ -6988,10 +7197,10 @@
       control.addEventListener("change", markSettingsPending);
     });
     elements.backgroundColor.addEventListener("input", () => {
-      markSettingsPending({ affectsBackground: true });
+      void randomizeActiveBackground(elements.backgroundColor.value);
     });
     elements.backgroundColor.addEventListener("change", () => {
-      markSettingsPending({ affectsBackground: true });
+      if (elements.backgroundColor.value !== state.currentBackground) void randomizeActiveBackground(elements.backgroundColor.value);
     });
 
     elements.generate.addEventListener("click", () => {

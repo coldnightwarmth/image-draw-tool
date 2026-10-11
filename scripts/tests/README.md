@@ -24,7 +24,17 @@ The finite-canvas composition generator has its own browser regression run:
 node scripts/tests/run-generator-regression.mjs
 node scripts/tests/run-generator-bookmark-regression.mjs
 node scripts/tests/run-generator-export-regression.mjs
+node scripts/tests/run-generator-upload-controls-regression.mjs
 ```
+
+The upload/control suite checks mixed still-image and animated-GIF imports, nested
+folder selection, file drops and batched nested-directory drops, corrupt-file skipping,
+mobile layout, embedded assets in bookmark
+backups, reload/restore, and quality WebP export. It also verifies independent seeded
+color randomization, whole-range dragging with endpoint clamping, independent handle
+dragging, manual background edits while randomization stays enabled,
+legacy bookmark appearance, and reversible sequence toggles that leave other marks
+unchanged. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use a specific Chromium binary.
 
 It verifies the clean `/generator/` route, the complete ALL catalog, exact and
 distinct placement counts, line/spray/box/scatter generation, fixed-property

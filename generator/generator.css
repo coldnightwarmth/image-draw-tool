@@ -309,10 +309,13 @@ body.generator-page {
 
 .generator-randomization-presets {
   display: inline-grid;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: auto repeat(3, auto);
+  align-items: center;
   justify-content: end;
   gap: 2px;
 }
+
+.generator-randomization-icon { margin-right: 4px; color: #555; }
 
 .generator-randomization-presets button {
   min-width: 29px;
@@ -355,7 +358,7 @@ body.generator-page {
 
 .generator-source-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 3px;
   margin-bottom: 3px;
 }
@@ -1204,7 +1207,12 @@ body.generator-page {
   left: var(--generator-range-start, 0%);
   width: var(--generator-range-size, 100%);
   background: #000;
+  cursor: grab;
+  pointer-events: auto;
 }
+
+.generator-dual-range.is-dragging-range { cursor: grabbing; }
+.generator-dual-range.is-dragging-range .generator-dual-range-track > span { cursor: grabbing; }
 
 .generator-dual-range > input[type="range"] {
   position: absolute;
@@ -1991,3 +1999,10 @@ body.generator-page {
 #generatorBatchOrderOptions[hidden] { display: none; }
 
 #generatorExportMode { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+#generatorUploadPanel { padding: 8px; }
+.generator-upload-drop-zone { display: block; width: 100%; min-height: 82px; margin-bottom: 8px; padding: 14px 8px; border: 1px dashed #888; background: transparent; text-align: center; }
+.generator-upload-drop-zone span { display: block; margin-top: 5px; font-size: 12px; color: #666; }
+.generator-upload-drop-zone.is-dragging { border-color: #111; background: #e5e5e5; outline: 1px solid #111; }
+.generator-upload-drop-zone:focus-visible { outline: 2px solid #111; outline-offset: 2px; }
+.generator-color-control > .generator-random-switch { justify-self: end; }

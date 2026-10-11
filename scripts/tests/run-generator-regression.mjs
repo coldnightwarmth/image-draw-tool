@@ -457,13 +457,13 @@ try {
   assert.equal(await categoryChoices.count(), 15);
   assert.equal(await page.locator(
     '.generator-source-checkbox[data-source-kind="category"]:checked'
-  ).count(), 15);
+  ).count(), 14);
   assert.equal(await tagChoices.count(), 23);
   assert.equal(await page.locator(
     '.generator-source-checkbox[data-source-kind="tag"]:checked'
   ).count(), 23);
-  assert.equal(await page.locator("#generatorCatalogCount").textContent(), "3,070 gifs");
-  assert.equal(await page.locator("#generatorCategorySelectionCount").textContent(), "15 selected");
+  assert.equal(await page.locator("#generatorCatalogCount").textContent(), "2,685 gifs");
+  assert.equal(await page.locator("#generatorCategorySelectionCount").textContent(), "14 selected");
   assert.equal(await page.locator("#generatorTagSelectionCount").textContent(), "23 selected");
   assert.equal(await page.locator("#generatorCategoryTab").getAttribute("aria-selected"), "true");
   assert.equal(await page.locator("#generatorCategoryTab").getAttribute("tabindex"), "0");
@@ -532,7 +532,7 @@ try {
   assert.equal(await page.locator("#generatorRandomizeAllToggle").count(), 0);
   assert.equal(await page.getByText("randomize placement controls", { exact: true }).count(), 0);
   const presetButtons = page.locator("[data-randomization-preset]");
-  assert.deepEqual(await presetButtons.allTextContents(), ["off", "default", "on"]);
+  assert.deepEqual(await presetButtons.allTextContents(), ["none", "default", "full"]);
   const presetHeaderGeometry = await page.evaluate(() => {
     const header = document.querySelector(".generator-panel-header")?.getBoundingClientRect();
     const title = document.getElementById("generatorPanelTitle")?.getBoundingClientRect();
@@ -720,9 +720,9 @@ try {
 
   const defaultSummary = await page.evaluate(() => window.GeneratorApp.getSummary());
   assert.equal(defaultSummary.catalogSize, 3070);
-  assert.equal(defaultSummary.activePoolSize, 3070);
+  assert.equal(defaultSummary.activePoolSize, 2685);
   assert.equal(defaultSummary.sourceMode, "category");
-  assert.equal(defaultSummary.selectedCategories.length, 15);
+  assert.equal(defaultSummary.selectedCategories.length, 14);
   assert.equal(defaultSummary.selectedTags.length, 23);
 
   const initial = await getCompositionSnapshot(page);
@@ -1060,6 +1060,9 @@ try {
 
   await page.locator("#generatorCategoryTab").focus();
   await page.keyboard.press("End");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "generatorUploadTab");
+  assert.equal(await page.locator("#generatorUploadPanel").isHidden(), false);
+  await page.keyboard.press("ArrowLeft");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "generatorTagTab");
   assert.equal(await page.locator("#generatorTagTab").getAttribute("aria-selected"), "true");
   assert.equal(await page.locator("#generatorTagPanel").isHidden(), false);
@@ -1689,7 +1692,7 @@ try {
       speed,
       intensity
     })),
-    beforeSequenceEffectChange.sequenceAssignments.map(({ speed, intensity }) => ({
+    beforeSequenceEffectChange.sequenceAssignments.filter(({ effect }) => effect !== effectToDisable).map(({ speed, intensity }) => ({
       speed,
       intensity
     }))
