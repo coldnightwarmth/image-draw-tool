@@ -228,7 +228,7 @@ function updateSources() {
 }
 
 try {
-  worker = new Worker(new URL('./match-worker.js?v=20261011-render-performance-v6', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./match-worker.js?v=20261102-nu2', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data }) => {
     if (data.type === 'catalog') {
       state.stock = data.assets.map(asset => ({ ...asset, url: sourceURL(asset.source) }));

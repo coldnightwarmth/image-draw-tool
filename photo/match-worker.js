@@ -13,10 +13,10 @@ function metadata(asset) {
 
 async function stock() {
   stockPromise ||= (async () => {
-    const response = await fetch("./data/stock-index.json?v=20261009-photo-v1");
+    const response = await fetch("./data/stock-index.json?v=20261102-nu2");
     if (!response.ok) throw new Error("The stock asset index could not be loaded. Try again.");
     const manifest = await response.json();
-    const atlasResponse = await fetch(`./data/${manifest.atlas}?v=20261009-photo-v1`);
+    const atlasResponse = await fetch(`./data/${manifest.atlas}?v=20261102-nu2`);
     if (!atlasResponse.ok) throw new Error("The stock asset thumbnails could not be loaded.");
     const bitmap = await createImageBitmap(await atlasResponse.blob());
     const canvas = new OffscreenCanvas(manifest.tileSize, manifest.tileSize), context = canvas.getContext("2d", { willReadFrequently: true });

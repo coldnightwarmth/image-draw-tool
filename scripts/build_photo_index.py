@@ -45,7 +45,7 @@ def analyze(job):
                     mean = [v / max(coverage, 1e-6) for v in averages[:3]]
                     samples.append((elapsed, tile, mean, coverage))
                 elapsed += max(20, image.info.get("duration", 50) or 100)
-            usable = [s for s in samples if s[3] > .008]
+            usable = [s for s in samples if s[3] > (0 if path.parent.name == "nu2" else .008)]
             if not usable:
                 return None
             mean = [sum(s[2][c] * s[3] for s in usable) / sum(s[3] for s in usable) for c in range(3)]
@@ -73,6 +73,8 @@ def main():
     text = (ROOT / "brush-metadata.js").read_text()
     metadata = json.loads(text.split("window.STOCK_BRUSH_METADATA =", 1)[1].strip().removesuffix(";"))
     jobs = [(source, info, args.size) for source, info in sorted(metadata.items()) if (ROOT / source).exists()]
+    known = {source for source, _, _ in jobs}
+    jobs.extend((str(path.relative_to(ROOT)), {}, args.size) for path in sorted((ROOT / "brushes/nu2").glob("*.gif")) if str(path.relative_to(ROOT)) not in known)
     if args.limit:
         jobs = jobs[:args.limit]
     results = []
